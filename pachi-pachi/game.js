@@ -337,6 +337,13 @@ function rebuildGrid() {
 }
 const DIVIDERS = [];
 for (let i = 1; i < NCUPS; i++) DIVIDERS.push(BX0 + i * CUPW);
+/* Wall nails, as on a real pachinko board: small nails set into both side walls knock wall-sliding
+   balls back into the field. They sit at the odd-row heights, where the peg lattice leaves the widest
+   gap to the wall, and are centred inside the path of a ball touching the wall so they always push
+   it inward (never wedge it between nail and wall). */
+const WALL_NAIL_R = 5, WALL_NAIL_INSET = 3;
+const WALL_NAILS = [];
+for (const y of [338, 426, 514]) WALL_NAILS.push({ x: BX0 + WALL_NAIL_INSET, y }, { x: BX1 - WALL_NAIL_INSET, y });
 const hasR = k => S.relics.includes(k);
 const relicN = k => S.relics.filter(r => r === k).length;
 const bossK = () => (S.boss ? S.boss.k : null);
@@ -551,6 +558,7 @@ function physStep(h) {
     b.x += b.vx * h; b.y += b.vy * h;
     // walls
     if (railCollide(b)) continue;
+    if (b.x < BX0 + 20 || b.x > BX1 - 20) for (const n of WALL_NAILS) collideCircle(b, n.x, n.y, WALL_NAIL_R, 0.5);
     // parts
     const gx = Math.floor(b.x / GRID), gy = Math.floor(b.y / GRID);
     if (gx >= 0 && gy >= 0 && gx < GW && gy < GH) {
@@ -1284,6 +1292,7 @@ function drawStatic() {
   for (let i = 0; i < NCUPS; i++) if (S.cups[i]) drawCup(g, i, BX0 + i * CUPW, CUPW, { ...S.cups[i], flash: 0 }, 0);
   g.fillStyle = '#cfd8da';
   for (const x of DIVIDERS) { g.fillRect(x - 2, CUP_TOP + 6, 4, BBOT - CUP_TOP); g.beginPath(); g.arc(x, CUP_TOP + 4, 4, 0, Math.PI * 2); g.fill(); }
+  for (const n of WALL_NAILS) { g.beginPath(); g.arc(n.x, n.y, WALL_NAIL_R, 0, Math.PI * 2); g.fill(); }
 }
 function ensureStatic() {
   // the board cannot change mid-drop, so skip the signature walk while balls are flying
