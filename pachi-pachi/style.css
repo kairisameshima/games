@@ -48,11 +48,11 @@ body[data-phase=shop] #board{cursor:pointer}
 .num{font-size:30px}
 #moneyBox{text-align:center;padding:6px}
 #money{font-size:40px;color:var(--gold)}
-#leftBtns{margin-top:auto;display:grid;grid-template-columns:70px 1fr 70px;gap:6px}
-#leftBtns>button{font-size:15px;padding:4px}
-#speedBox{text-align:center;padding:4px}
-#speedBtns{display:flex;gap:3px;justify-content:center;margin-top:2px}
-#speedBtns button{font-size:14px;padding:3px 7px}
+#leftBtns{margin-top:auto;display:grid;grid-template-columns:58px 1fr 58px;gap:5px}
+#leftBtns>button{font-size:14px;padding:4px 2px}
+#speedBox{text-align:center;padding:4px 3px}
+#speedBtns{display:flex;gap:2px;justify-content:center;margin-top:2px}
+#speedBtns button{font-size:13px;padding:3px 4px;min-width:0}
 #speedBtns button.on{box-shadow:0 0 0 2px #fff,0 3px 0 rgba(0,0,0,.35)}
 
 /* right */
@@ -137,6 +137,11 @@ body[data-phase=shop] .relic.full:hover .sell{display:block}
 .opt{display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:22px;margin:10px 0}
 .opt .seg button{font-size:16px;padding:6px 12px;margin-left:4px}
 .opt .seg button.on{box-shadow:0 0 0 3px #fff,0 4px 0 rgba(0,0,0,.35)}
+.fxAll{border-top:2px dashed rgba(255,255,255,.12);padding-top:10px}
+.fxGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}
+.fxGrid .opt{font-size:19px;margin:6px 0}
+.fxGrid .opt .seg button{font-size:14px;padding:4px 10px}
+body.no-anim .pulse,body.no-anim .bump,body.no-anim .relic.full,body.no-anim .logo span,body.no-anim .shopSign,body.no-anim .offer,body.no-anim .rcard,body.no-anim #modal .box,body.no-anim .cash,body.no-anim .reward,body.no-anim .cl{animation:none}
 .infoGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:left;font-size:16px}
 .infoGrid div{background:var(--inset);border-radius:8px;padding:6px 10px}
 

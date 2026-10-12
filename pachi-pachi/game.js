@@ -46,6 +46,13 @@ const ROUNDS_TO_WIN = 24;
 const REWARD = { normal: 6, boss: 10 };
 const SAVE = 'pachipachi_reach_v1';
 const prefs = Object.assign({ speed: 1, sound: true, music: true }, JSON.parse(localStorage.getItem(SAVE + '_prefs') || '{}'));
+/* Visual effects the player can switch off individually in Options. */
+const FX_OPTIONS = [
+  ['shake', 'Screen shake'], ['particles', 'Particles'], ['pops', 'Popup numbers'], ['trails', 'Ball trails'],
+  ['banners', 'Banners'], ['bgAnim', 'Animated background'], ['crt', 'CRT scanlines'], ['uiAnim', 'UI animations'],
+];
+prefs.fx = Object.assign(Object.fromEntries(FX_OPTIONS.map(([k]) => [k, true])), prefs.fx);
+const SPEEDS = [[0.25, '¼x'], [0.5, '½x'], [1, '1x'], [2, '2x'], [4, '4x']];
 const best = Object.assign({ round: 0, ball: 0, roundScore: 0, runs: 0, wins: 0 }, JSON.parse(localStorage.getItem(SAVE + '_best') || '{}'));
 const savePrefs = () => localStorage.setItem(SAVE + '_prefs', JSON.stringify(prefs));
 const saveBest = () => localStorage.setItem(SAVE + '_best', JSON.stringify(best));
@@ -187,9 +194,11 @@ void main(){
 function setBg(theme) { BG.tgt = (Array.isArray(theme) ? theme : BG_THEMES[theme]).map(hexRgb); }
 function drawBg(dt) {
   if (!gl) return;
-  BG.boost *= Math.pow(0.97, dt / 16.7);
-  BG.t += dt * 0.001 * (0.45 + BG.boost * 0.5);
-  BG.spin += dt * 0.001 * (0.6 + BG.boost * 2);
+  BG.boost = prefs.fx.bgAnim ? BG.boost * Math.pow(0.97, dt / 16.7) : 0;
+  if (prefs.fx.bgAnim) {
+    BG.t += dt * 0.001 * (0.45 + BG.boost * 0.5);
+    BG.spin += dt * 0.001 * (0.6 + BG.boost * 2);
+  }
   for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) BG.cur[i][k] += (BG.tgt[i][k] - BG.cur[i][k]) * 0.03;
   gl.uniform2f(glU.R, bgCanvas.width, bgCanvas.height);
   gl.uniform1f(glU.TT, BG.t); gl.uniform1f(glU.SPN, BG.spin);
@@ -213,13 +222,14 @@ function stagePt(e) { const r = stageEl.getBoundingClientRect(); return { x: (e.
 function elCenter(el) { const r = el.getBoundingClientRect(), s = stageEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale }; }
 let shakeAmt = 0;
 const shakeEl = $('#shake');
-function shake(a) { shakeAmt = Math.max(shakeAmt, a); }
+function shake(a) { if (prefs.fx.shake) shakeAmt = Math.max(shakeAmt, a); }
 function stepShake(dt) {
   if (shakeAmt < 0.2) { if (shakeAmt) { shakeEl.style.transform = ''; shakeAmt = 0; } return; }
   shakeEl.style.transform = `translate(${(rnd() - 0.5) * shakeAmt * 2}px,${(rnd() - 0.5) * shakeAmt * 2}px) rotate(${(rnd() - 0.5) * shakeAmt * 0.1}deg)`;
   shakeAmt *= Math.pow(0.88, dt / 16.67);
 }
 function banner(text, color = '#fff', sub = '') {
+  if (!prefs.fx.banners) return;
   $('#banner').innerHTML = `<div class="bt" style="color:${color}">${[...text].map((ch, i) => `<span style="--i:${i}">${ch === ' ' ? '&nbsp;' : ch}</span>`).join('')}</div>${sub ? `<div class="bs">${sub}</div>` : ''}`;
 }
 function bumpEl(el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
@@ -231,6 +241,7 @@ const cv = $('#board'), ctx = cv.getContext('2d');
 const fcv = $('#fxl'), fctx = fcv.getContext('2d');
 const parts = [], pops = [];
 function burst(x, y, n, colors, spd = 4, opts = {}) {
+  if (!prefs.fx.particles) return;
   if (parts.length > 2200) n = Math.min(n, 4);
   for (let i = 0; i < n; i++) {
     const a = rnd() * Math.PI * 2, v = spd * (0.3 + rnd());
@@ -238,10 +249,12 @@ function burst(x, y, n, colors, spd = 4, opts = {}) {
   }
 }
 function confetti(n = 120) {
+  if (!prefs.fx.particles) return;
   const cols = ['#fe5f55', '#009dff', '#f3b958', '#4bc292', '#8a71e1', '#fff'];
   for (let i = 0; i < n; i++) parts.push({ x: 300 + rnd() * 672, y: -20 - rnd() * 200, vx: (rnd() - 0.5) * 3, vy: 2 + rnd() * 4, life: 1, decay: 0.004 + rnd() * 0.004, size: 5 + rnd() * 5, col: pick(cols), g: 0.05, type: 'conf', rot: rnd() * 6, vr: (rnd() - 0.5) * 0.3 });
 }
 function pop(x, y, text, col = '#fff', size = 18, bg = null) {
+  if (!prefs.fx.pops) return;
   if (pops.length > 90) { if (size < 22) return; pops.shift(); }
   pops.push({ x, y, text, col, size, bg, life: 1, vy: -40 - rnd() * 20 });
 }
@@ -756,7 +769,7 @@ function finishRound() {
     const over = S.score / S.target;
     banner(over >= 10 ? 'ANNIHILATED!' : over >= 3 ? 'DEMOLISHED!' : over >= 1.5 ? 'CRUSHED IT!' : 'CLEARED!', '#f3b958', `${over.toFixed(1)}x the target`);
     renderRight();
-    setTimeout(showCashout, 1300 / Math.sqrt(prefs.speed));
+    setTimeout(showCashout, 1300 / Math.sqrt(Math.max(1, prefs.speed)));
   } else {
     saveBest();
     S.phase = 'over';
@@ -1522,7 +1535,7 @@ function renderRight() {
   const cb = $('#cancelBtn'); if (cb) cb.addEventListener('click', cancelHeld);
 }
 function renderSpeed() {
-  $('#speedBtns').innerHTML = [1, 2, 4].map(v => `<button class="b-blue ${prefs.speed === v ? 'on' : ''}" data-sp="${v}">${v}x</button>`).join('');
+  $('#speedBtns').innerHTML = SPEEDS.map(([v, label]) => `<button class="b-blue ${prefs.speed === v ? 'on' : ''}" data-sp="${v}">${label}</button>`).join('');
   $('#speedBtns').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { prefs.speed = +b.dataset.sp; savePrefs(); renderSpeed(); SFX.button(); }));
 }
 
@@ -1571,12 +1584,32 @@ function showOptions() {
   showModal(`<div class="box panel"><h2>Options</h2>
     <div class="opt"><span>Sound</span>${seg('sound', [[1, 'On'], [0, 'Off']], prefs.sound ? 1 : 0)}</div>
     <div class="opt"><span>Music</span>${seg('music', [[1, 'On'], [0, 'Off']], prefs.music ? 1 : 0)}</div>
+    <div class="opt fxAll"><span>All effects</span><span class="seg"><button class="b-gray" data-fxall="1">All on</button><button class="b-gray" data-fxall="0">All off</button></span></div>
+    <div class="fxGrid">${FX_OPTIONS.map(([k, label]) => `<div class="opt"><span>${label}</span>${seg('fx-' + k, [[1, 'On'], [0, 'Off']], prefs.fx[k] ? 1 : 0)}</div>`).join('')}</div>
     <div class="row"><button class="b-red" id="optNew" ${midDrop ? 'disabled' : ''}>New Run</button><button class="b-gray" id="optMenu" ${midDrop ? 'disabled' : ''}>Main Menu</button><button class="b-orange" id="closeM">Back</button></div></div>`);
   modalEl.querySelectorAll('[data-sound]').forEach(b => b.addEventListener('click', () => { prefs.sound = b.dataset.sound === '1'; savePrefs(); showOptions(); }));
   modalEl.querySelectorAll('[data-music]').forEach(b => b.addEventListener('click', () => { prefs.music = b.dataset.music === '1'; savePrefs(); showOptions(); }));
+  for (const [k] of FX_OPTIONS) modalEl.querySelectorAll(`[data-fx-${k}]`).forEach(b => b.addEventListener('click', () => { setFx(k, b.getAttribute(`data-fx-${k}`) === '1'); showOptions(); }));
+  modalEl.querySelectorAll('[data-fxall]').forEach(b => b.addEventListener('click', () => { for (const [k] of FX_OPTIONS) setFx(k, b.dataset.fxall === '1'); showOptions(); }));
   $('#optNew').addEventListener('click', () => { SFX.button(); newRun(); });
   $('#optMenu').addEventListener('click', () => { SFX.button(); showTitle(); });
   $('#closeM').addEventListener('click', () => { SFX.button(); hideModal(); });
+}
+function setFx(k, on) {
+  prefs.fx[k] = on;
+  savePrefs();
+  applyFx();
+}
+/* Turning an effect off also clears whatever it already has on screen. */
+function applyFx() {
+  const fx = prefs.fx;
+  if (!fx.particles) parts.length = 0;
+  if (!fx.pops) pops.length = 0;
+  if (!fx.trails) for (const b of S.balls) b.trail.length = 0;
+  if (!fx.banners) $('#banner').innerHTML = '';
+  if (!fx.shake) { shakeAmt = 0; shakeEl.style.transform = ''; }
+  $('#crt').style.display = fx.crt ? '' : 'none';
+  document.body.classList.toggle('no-anim', !fx.uiAnim);
 }
 function showTitle() {
   clearOv(); hideTip();
@@ -1603,14 +1636,24 @@ $('#optBtn').addEventListener('click', showOptions);
 
 /* ================= MAIN LOOP ================= */
 let last = performance.now();
+/* Physics runs in fixed STEP increments; the accumulator keeps slow speeds smooth instead of
+   rounding a fractional step count to 0 or 1 every frame. Trail samples are taken once per
+   1x-speed frame worth of physics so trails keep their length at slow speeds. */
+let simAcc = 0, trailSteps = 0;
+const MAX_STEPS = 48, TRAIL_EVERY = 4;
 function frame(t) {
   const dt = Math.min(50, t - last); last = t;
   const running = S.phase === 'drop' || S.phase === 'title' || S.phase === 'cashout' || S.phase === 'over';
   if (running) {
-    const simDt = (dt / 1000) * (S.phase === 'drop' ? prefs.speed : 1);
-    const steps = Math.min(48, Math.round(simDt / STEP));
+    simAcc += (dt / 1000) * (S.phase === 'drop' ? prefs.speed : 1);
+    const steps = Math.min(MAX_STEPS, Math.floor(simAcc / STEP));
+    simAcc = steps === MAX_STEPS ? 0 : simAcc - steps * STEP;
     for (let i = 0; i < steps; i++) { stepLauncher(STEP); physStep(STEP); }
-    for (const b of S.balls) { b.trail.push([b.x, b.y]); if (b.trail.length > TRAIL_LEN) b.trail.shift(); }
+    trailSteps += steps;
+    if (trailSteps >= TRAIL_EVERY) {
+      trailSteps = 0;
+      if (prefs.fx.trails) for (const b of S.balls) { b.trail.push([b.x, b.y]); if (b.trail.length > TRAIL_LEN) b.trail.shift(); }
+    }
   }
   if (S.shownScore !== S.score) {
     const diff = S.score - S.shownScore;
@@ -1627,6 +1670,7 @@ function frame(t) {
   requestAnimationFrame(frame);
 }
 fit();
+applyFx();
 renderSpeed();
 document.fonts.load('20px "Jersey 10"').finally(() => {});
 showTitle();
