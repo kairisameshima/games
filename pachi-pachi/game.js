@@ -44,7 +44,7 @@ const STEP = 1 / 240;
 const BALL_R = 7;
 const ROUNDS_TO_WIN = 24;
 const REWARD = { normal: 6, boss: 10 };
-const SAVE = 'megachinko_reach_v1';
+const SAVE = 'pachipachi_reach_v1';
 const prefs = Object.assign({ speed: 1, sound: true, music: true }, JSON.parse(localStorage.getItem(SAVE + '_prefs') || '{}'));
 const best = Object.assign({ round: 0, ball: 0, roundScore: 0, runs: 0, wins: 0 }, JSON.parse(localStorage.getItem(SAVE + '_best') || '{}'));
 const savePrefs = () => localStorage.setItem(SAVE + '_prefs', JSON.stringify(prefs));
@@ -1591,7 +1591,7 @@ function showTitle() {
   setBg('title');
   document.body.dataset.phase = 'title';
   showModal(`<div class="title">
-    <div class="logo">${[...'MEGACHINKO'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('')}</div>
+    <div class="logo">${[...'PACHI PACHI'].map((c, i) => `<span style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</span>`).join('')}</div>
     <div class="subt">REACH EDITION · every shot rides the rail · build the board · watch the number go up</div>
     <button class="b-blue big pulse" id="playGo">PLAY</button>
     <div class="bestline">Best round: <span class="c-gold">${best.round}</span> · Best ball: <span class="c-gold">${fmt(best.ball)}</span> · Runs: ${best.runs} · Wins: ${best.wins}</div>
