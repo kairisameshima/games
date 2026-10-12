@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MEGACHINKO: REACH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-phase="title">
+<canvas id="bg"></canvas>
+<div id="stage"><div id="shake">
+  <div id="boardFrame"></div>
+  <canvas id="board" width="1280" height="720"></canvas>
+  <canvas id="balls" width="1280" height="720"></canvas>
+  <canvas id="fxl" width="1280" height="720"></canvas>
+
+  <div id="left" class="panel">
+    <div id="roundBox">
+      <div id="roundName" class="t">Round 1</div>
+      <div id="bossLine"></div>
+      <div id="targetRow"><div class="lbl">Target</div><div id="target" class="t">0</div></div>
+    </div>
+    <div id="scoreBox" class="inset">
+      <div class="lbl">Round score</div>
+      <div id="score" class="t">0</div>
+      <div id="bar"><div id="barFill"></div><div id="barMark"></div></div>
+      <div id="pct" class="t"></div>
+    </div>
+    <div id="ballBox" class="inset">
+      <div class="cell"><div class="lbl">Balls</div><div id="ballsLeft" class="num c-blue t">10</div></div>
+      <div class="cell"><div class="lbl">In play</div><div id="inPlay" class="num c-green t">0</div></div>
+      <div class="cell wide"><div class="lbl">Best ball this run</div><div id="bestBall" class="num c-orange t">0</div></div>
+    </div>
+    <div id="moneyBox" class="inset"><div id="money" class="t">$6</div></div>
+    <div id="leftBtns">
+      <button id="infoBtn" class="b-red">Run<br>Info</button>
+      <div id="speedBox" class="inset"><div class="lbl">Speed</div><div id="speedBtns"></div></div>
+      <button id="optBtn" class="b-orange">Options</button>
+    </div>
+  </div>
+
+  <div id="right" class="panel">
+    <div class="rhead t">RELICS <span id="relicCount" class="lbl"></span></div>
+    <div id="relics"></div>
+    <div id="rightBody"></div>
+  </div>
+
+  <div id="ov"></div>
+  <div id="banner"></div>
+  <div id="modal"></div>
+  <div id="tip"></div>
+</div></div>
+<div id="crt"></div>
+<script src="data.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
