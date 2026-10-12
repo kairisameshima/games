@@ -313,8 +313,10 @@ function buildSlots() {
     const y = 118 + r * 44, odd = r % 2, n = odd ? 10 : 11;
     for (let i = 0; i < n; i++) {
       const x = (odd ? 409 : 382) + i * 54;
-      // keep clear of the curved inner rail and its release point
-      if (y < ARC_CY + 10 && Math.hypot(x - ARC_CX, y - ARC_CY) > RAIL_R - 26) continue;
+      // keep clear of the curved inner rail (left half) and the outer dome wall (right half, where there is no
+      // inner rail); 26px leaves room for balls riding the wall to pass under the pegs
+      const wallR = x > ARC_CX ? ARC_R : RAIL_R;
+      if (y < ARC_CY + 10 && Math.hypot(x - ARC_CX, y - ARC_CY) > wallR - 26) continue;
       if (Math.hypot(x - RAIL_END_X, y - RAIL_END_Y) < 34) continue;
       slots.push({ id: slots.length, x, y, row: r, part: null, hits: 0 });
     }
