@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WANDSMITH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-phase="title">
+<canvas id="bg"></canvas>
+<div id="stage"><div id="shake">
+  <div id="battleFrame"></div>
+  <canvas id="battle" width="224" height="112"></canvas>
+  <canvas id="fx" width="1280" height="720"></canvas>
+
+  <div id="left" class="panel">
+    <div id="rungBox">
+      <div id="rungName" class="t">Rung 1</div>
+      <div id="fightName" class="t"></div>
+      <div id="ruleLine"></div>
+    </div>
+    <div id="foeBox" class="inset">
+      <div class="lbl">Enemy health</div>
+      <div id="foeHp" class="t">0</div>
+      <div id="bar"><div id="barFill"></div></div>
+    </div>
+    <div id="dmgBox" class="inset">
+      <div class="lbl">Damage this turn</div>
+      <div id="turnDmg" class="t">0</div>
+    </div>
+    <div id="statBox" class="inset">
+      <div class="cell"><div class="lbl">Turn</div><div id="turnNum" class="num c-blue t">-</div></div>
+      <div class="cell"><div class="lbl">Hearts</div><div id="hearts" class="num t"></div></div>
+    </div>
+    <div id="moneyBox" class="inset"><div id="money" class="t">$4</div></div>
+    <div id="leftBtns">
+      <button id="infoBtn" class="b-red">Run<br>Info</button>
+      <div id="speedBox" class="inset"><div class="lbl">Speed</div><div id="speedBtns"></div></div>
+      <button id="optBtn" class="b-orange">Options</button>
+    </div>
+  </div>
+
+  <div id="wandPanel" class="panel">
+    <div id="wandHead">
+      <canvas id="frameIcon" width="40" height="12"></canvas>
+      <div id="frameName" class="t"></div>
+      <div id="slotCount" class="lbl"></div>
+      <div id="estimate" class="t"></div>
+    </div>
+    <div id="slots"></div>
+    <div id="bagRow"><div class="lbl">Scrap bag</div><div id="bag"></div><div id="wandHint" class="hint"></div></div>
+    <div id="tree"></div>
+  </div>
+
+  <div id="right" class="panel">
+    <div class="rhead t">CHARMS <span id="charmCount" class="lbl"></span></div>
+    <div id="charms"></div>
+    <div id="rightBody"></div>
+  </div>
+
+  <div id="ov"></div>
+  <div id="banner"></div>
+  <div id="modal"></div>
+  <div id="tip"></div>
+</div></div>
+<div id="crt"></div>
+<script src="data.js"></script>
+<script src="pix.js"></script>
+<script src="sprites-heroes.js"></script>
+<script src="sprites-bosses.js"></script>
+<script src="sprites-icons.js"></script>
+<script src="bgs.js"></script>
+<script src="art.js"></script>
+<script src="cinema.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
