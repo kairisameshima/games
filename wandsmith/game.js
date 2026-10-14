@@ -45,9 +45,63 @@ const SPEEDS = [[0.5, '½x'], [1, '1x'], [2, '2x'], [4, '4x']];
 const S = {
   phase: 'title', rung: 0, fightIdx: 0, hearts: MAX_HEARTS, gold: 4, frame: 'twig', extraSlots: 0,
   wand: [], bag: [], charms: [], charmSlots: 5, offers: [], rerollCost: 2, sel: null, slotPrice: 5,
-  fight: null, anim: null, log: [], stats: { fights: 0, bestTurn: 0 }, endless: false,
+  fight: null, anim: null, cashout: null, log: [], stats: { fights: 0, bestTurn: 0 }, endless: false,
 };
 window.__S = S;
+
+const RUN_SAVE = SAVE + '_run';
+const RUN_FIELDS = ['phase', 'rung', 'fightIdx', 'hearts', 'gold', 'frame', 'extraSlots', 'wand', 'bag', 'charms', 'charmSlots', 'offers', 'rerollCost', 'slotPrice', 'fight', 'cashout', 'log', 'stats', 'endless', 'bossSeen'];
+const SAVED_PHASES = ['ready', 'fight', 'shop', 'cashout'];
+function encodeRunValue(key, value) {
+  return typeof value === 'number' && !Number.isFinite(value) ? { $number: String(value) } : value;
+}
+function decodeRunValue(key, value) {
+  return value && typeof value === 'object' && typeof value.$number === 'string' ? Number(value.$number) : value;
+}
+function readSavedRun() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RUN_SAVE) || 'null', decodeRunValue);
+    if (!saved || saved.version !== 1 || !saved.state || !SAVED_PHASES.includes(saved.state.phase) || !Array.isArray(saved.state.wand) || !FRAMES[saved.state.frame]) return null;
+    return saved.state;
+  } catch (error) {
+    console.warn('Could not read the saved Wandsmith run.', error);
+    return null;
+  }
+}
+function saveRun() {
+  if (!SAVED_PHASES.includes(S.phase) && S.phase !== 'over') return;
+  try {
+    if (S.phase === 'over' || S.hearts <= 0) localStorage.removeItem(RUN_SAVE);
+    else {
+      const state = Object.fromEntries(RUN_FIELDS.map(field => [field, S[field]]));
+      // Combat is already resolved before its animation. Preserve that result, not a fresh roll.
+      state.anim = S.anim ? { ...S.anim, fired: [...S.anim.fired] } : null;
+      localStorage.setItem(RUN_SAVE, JSON.stringify({ version: 1, state }, encodeRunValue));
+    }
+    setText('runSaveStatus', 'Run saved locally');
+  } catch (error) {
+    console.warn('Could not save the Wandsmith run.', error);
+    setText('runSaveStatus', 'Run could not be saved');
+  }
+}
+function restoreRun() {
+  const saved = readSavedRun();
+  if (!saved) return false;
+  Object.assign(S, saved, { sel: null });
+  if (S.anim) S.anim.fired = new Set(S.anim.fired);
+  hideModal(); clearOv(); hideTip();
+  if (S.phase === 'ready' && !S.fight) { startFight(); return true; }
+  setBg(S.phase === 'shop' ? 'shop' : rungInfo().loc);
+  renderAll();
+  if (S.phase === 'cashout') showCashout(S.cashout.rows, S.cashout.won);
+  else if (S.phase === 'fight' && !S.anim) {
+    if (S.fight.turn >= S.fight.turns) loseFight();
+    else beginTurn();
+  }
+  return true;
+}
+addEventListener('pagehide', saveRun);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveRun(); });
 
 /* ================= AUDIO ================= */
 let AC = null, master = null, musicBus = null;
@@ -345,6 +399,103 @@ function parseWand(list) {
   while (i < list.length) { const [g, ni] = parseGroup(list, i, false); if (g) groups.push(g); i = ni; }
   return groups;
 }
+
+function appendWandGroup(model, group, parent = null) {
+  const entries = group.fizzle || (group.echo ? [group.echo] : [...group.mods, group.proj]);
+  const node = { id: model.groups.length, group, slots: entries.map(entry => entry.slot), parent, payload: null, target: null };
+  model.groups.push(node);
+  if (group.proj) {
+    for (const modifier of group.mods) model.links.push({ from: modifier.slot, to: group.proj.slot });
+    if (parent) for (const slot of node.slots) model.links.push({ from: parent.group.proj.slot, to: slot });
+    if (group.payload || group.payloadFizzle) node.payload = appendWandGroup(model, group.payload || group.payloadFizzle, group.payload ? node : null);
+  }
+  return node;
+}
+function wandRelationships() {
+  const model = { groups: [], links: [] };
+  let previous = null;
+  for (const group of parseWand(activeEntries())) {
+    const node = appendWandGroup(model, group);
+    if (group.echo && previous) {
+      node.target = previous;
+      const slots = wandPayloadSlots(previous);
+      for (const slot of slots) model.links.push({ from: group.echo.slot, to: slot });
+    } else if (group.proj) previous = node;
+  }
+  return model;
+}
+function wandPayloadSlots(node) {
+  return node.payload && !node.payload.group.fizzle ? [...node.slots, ...wandPayloadSlots(node.payload)] : node.slots;
+}
+function relatedWandSlots(model, slots, reverse = false) {
+  const related = new Set(slots), pending = [...slots];
+  while (pending.length) {
+    const slot = pending.pop();
+    for (const link of model.links) {
+      const source = reverse ? link.to : link.from, target = reverse ? link.from : link.to;
+      if (source === slot && !related.has(target)) { related.add(target); pending.push(target); }
+    }
+  }
+  for (const slot of slots) related.delete(slot);
+  return related;
+}
+function wandGroupLabel(node) {
+  if (node.group.fizzle) return `G${node.id + 1} · fizzle`;
+  if (node.group.echo) return `G${node.id + 1}${node.target ? ` ↻ G${node.target.id + 1}` : ' · fizzle'}`;
+  return `G${node.id + 1}${node.parent ? ` ↳ G${node.parent.id + 1}` : ' · cast'}`;
+}
+function groupedSlotsHtml(model) {
+  const membership = Array(S.wand.length).fill(null);
+  for (const node of model.groups) for (let slot = Math.min(...node.slots); slot <= Math.max(...node.slots); slot++) membership[slot] = node;
+  let html = '', slot = 0;
+  while (slot < S.wand.length) {
+    const node = membership[slot], start = slot;
+    do { slot++; } while (slot < S.wand.length && node && membership[slot] === node);
+    const cards = S.wand.slice(start, slot).map((part, index) => slotHtml(part, 'wand', start + index)).join('');
+    html += node ? `<div class="wandGroup ${node.group.fizzle ? 'fizzle' : ''}" data-group="${node.id}" style="--group-size:${slot - start}"><span class="groupLabel" tabindex="0" title="${wandGroupLabel(node)}" aria-label="${wandGroupLabel(node)}">${wandGroupLabel(node)}</span><div class="groupCards">${cards}</div></div>` : `<div class="wandLoose" style="--group-size:1">${cards}</div>`;
+  }
+  return html;
+}
+function clearWandRelationships() {
+  $('#wandPanel').classList.remove('relating');
+  $('#wandPanel').querySelectorAll('.rel-focus,.rel-in,.rel-out').forEach(element => element.classList.remove('rel-focus', 'rel-in', 'rel-out'));
+  setText('relationshipText', 'Hover a card or group to trace its relationships');
+}
+function highlightWandRelationships(model, node, slot = null) {
+  clearWandRelationships();
+  const subjects = slot !== null ? [slot] : [node.group.proj ? node.group.proj.slot : node.slots[0]];
+  const incoming = relatedWandSlots(model, subjects, true), outgoing = relatedWandSlots(model, subjects);
+  $('#wandPanel').classList.add('relating');
+  for (const card of $('#slots').querySelectorAll('.slot')) {
+    const index = +card.dataset.i;
+    const role = subjects.includes(index) ? 'rel-focus' : outgoing.has(index) ? 'rel-out' : incoming.has(index) ? 'rel-in' : null;
+    if (role) card.classList.add(role);
+  }
+  for (const group of model.groups) {
+    const role = group === node ? 'rel-focus' : group.slots.some(index => outgoing.has(index)) ? 'rel-out' : group.slots.some(index => incoming.has(index)) ? 'rel-in' : null;
+    if (role) $('#wandPanel').querySelectorAll(`[data-group="${group.id}"]`).forEach(element => element.classList.add(role));
+  }
+  const subject = slot !== null ? PARTS[S.wand[slot].k].n : `G${node.id + 1}`;
+  const sources = [...incoming].sort((left, right) => left - right).map(index => `slot ${index + 1}`).join(', ');
+  const targets = [...new Set(model.groups.filter(group => group.slots.some(index => outgoing.has(index))).map(group => `G${group.id + 1}`))].join(', ');
+  setText('relationshipText', `${subject}${sources ? ` ← ${sources}` : ''}${targets ? ` → ${targets}` : ''}${!sources && !targets ? ' · no card links' : ''}${node.group.fizzle ? ' · fizzles' : ''}`);
+}
+function bindWandRelationships(model) {
+  for (const element of $('#slots').querySelectorAll('.wandGroup')) {
+    const node = model.groups[+element.dataset.group];
+    element.addEventListener('mouseenter', () => highlightWandRelationships(model, node));
+    element.addEventListener('mouseleave', clearWandRelationships);
+    element.querySelector('.groupLabel').addEventListener('focus', () => highlightWandRelationships(model, node));
+    element.querySelector('.groupLabel').addEventListener('blur', clearWandRelationships);
+    for (const card of element.querySelectorAll('.slot.full:not(.off)')) {
+      const slot = +card.dataset.i;
+      card.addEventListener('mouseenter', () => highlightWandRelationships(model, node, slot));
+      card.addEventListener('mouseleave', event => { if (event.relatedTarget && element.contains(event.relatedTarget)) highlightWandRelationships(model, node); });
+      card.addEventListener('focus', () => highlightWandRelationships(model, node, slot));
+      card.addEventListener('blur', clearWandRelationships);
+    }
+  }
+}
 /* Per-projectile numbers for one group. Target-dependent multipliers (freeze, grudge, boss rules) are applied on hit. */
 function groupStats(g, depth, turnIdx) {
   const P = PARTS[g.proj.k], L = g.proj.lvl;
@@ -551,6 +702,7 @@ function ruleText(rule, foe) {
 }
 function startFight() {
   S.phase = 'ready';
+  S.cashout = null;
   S.sel = null;
   const foes = makeFoes();
   const rule = fightRule();
@@ -564,6 +716,8 @@ function startFight() {
 async function goToFight() {
   if (S.fightIdx === 2 && !S.bossSeen) {
     S.bossSeen = true;
+    S.phase = 'ready'; S.fight = null;
+    saveRun();
     await playCine('boss:' + rungInfo().boss);
   }
   startFight();
@@ -673,15 +827,15 @@ async function winFight() {
   const f = S.fight;
   S.phase = 'cashout';
   S.stats.fights++;
+  S.cashout = { rows: fightReward(), won: true };
+  if (f.rule) { best.bosses[f.rule] = (best.bosses[f.rule] || 0) + 1; saveBest(); }
   SFX.win(); confetti(80); shake(6); BG.boost += 3;
   banner(pick(['SMASHED!', 'K.O.!', 'REVENGE!', 'PAYBACK!']), '#ffcf4a', `${fmt(f.foes.reduce((a, o) => a + o.maxHp, 0))} health cleared`);
   renderAll();
   await sleep(1200 / Math.sqrt(prefs.speed));
-  if (f.rule) {
-    best.bosses[f.rule] = (best.bosses[f.rule] || 0) + 1; saveBest();
-    await playCine('bossDefeat:' + rungInfo().boss);
-  }
-  showCashout(fightReward(), true);
+  if (S.fight !== f || S.phase !== 'cashout') return;
+  if (f.rule) await playCine('bossDefeat:' + rungInfo().boss);
+  if (S.fight === f && S.phase === 'cashout') showCashout(S.cashout.rows, true);
 }
 async function loseFight() {
   const f = S.fight;
@@ -692,14 +846,18 @@ async function loseFight() {
   banner('BEATEN UP', '#ff5f6a', S.hearts > 0 ? `You lose a heart. ${S.hearts} left.` : 'No hearts left...');
   logLine(`Lost the fight: ${fmt(f.foes.reduce((a, o) => a + o.hp, 0))} health left standing`);
   S.phase = 'cashout';
-  renderAll();
-  await sleep(1500);
-  if (S.hearts <= 0) return gameOver();
   const cap = charmOn('ledger') ? 10 : 5;
   const interest = Math.min(cap, Math.floor(Math.max(0, S.gold) / 5));
-  showCashout(interest ? [[`Interest ($1 per $5, max $${cap})`, interest]] : [], false);
+  S.cashout = { rows: interest ? [[`Interest ($1 per $5, max $${cap})`, interest]] : [], won: false };
+  renderAll();
+  await sleep(1500);
+  if (S.fight !== f || S.phase !== 'cashout') return;
+  if (S.hearts <= 0) return gameOver();
+  showCashout(S.cashout.rows, false);
 }
 function showCashout(rows, won) {
+  S.cashout = { rows, won };
+  saveRun();
   const total = rows.reduce((a, r) => a + r[1], 0);
   const boss = S.fight && S.fight.rule;
   $('#ov').innerHTML = `<div class="cash panel"><h2 class="t" style="text-align:center;font-size:34px">${won ? 'LOOT' : 'LICK YOUR WOUNDS'}</h2>
@@ -707,6 +865,8 @@ function showCashout(rows, won) {
     ${!won && boss ? '<div class="cl"><span>The boss is still standing. Regroup and try again.</span><span></span></div>' : ''}
     <div style="margin-top:12px"><button class="b-gold" id="cashBtn">${total ? `Collect $${total}` : 'Continue'}</button></div></div>`;
   $('#cashBtn').addEventListener('click', () => {
+    if (S.phase !== 'cashout' || !S.cashout) return;
+    S.cashout = null;
     S.gold += total; if (total) SFX.coin();
     clearOv();
     afterFight(won);
@@ -728,6 +888,7 @@ async function afterFight(won) {
   goShop();
 }
 async function victory() {
+  S.phase = 'over'; saveRun();
   best.wins++; saveBest();
   await playCine('ending');
   S.phase = 'over';
@@ -743,6 +904,7 @@ async function victory() {
   $('#menuBtn').addEventListener('click', () => { SFX.button(); showTitle(); });
 }
 async function gameOver() {
+  S.phase = 'over'; saveRun();
   saveBest();
   await playCine('gameover');
   S.phase = 'over';
@@ -772,12 +934,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function newRun() {
   hideModal(); clearOv(); hideTip();
   Object.assign(S, {
-    rung: 0, fightIdx: 0, hearts: MAX_HEARTS, gold: START_GOLD, frame: 'twig', extraSlots: 0,
+    phase: 'ready', rung: 0, fightIdx: 0, hearts: MAX_HEARTS, gold: START_GOLD, frame: 'twig', extraSlots: 0,
     wand: startWand(), bag: [], charms: [], offers: [], rerollCost: 2, sel: null,
-    slotPrice: 5, fight: null, anim: null, log: [], stats: { fights: 0, bestTurn: 0 }, endless: false, bossSeen: false,
+    slotPrice: 5, fight: null, anim: null, cashout: null, log: [], stats: { fights: 0, bestTurn: 0 }, endless: false, bossSeen: false,
   });
   best.runs++; saveBest();
   syncWandSize();
+  saveRun();
   if (!prefs.introSeen) { prefs.introSeen = true; savePrefs(); await playCine('intro'); }
   startFight();
 }
@@ -1066,9 +1229,9 @@ const KIND_LABEL = { proj: 'SPELL', mod: 'MOD', special: 'RUNE' };
 function slotHtml(p, where, i) {
   const sel = S.sel && S.sel.where === where && S.sel.i === i;
   const off = where === 'wand' ? slotState(i) : null;
-  if (!p) return `<div class="slot ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-w="${where}" data-i="${i}" ${off ? `data-off="${off}"` : ''}>${where === 'wand' ? `<span class="ix">${i + 1}</span>` : ''}</div>`;
+  if (!p) return `<div class="slot ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-w="${where}" data-i="${i}" tabindex="0" role="button" aria-label="Empty ${where} slot ${i + 1}" ${off ? `data-off="${off}"` : ''}>${where === 'wand' ? `<span class="ix">${i + 1}</span>` : ''}</div>`;
   const P = PARTS[p.k];
-  return `<div class="slot full ${P.kind} ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-w="${where}" data-i="${i}" style="--pc:${P.col}" ${off ? `data-off="${off}"` : ''}>
+  return `<div class="slot full ${P.kind} ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-w="${where}" data-i="${i}" tabindex="0" role="button" aria-label="${P.n}, ${where} slot ${i + 1}${off ? ', ' + off : ''}" style="--pc:${P.col}" ${off ? `data-off="${off}"` : ''}>
     ${where === 'wand' ? `<span class="ix">${i + 1}</span>` : ''}${p.lvl > 1 ? `<span class="lv">Lv${p.lvl}</span>` : ''}
     <canvas width="16" height="16" data-part="${p.k}"></canvas><span class="kd">${KIND_LABEL[P.kind]}</span>
     <button class="b-red sell" data-sellp="${where}:${i}">$${sellValue(p)}</button></div>`;
@@ -1086,7 +1249,9 @@ function renderWand() {
   const fic = $('#frameIcon'), src = Art.frameIcon(S.frame), fi = fic.getContext('2d');
   if (fic.width !== src.width) { fic.width = src.width; fic.height = src.height; }
   fi.imageSmoothingEnabled = false; fi.clearRect(0, 0, fic.width, fic.height); fi.drawImage(src, 0, 0);
-  $('#slots').innerHTML = S.wand.map((p, i) => slotHtml(p, 'wand', i)).join('');
+  const relationships = wandRelationships();
+  $('#slots').innerHTML = groupedSlotsHtml(relationships);
+  clearWandRelationships();
   $('#bag').innerHTML = Array.from({ length: BAG_SIZE }, (_, i) => slotHtml(S.bag[i] || null, 'bag', i)).join('');
   setText('wandHint', defaultHint());
   for (const root of [$('#slots'), $('#bag')]) {
@@ -1094,6 +1259,7 @@ function renderWand() {
     root.querySelectorAll('.slot').forEach(el => {
       const where = el.dataset.w, i = +el.dataset.i;
       el.addEventListener('click', () => clickSlot(where, i));
+      el.addEventListener('keydown', event => { if (event.target === el && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); clickSlot(where, i); } });
       const p = where === 'wand' ? S.wand[i] : S.bag[i];
       if (p) {
         el.addEventListener('mouseenter', () => { const c = elCenter(el); showTipAt(partTip(p), c.x, c.y - 40); });
@@ -1102,7 +1268,9 @@ function renderWand() {
     });
     root.querySelectorAll('[data-sellp]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); const [w, i] = b.dataset.sellp.split(':'); if (S.phase === 'shop') sellPart(w, +i); }));
   }
-  renderTree();
+  renderTree(relationships);
+  bindWandRelationships(relationships);
+  saveRun();
 }
 function flashSlot(i) {
   const el = document.querySelector(`#slots .slot[data-i="${i}"]`);
@@ -1111,29 +1279,22 @@ function flashSlot(i) {
   setTimeout(() => el.classList.remove('firing'), 180);
 }
 const HIT_LABEL = { single: '1 target', aoe: 'all enemies', chain: 'chains ×3', bounce: 'bounces ×2', rain: 'rains' };
-/* The cast tree explains what the wand will do: one line per group, payloads indented under their trigger. */
-function renderTree() {
-  const list = S.wand.map((p, i) => (p && !slotState(i) ? { ...p, slot: i } : null)).filter(Boolean);
-  const groups = parseWand(list);
-  const lines = [];
-  const name = e => PARTS[e.k].n + (e.lvl > 1 ? ` Lv${e.lvl}` : '');
-  const walk = (g, depth) => {
-    const st = groupStats(g, depth, 0);
-    const mods = g.mods.length ? g.mods.map(name).join(' + ') + ' → ' : '';
-    const pad = depth ? '&nbsp;'.repeat(depth * 3) + '↳ on hit: ' : '';
-    lines.push(`<div>${pad}${mods}<b style="color:${PARTS[g.proj.k].col}">${name(g.proj)}</b> ×${fmt(st.count)} · ${fmt(st.dmg)} dmg · ${HIT_LABEL[st.hit]}${st.trig ? ` · <span class="c-pink">casts next ×${st.trig}/hit</span>` : ''}${st.crit ? ` · ${Math.round(st.crit * 100)}% crit` : ''}</div>`);
-    if (g.payload) walk(g.payload, depth + 1);
-    else if (st.trig && g.payloadFizzle) lines.push(`<div class="dim">${'&nbsp;'.repeat((depth + 1) * 3)}↳ ${g.payloadFizzle.fizzle.map(name).join(' + ')} fizzles (${g.payloadFizzle.reason})</div>`);
-    else if (st.trig) lines.push(`<div class="dim">${'&nbsp;'.repeat((depth + 1) * 3)}↳ nothing after it to trigger</div>`);
-  };
-  for (const g of groups) {
-    if (g.fizzle) lines.push(`<div class="dim">${g.fizzle.map(name).join(' + ')} fizzles (${g.reason})</div>`);
-    else if (g.echo) lines.push(`<div><b style="color:${PARTS.echo.col}">${name(g.echo)}</b> · repeats the previous group ×${g.echo.lvl}</div>`);
-    else walk(g, 0);
-  }
-  $('#tree').innerHTML = lines.join('') || '<div class="dim">Empty wand: put a projectile in a slot</div>';
-  const est = estimateTurn();
-  setText('estimate', `≈ ${fmt(est.total)} damage / turn`);
+function wandTreeLine(node) {
+  const group = node.group;
+  const names = entries => entries.map(entry => PARTS[entry.k].n + (entry.lvl > 1 ? ` Lv${entry.lvl}` : '')).join(' + ');
+  if (group.fizzle) return `<div data-group="${node.id}" class="dim">G${node.id + 1} · ${names(group.fizzle)} fizzles (${group.reason})</div>`;
+  if (group.echo) return `<div data-group="${node.id}">G${node.id + 1} · <b class="c-blue">${names([group.echo])}</b> · ${node.target ? `repeats G${node.target.id + 1} ×${group.echo.lvl}` : 'fizzles (no previous group)'}</div>`;
+  let depth = 0, parent = node.parent;
+  while (parent) { depth++; parent = parent.parent; }
+  const stats = groupStats(group, depth, 0);
+  const prefix = node.parent ? `↳ G${node.id + 1} on hit of G${node.parent.id + 1}: ` : `G${node.id + 1} · `;
+  const modifiers = group.mods.length ? names(group.mods) + ' → ' : '';
+  return `<div data-group="${node.id}">${prefix}${modifiers}<b style="color:${PARTS[group.proj.k].col}">${names([group.proj])}</b> ×${fmt(stats.count)} · ${fmt(stats.dmg)} dmg · ${HIT_LABEL[stats.hit]}${stats.trig ? ` · <span class="c-pink">casts next ×${stats.trig}/hit</span>` : ''}${stats.crit ? ` · ${Math.round(stats.crit * 100)}% crit` : ''}${stats.trig && !group.payload && !group.payloadFizzle ? ' · no payload' : ''}</div>`;
+}
+function renderTree(relationships) {
+  $('#tree').innerHTML = relationships.groups.map(wandTreeLine).join('') || '<div class="dim">Empty wand: put a projectile in a slot</div>';
+  const estimate = estimateTurn();
+  setText('estimate', `≈ ${fmt(estimate.total)} damage / turn`);
 }
 function logLine(text) {
   S.log.unshift(text);
@@ -1250,6 +1411,8 @@ function showOptions() {
   $('#closeM').addEventListener('click', () => { SFX.button(); S.phase === 'title' ? showTitle() : hideModal(); });
 }
 function showTitle() {
+  saveRun();
+  const resumable = readSavedRun();
   clearOv(); hideTip();
   S.phase = 'title'; S.fight = null; S.anim = null;
   setBg('title');
@@ -1257,11 +1420,14 @@ function showTitle() {
   showModal(`<div class="title">
     <div class="logo">${[...'WANDSMITH'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('')}</div>
     <div class="subt">revenge on the wizard mafia · one cobbled wand at a time</div>
-    <button class="b-pink big pulse" id="playGo">PLAY</button>
+    ${resumable ? '<button class="b-pink big pulse" id="continueGo">CONTINUE RUN</button>' : ''}
+    <button class="${resumable ? 'b-orange' : 'b-pink big pulse'}" id="playGo">${resumable ? 'NEW RUN' : 'PLAY'}</button>
     <div class="row2"><button class="b-purple" id="introGo">Watch intro</button><button class="b-blue" id="howGo">How to play</button><button class="b-gray" id="optGo">Options</button></div>
     <div class="bestline">Highest rung: <span class="c-gold">${best.rung}</span> · Biggest turn: <span class="c-gold">${fmt(best.turn)}</span> · Runs: ${best.runs} · Wins: ${best.wins}</div>
   </div>`, true);
   $('#playGo').addEventListener('click', () => { audioInit(); SFX.buy(); BG.boost += 3; newRun(); });
+  const continueButton = $('#continueGo');
+  if (continueButton) continueButton.addEventListener('click', () => { audioInit(); SFX.button(); restoreRun(); });
   $('#introGo').addEventListener('click', async () => { audioInit(); hideModal(); await playCine('intro'); showTitle(); });
   $('#howGo').addEventListener('click', () => { audioInit(); showHowTo(showTitle); });
   $('#optGo').addEventListener('click', () => { audioInit(); showOptions(); });
@@ -1291,5 +1457,5 @@ function frame(now) {
 }
 fit();
 renderSpeed();
-showTitle();
+if (!restoreRun()) showTitle();
 requestAnimationFrame(frame);
