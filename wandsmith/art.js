@@ -1,11 +1,7 @@
 'use strict';
-/* =====================================================================
-   WANDSMITH — procedural pixel art (cached offscreen canvases)
-   Everything is drawn with fillRect primitives at native low-res pixels.
-   The battle canvas is 336x168; game.js upscales 2x with nearest-neighbour.
-   Style: muted dark-plum outlines, 3-5 tone banded shading per shape,
-   soft magic glow halos, soft drop shadow + faint floor reflection.
-   ===================================================================== */
+/* WANDSMITH rendering facade. Generated source artwork is converted offline
+   into Pix definitions; poses and effects reuse cached native pixel canvases.
+   Legacy drawing helpers remain as API fallbacks. */
 const Art = (function () {
   const W = 336, H = 168;
   const GROUND = 150;      // feet y for characters (game.js + cinema.js)
@@ -15,6 +11,7 @@ const Art = (function () {
   // low level helpers
   // ---------------------------------------------------------------
   const _cache = Object.create(null);
+  const _poseBounds = Object.create(null);
   function cached(key, w, h, draw) {
     let c = _cache[key];
     if (!c) {
@@ -27,6 +24,17 @@ const Art = (function () {
     return c;
   }
   function fi(t, speed, n) { const k = Math.floor(t * speed) % n; return k < 0 ? k + n : k; }
+  function poseBounds(key, image) {
+    if (_poseBounds[key]) return _poseBounds[key];
+    const pixels = image.getContext('2d').getImageData(0, 0, image.width, image.height).data;
+    const box = [image.width, image.height, 0, 0];
+    for (let y = 0; y < image.height; y++) for (let x = 0; x < image.width; x++) {
+      if (!pixels[(y * image.width + x) * 4 + 3]) continue;
+      box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
+      box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+    }
+    return (_poseBounds[key] = box);
+  }
 
   function hex2rgb(h) {
     h = ('' + h).replace('#', '');
@@ -470,7 +478,9 @@ const Art = (function () {
     sad: () => ({ dx: 0, dy: 3, sx: 1, sy: 0.88 }),
     cobble: () => ({ dx: 0, dy: 3, sx: 1, sy: 0.88 }),
   };
-  function pixPlayerFrame(t) { return fi(t, 2.4, Math.max(1, (Pix.get('player') || [0]).length)); }
+  // Pose timing is independent of artwork frame count: a strong single
+  // still keeps the renderer's four-step body motion and tip movement.
+  function pixPlayerFrame(t) { return fi(t, 2.4, 4); }
   function poseAndDrawPlayerPix(c, state, frame, t) {
     const pose = (PLAYER_POSE_PIX[state] || PLAYER_POSE_PIX.idle)(frame, t);
     c.save();
@@ -482,7 +492,7 @@ const Art = (function () {
     c.restore();
     if (state === 'hurt') {
       const sz = Pix.size('player') || { w: 28, h: 54 };
-      c.save(); c.globalAlpha = 0.22; c.fillStyle = '#ff4040';
+      c.save(); c.globalCompositeOperation = 'source-atop'; c.globalAlpha = 0.22; c.fillStyle = '#ff4040';
       c.fillRect(-sz.w * 0.4, -sz.h * 0.92, sz.w * 0.8, sz.h * 0.9);
       c.restore();
     } else if (state === 'win') {
@@ -757,7 +767,8 @@ const Art = (function () {
       for (let i = 0; i < 3; i++) {
         const ang = t * 3 + i * (Math.PI * 2 / 3);
         const sx = w / 2 + Math.cos(ang) * 14, sy = groundY - h - 10 + Math.sin(ang) * 5;
-        c.fillStyle = '#ffe066'; c.fillRect(sx - 2, sy - 2, 4, 4);
+        if (Pix.has('impact:starfall')) Pix.draw(c, 'impact:starfall', sx, sy, { scale: .25 });
+        else { c.fillStyle = '#ffe066'; c.fillRect(sx - 2, sy - 2, 4, 4); }
       }
       c.restore();
       return;
@@ -822,6 +833,12 @@ const Art = (function () {
       const w = pad * 2, h = pad * 2, AY = pad;
       const cacheKey = 'enemy:' + key + ':' + st + ':' + frame + ':px';
       const spr = cached(cacheKey, w, h, (c) => poseAndDrawPix(c, w, sz.h, AY, st, frame, pixKey, t || 0));
+      if ((st === 'hit' || st === 'dead') && x >= 0 && x <= W) {
+        // Fit the cached pose itself, including raised props and fallen limbs.
+        const bounds = poseBounds(cacheKey, spr);
+        x = Math.max(1 - bounds[0] + w / 2, Math.min(x, W - 2 - bounds[2] + w / 2));
+        y = Math.max(1 - bounds[1] + AY, Math.min(y, H - 2 - bounds[3] + AY));
+      }
       groundFX(g, spr, x, y, w / 2, AY, sz.w * 0.4);
       return;
     }
@@ -953,6 +970,20 @@ const Art = (function () {
   function drawImpact(g, partKey, x, y, k) {
     k = Math.max(0, Math.min(1, k || 0));
     const bucket = Math.round(k * (N_IMPACT - 1));
+    const pixKey = 'impact:' + partKey;
+    if (Pix.has(pixKey)) {
+      const size = 40;
+      const spr = cached('impact:' + partKey + ':' + bucket + ':px', size, size, (c) => {
+        c.imageSmoothingEnabled = false;
+        const progress = bucket / (N_IMPACT - 1);
+        Pix.draw(c, pixKey, size / 2, size / 2, {
+          scale: 0.4 + progress * 0.6,
+          alpha: Math.max(0, 0.85 * (1 - progress)),
+        });
+      });
+      g.drawImage(spr, Math.round(x - size / 2), Math.round(y - size / 2));
+      return;
+    }
     const style = IMPACT_STYLE[partKey] || 'sparkle';
     const col = PROJ_COL[partKey] || '#ffffff';
     const size = 38;
@@ -1088,6 +1119,35 @@ const Art = (function () {
 
   // small shop wand item (vertical, ~5x22), anchor = centre point
   function drawWandItemInto(g, x, y, col, broken, t) {
+    if (Pix.has('prop:wand')) {
+      const source = Pix.get('prop:wand')[0];
+      const tinted = cached('wand-item:' + col, source.width, source.height, c => {
+        c.drawImage(source, 0, 0);
+        const image = c.getImageData(0, 0, source.width, source.height);
+        const [red, green, blue] = hex2rgb(col);
+        for (let i = 0; i < image.data.length; i += 4) {
+          const r = image.data[i], b = image.data[i + 2], gr = image.data[i + 1];
+          if (image.data[i + 3] && gr > r * 1.2 && b > r * 1.2) {
+            const light = Math.max(gr, b) / 255;
+            image.data[i] = Math.round(red * light);
+            image.data[i + 1] = Math.round(green * light);
+            image.data[i + 2] = Math.round(blue * light);
+          }
+        }
+        c.putImageData(image, 0, 0);
+      });
+      const image = broken ? cached('wand-item-broken:' + col, 28, 16, c => {
+        c.imageSmoothingEnabled = false;
+        const cut = 12;
+        c.save(); c.translate(8, 7); c.rotate(-1.1);
+        c.drawImage(tinted, 0, 0, tinted.width, cut, -4, -7, tinted.width, cut); c.restore();
+        c.save(); c.translate(18, 9); c.rotate(1.1);
+        c.drawImage(tinted, 0, cut, tinted.width, tinted.height - cut, -4, -5, tinted.width, tinted.height - cut); c.restore();
+      }) : tinted;
+      g.save(); g.imageSmoothingEnabled = false;
+      g.drawImage(image, Math.round(x - image.width / 2), Math.round(y - image.height / 2));
+      g.restore(); return;
+    }
     if (!broken) {
       Rout(g, x - 2, y - 11, 4, 19, col, OUTLINE);
       Ellipse(g, x, y - 13, 3, 3, mix(col, '#fff', 0.5), OUTLINE);

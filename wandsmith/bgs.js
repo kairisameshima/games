@@ -684,6 +684,13 @@ const BGS = (function () {
   }
   function has(locKey) { return !!SCENES[locKey]; }
   function draw(g, locKey, t) {
+    // Generated backgrounds use the same one-time Pix construction/cache.
+    // Return before the old scene overlays so their lights cannot obscure it.
+    const pixKey = 'bg:' + locKey;
+    if (typeof Pix !== 'undefined' && Pix.has(pixKey)) {
+      g.drawImage(Pix.get(pixKey)[0], 0, 0);
+      return;
+    }
     const scene = SCENES[locKey] || SCENES.shop;
     const base = cachedCanvas(locKey, scene.base);
     g.drawImage(base, 0, 0);

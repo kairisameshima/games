@@ -168,8 +168,22 @@ const Cinema = (function () {
       actx.save();
       actx.globalAlpha = Math.max(0, Math.min(1, p.life / (p.maxLife || 1)));
       actx.translate(p.x, p.y); actx.rotate(p.rot || 0);
-      actx.fillStyle = p.col;
-      actx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      if (p.art === 'shard' && Pix.has('frame:twig')) {
+        const fragment = propCache.shard || (propCache.shard = (() => {
+          const c = document.createElement('canvas'); c.width = 3; c.height = 7;
+          const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
+          ctx.translate(3, 0); ctx.rotate(Math.PI / 2);
+          ctx.drawImage(Pix.get('frame:twig')[0], 18, 6, 7, 3, 0, 0, 7, 3);
+          return c;
+        })());
+        actx.drawImage(fragment, -p.w / 2, -p.h / 2, p.w, p.h);
+      } else if (p.art === 'spark' && Pix.has('impact:spark')) {
+        const spark = Pix.get('impact:spark')[0];
+        actx.drawImage(spark, -p.w, -p.h, p.w * 2, p.h * 2);
+      } else {
+        actx.fillStyle = p.col;
+        actx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      }
       actx.restore();
     }
     if (world.flashAlpha > 0) {
@@ -251,7 +265,7 @@ const Cinema = (function () {
         rot: Math.random() * Math.PI * 2,
         vr: (Math.random() * 2 - 1) * 10,
         w: (2 + Math.random() * 2) * K, h: (5 + Math.random() * 5) * K,
-        col: cols[(Math.random() * cols.length) | 0],
+        col: cols[(Math.random() * cols.length) | 0], art: 'shard',
         life: 1.0 + Math.random() * 0.6, maxLife: 1.6, grav: 220 * K,
       });
     }
@@ -262,7 +276,7 @@ const Cinema = (function () {
       world.particles.push({
         x: x + (Math.random() * 6 - 3) * K, y: y + (Math.random() * 4 - 2) * K,
         vx: (Math.random() * 2 - 1) * 20 * K, vy: (-20 - Math.random() * 20) * K,
-        rot: 0, vr: 0, w: 1.5 * K, h: 1.5 * K, col: col || '#ffe066',
+        rot: 0, vr: 0, w: 1.5 * K, h: 1.5 * K, col: col || '#ffe066', art: 'spark',
         life: 0.3 + Math.random() * 0.2, maxLife: 0.5, grav: 60 * K,
       });
     }
@@ -336,7 +350,28 @@ const Cinema = (function () {
   // =====================================================================
   // custom scene props (not part of the Art contract)
   // =====================================================================
+  const propCache = Object.create(null);
   function drawDoor(g, x, bottom, openness, K) {
+    if (Pix.has('prop:door')) {
+      const image = Pix.get('prop:door')[0], scale = K / 1.5;
+      const w = image.width * scale, h = image.height * scale, edge = 2;
+      const left = Math.round(x - w / 2), top = Math.round(bottom - h);
+      const panelWidth = Math.max(1, Math.round((w - edge * scale * 2) * (1 - openness)));
+      g.save(); g.imageSmoothingEnabled = false;
+      // Preserve the generated door's transparent corners when it opens.
+      const opening = propCache.doorOpening || (propCache.doorOpening = (() => {
+        const c = document.createElement('canvas'); c.width = image.width; c.height = image.height;
+        const ctx = c.getContext('2d'); ctx.drawImage(image, 0, 0);
+        ctx.globalCompositeOperation = 'source-in'; ctx.fillStyle = '#251c30'; ctx.fillRect(0, 0, c.width, c.height);
+        return c;
+      })());
+      g.drawImage(opening, left, top, w, h);
+      g.drawImage(image, 0, 0, edge, image.height, left, top, edge * scale, h);
+      g.drawImage(image, image.width - edge, 0, edge, image.height, left + w - edge * scale, top, edge * scale, h);
+      g.drawImage(image, edge, 0, image.width - edge * 2, image.height, left + edge * scale, top, panelWidth, h);
+      g.restore();
+      return;
+    }
     const w = 22 * K, h = 44 * K, top = bottom - h;
     const frame = '#2a1810', wood = '#6a4a2a';
     g.fillStyle = darken(frame, 0.25); g.fillRect(x - w / 2 - 2 * K, top - 2 * K, w + 4 * K, h + 2 * K);
@@ -354,6 +389,7 @@ const Cinema = (function () {
     }
   }
   function drawCrate(g, cx, cy, K) {
+    if (Pix.has('prop:crate')) { Pix.draw(g, 'prop:crate', cx, cy, { scale: K / 1.5 }); return; }
     const w = 12 * K, h = 10 * K, base = '#8a5a32';
     g.fillStyle = base; g.fillRect(cx - w / 2, cy - h / 2, w, h);
     g.fillStyle = lighten(base, 0.3); g.fillRect(cx - w / 2, cy - h / 2, w, h * 0.25);
@@ -363,6 +399,7 @@ const Cinema = (function () {
     g.strokeStyle = INK; g.strokeRect(cx - w / 2 + 0.5, cy - h / 2 + 0.5, w - 1, h - 1);
   }
   function drawCart(g, x, bottom, K) {
+    if (Pix.has('prop:cart')) { Pix.draw(g, 'prop:cart', x, bottom, { scale: K / 1.5 }); return; }
     const w = 30 * K, h = 14 * K, top = bottom - h - 6 * K, base = '#6a4a2a';
     g.fillStyle = darken(base, 0.3); g.fillRect(x - w / 2 - 1 * K, top - 1 * K, w + 2 * K, h + 2 * K);
     g.fillStyle = base; g.fillRect(x - w / 2, top, w, h);
@@ -376,6 +413,12 @@ const Cinema = (function () {
     for (let i = 0; i < 3; i++) drawCrate(g, x - w / 2 + 5 * K + i * 9 * K, top - 4 * K, K * 0.6);
   }
   function drawSign(g, x, y, text, col, K) {
+    if (Pix.has('prop:sign')) {
+      Pix.draw(g, 'prop:sign', x, y, { scale: K / 1.5 });
+      g.save(); g.fillStyle = '#281b30'; g.font = Math.round(7 * K) + 'px monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, x, y - 5 * K); g.restore();
+      return;
+    }
     const base = col || '#ffe066';
     g.fillStyle = darken('#5a3a1a', 0.2); g.fillRect(x - 1 * K, y - 10 * K, 2 * K, 10 * K);
     g.fillStyle = base; g.fillRect(x - 24 * K, y - 10 * K, 48 * K, 10 * K);
@@ -386,6 +429,10 @@ const Cinema = (function () {
     g.fillText(text, x, y - 5 * K);
   }
   function drawHammer(g, x, y, angle, K) {
+    if (Pix.has('prop:hammer')) {
+      g.save(); g.translate(x, y); g.rotate(angle || 0);
+      Pix.draw(g, 'prop:hammer', 0, 0, { scale: K / 1.5 }); g.restore(); return;
+    }
     g.save(); g.translate(x, y); g.rotate(angle || 0);
     const wood = '#8a5a32', metal = '#8a96a8';
     g.fillStyle = darken(wood, 0.3); g.fillRect(-1 * K, -6 * K, 2 * K, 10 * K);
@@ -397,6 +444,11 @@ const Cinema = (function () {
     g.restore();
   }
   function drawMoneyBag(g, x, y, K) {
+    if (Pix.has('prop:moneybag')) {
+      Pix.draw(g, 'prop:moneybag', x, y, { scale: K / 1.5 });
+      g.save(); g.fillStyle = '#ddaa57'; g.font = Math.round(6 * K) + 'px monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', x, y + K); g.restore(); return;
+    }
     const base = '#c8a060';
     g.fillStyle = darken(base, 0.25); g.beginPath(); g.ellipse(x, y + 1 * K, 5 * K, 6 * K, 0, 0, Math.PI * 2); g.fill();
     g.fillStyle = base; g.beginPath(); g.ellipse(x, y, 5 * K, 6 * K, 0, 0, Math.PI * 2); g.fill();
@@ -544,7 +596,7 @@ const Cinema = (function () {
     await say('Wandsmith', 'smithHurt', "They took the wands. They didn't take the parts.");
 
     setState(player, 'cobble');
-    const hammer = addActor({ kind: 'prop', x: player.x + 10 * K, y: GROUND - 14 * K, draw: (g, x, y, t) => drawHammer(g, x, y, Math.sin(t * 6) * 0.6, K) });
+    const hammer = addActor({ kind: 'prop', x: player.x - 14 * K, y: GROUND - 17 * K, draw: (g, x, y, t) => drawHammer(g, x, y, Math.sin(t * 6) * 0.6, K) });
     for (let i = 0; i < 3; i++) {
       await wait(0.5);
       spawnSparkle(player.x + 8 * K, GROUND - 14 * K, '#ffe066', K);
@@ -573,14 +625,14 @@ const Cinema = (function () {
 
     addActor({ kind: 'player', x: Art.W * 0.18, y: GROUND, state: 'idle' });
     const enemyKeys = boss.parts || [key];
-    const n = enemyKeys.length, spread = n > 1 ? 24 * K : 0;
+    const n = enemyKeys.length, spread = n > 1 ? 46 * K : 0;
     const bossActors = enemyKeys.map((k, i) => addActor({ kind: 'enemy', key: k, x: Art.W + 30 * K + i * 20 * K, y: GROUND, state: 'idle' }));
 
     await fadeTo(0, 0.6);
     await say('Wandsmith', 'smith', OPENERS[key] || '...Here we go.');
     await Promise.all(bossActors.map((a, i) => moveTo(a, Art.W * 0.7 + (i - (n - 1) / 2) * spread, GROUND, 1.0)));
     await wait(0.2);
-    await panTo(Art.W * 0.65, Art.H * 0.4, 1.25, 0.4);
+    await panTo(Art.W * 0.55, Art.H * 0.52, 1.15, 0.4);
     for (const raw of boss.intro) {
       const { name, portrait, text } = parseBossLine(key, raw, boss);
       await say(name, portrait, text);
@@ -603,7 +655,7 @@ const Cinema = (function () {
 
     addActor({ kind: 'player', x: Art.W * 0.18, y: GROUND, state: 'win' });
     const enemyKeys = boss.parts || [key];
-    const n = enemyKeys.length, spread = n > 1 ? 24 * K : 0;
+    const n = enemyKeys.length, spread = n > 1 ? 46 * K : 0;
     enemyKeys.forEach((k, i) => addActor({ kind: 'enemy', key: k, x: Art.W * 0.7 + (i - (n - 1) / 2) * spread, y: GROUND, state: 'dead' }));
 
     await fadeTo(0, 0.5);

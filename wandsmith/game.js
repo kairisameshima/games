@@ -947,7 +947,8 @@ function renderBattle(dt) {
       const st = dead ? 'dead' : o.hitT > 0 ? 'hit' : o.atkT > 0 ? 'attack' : 'idle';
       Art.drawEnemy(g, o.key, Math.round(x), GROUND, t + i * 0.37, st);
       if (!dead) {
-        const w = Math.round(Math.max(14 * K, Math.min(34 * K, o.w))), bh = Math.max(2, Math.round(2 * K)), bx = Math.round(o.x - w / 2), by = GROUND - o.h - Math.round(6 * K);
+        const barSpace = Math.min(i > 0 ? o.x - f.foes[i - 1].x - 4 : Infinity, i + 1 < f.foes.length ? f.foes[i + 1].x - o.x - 4 : Infinity);
+        const w = Math.round(Math.max(14 * K, Math.min(34 * K, o.w, barSpace))), bh = Math.max(2, Math.round(2 * K)), bx = Math.round(o.x - w / 2), by = GROUND - o.h - Math.round(6 * K);
         g.fillStyle = '#120d1e'; g.fillRect(bx - 1, by - 1, w + 2, bh + 2);
         g.fillStyle = '#3a2a4a'; g.fillRect(bx, by, w, bh);
         g.fillStyle = o.boss ? '#ff5fd2' : '#ff5f6a'; g.fillRect(bx, by, Math.max(1, Math.round((w * hp) / o.maxHp)), bh);

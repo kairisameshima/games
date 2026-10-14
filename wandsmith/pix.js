@@ -181,10 +181,10 @@ const Pix = (function () {
     if (d && d.face) {
       const frame0 = get(key)[0];
       const [fx, fy, fw, fh] = d.face;
-      const pad = 5;
+      const pad = 2;
       const scale = Math.max(1, Math.floor(Math.min((64 - pad * 2) / fw, (64 - pad * 2) / fh)));
       const dw = fw * scale, dh = fh * scale;
-      const dx = Math.round((64 - dw) / 2), dy = Math.round((64 - dh) / 2) + 3;
+      const dx = Math.round((64 - dw) / 2), dy = Math.min(64 - dh, Math.round((64 - dh) / 2) + 3);
       g.drawImage(frame0, fx, fy, fw, fh, dx, dy, dw, dh);
     }
     g.save(); g.globalAlpha = 0.22;
