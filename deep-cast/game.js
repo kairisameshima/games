@@ -226,16 +226,41 @@ function drawBg(dt) {
 
 /* ================= STAGE ================= */
 const stageEl = $('#stage');
+const oceanWrapEl = $('#oceanWrap'), oceanInnerEl = $('#oceanInner');
+const isMobile = () => matchMedia('(max-width:900px)').matches;
 let scale = 1;
+// Crop box (in 1280x720 stage units) shown inside the mobile ocean viewport:
+// roughly the oceanFrame (left:297 top:12 w:678 h:696) plus a small margin.
+const OCEAN_CROP = { l: 287, t: 2, w: 698, h: 716 };
+function fitOcean() {
+  const cw = oceanWrapEl.clientWidth || innerWidth;
+  const s = cw / OCEAN_CROP.w;
+  oceanWrapEl.style.height = Math.round(OCEAN_CROP.h * s) + 'px';
+  oceanInnerEl.style.transform = `translate(${-OCEAN_CROP.l * s}px,${-OCEAN_CROP.t * s}px) scale(${s})`;
+}
+/** @param {string} selector @returns {void} */
+function scrollToMobileSection(selector) {
+  if (!isMobile()) return;
+  $(selector).scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
 function fit() {
   const w = innerWidth, h = innerHeight;
-  scale = Math.min(w / 1280, h / 720);
-  stageEl.style.transform = `translate(${(w - 1280 * scale) / 2}px,${(h - 720 * scale) / 2}px) scale(${scale})`;
+  if (isMobile()) {
+    stageEl.style.transform = 'none';
+    scale = 1;
+    fitOcean();
+  } else {
+    oceanWrapEl.style.height = '';
+    oceanInnerEl.style.transform = '';
+    scale = Math.min(w / 1280, h / 720);
+    stageEl.style.transform = `translate(${(w - 1280 * scale) / 2}px,${(h - 720 * scale) / 2}px) scale(${scale})`;
+  }
   bgCanvas.width = Math.ceil(w / 2); bgCanvas.height = Math.ceil(h / 2);
   if (gl) gl.viewport(0, 0, bgCanvas.width, bgCanvas.height);
 }
 addEventListener('resize', fit);
-addEventListener('scroll', () => scrollTo(0, 0));
+addEventListener('orientationchange', fit);
+addEventListener('scroll', () => { if (!isMobile()) scrollTo(0, 0); });
 function elCenter(el) { const r = el.getBoundingClientRect(), s = stageEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale }; }
 let shakeAmt = 0;
 const shakeEl = $('#shake');
@@ -892,6 +917,7 @@ function setSail() {
   S.phase = 'cast';
   SFX.button();
   startCast();
+  scrollToMobileSection('#oceanWrap');
 }
 function endDay(made) {
   S.cast = null;
@@ -985,6 +1011,7 @@ function goShop() {
   genOffers();
   setBg('shop');
   renderAll();
+  scrollToMobileSection('#right');
 }
 const offerDef = o => (o.kind === 'hook' ? HOOKS : o.kind === 'crew' ? CREW : BAIT)[o.key];
 function buyOffer(i) {
@@ -1045,7 +1072,8 @@ function nextDay() {
 }
 let hintTimer = null;
 function flashHint(text) { const el = $('#hint'); if (!el) return; el.textContent = text; el.style.color = '#ffd27a'; clearTimeout(hintTimer); hintTimer = setTimeout(() => { el.style.color = ''; el.textContent = defaultHint(); }, 1800); }
-const defaultHint = () => 'Click two hooks to swap them. Top hook hangs highest.';
+const defaultHint = () => 'Select two hooks to swap them. Top hook hangs highest.';
+const sellHint = () => isMobile() ? 'Tap $ to sell' : 'Hover and click $ to sell';
 
 /* ================= WORLD LAYERS (prebuilt) =================
    Water colour and darkness are 1px-wide vertical strips stretched across the viewport;
@@ -1359,8 +1387,10 @@ function renderCrew() {
   const el = $('#crew'); el.innerHTML = html;
   el.querySelectorAll('.crew.full').forEach(r => {
     const k = S.crew[+r.dataset.i];
-    r.addEventListener('mouseenter', () => { const c = elCenter(r); showTipAt(tipHTML(CREW[k].n, CREW[k].d, RARITY[CREW[k].rarity][0] + ' crew', RARITY[CREW[k].rarity][1], S.phase === 'shop' ? 'Hover and click $ to sell' : ''), Math.min(c.x, 1140), c.y + 34, true); });
+    const showCrewTip = () => { const c = elCenter(r); showTipAt(tipHTML(CREW[k].n, CREW[k].d, RARITY[CREW[k].rarity][0] + ' crew', RARITY[CREW[k].rarity][1], S.phase === 'shop' ? sellHint() : ''), Math.min(c.x, 1140), c.y + 34, true); };
+    r.addEventListener('mouseenter', showCrewTip);
     r.addEventListener('mouseleave', hideTip);
+    r.addEventListener('click', e => { if (!e.target.closest('[data-sell]')) showCrewTip(); });
   });
   el.querySelectorAll('[data-sell]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); sellCrew(+b.dataset.sell); }));
 }
@@ -1377,8 +1407,9 @@ function renderRig() {
   paintIcons(el);
   el.querySelectorAll('.hk.full').forEach(r => {
     const i = +r.dataset.i, k = S.hooks[i];
-    r.addEventListener('click', () => clickHook(i));
-    r.addEventListener('mouseenter', () => { const c = elCenter(r); showTipAt(tipHTML(HOOKS[k].n, HOOKS[k].d, `Hook ${i + 1} of ${S.hooks.length}`, RARITY[HOOKS[k].rarity][1], S.phase === 'shop' ? 'Click two hooks to swap · hover $ to sell' : ''), Math.min(c.x, 1140), c.y + 30, true); });
+    const showHookTip = () => { const c = elCenter(r); showTipAt(tipHTML(HOOKS[k].n, HOOKS[k].d, `Hook ${i + 1} of ${S.hooks.length}`, RARITY[HOOKS[k].rarity][1], S.phase === 'shop' ? `Select two hooks to swap · ${sellHint()}` : ''), Math.min(c.x, 1140), c.y + 30, true); };
+    r.addEventListener('click', e => { clickHook(i); if (!e.target.closest('[data-sellh]')) showHookTip(); });
+    r.addEventListener('mouseenter', showHookTip);
     r.addEventListener('mouseleave', hideTip);
   });
   el.querySelectorAll('[data-sellh]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); sellHook(+b.dataset.sellh); }));
@@ -1398,7 +1429,7 @@ function renderRight() {
   if (S.phase === 'ready') {
     body.innerHTML = `<div class="castBox">
       <button class="b-cyan bigCast pulse" id="sailBtn">SET SAIL</button>
-      <div class="feed">${castsPerDay()} casts · line ${fmtM(tval('length'))} · ${S.hooks.length} hooks<br><span class="lbl">Space to start · everything after is automatic</span></div>
+      <div class="feed">${castsPerDay()} casts · line ${fmtM(tval('length'))} · ${S.hooks.length} hooks<br><span class="lbl">${isMobile() ? 'Tap SET SAIL to start · everything after is automatic' : 'Space to start · everything after is automatic'}</span></div>
       ${baitHtml(S.bait, 'Bait today:')}
       <div class="feed">${S.legend ? `<span class="c-gold">LEGEND</span> ${S.legend.n}<br>${S.legend.curse}` : S.event ? `${S.event.a} ${S.event.n}<br>${S.event.d}` : 'Calm seas'}</div></div>`;
     $('#sailBtn').addEventListener('click', setSail);
@@ -1416,7 +1447,7 @@ function renderRight() {
     const cur = T.levels[S.tackle[k]], nxt = T.levels[S.tackle[k] + 1];
     const curS = k === 'length' ? fmtM(cur) : cur + T.unit;
     const nxtS = nxt === undefined ? '' : k === 'length' ? fmtM(nxt) : nxt + T.unit;
-    return `<button data-tk="${k}" class="${p === null ? 'max' : ''}" ${p === null || S.money < p ? 'disabled' : ''}>${T.n}<br><span class="tv">${curS}${p === null ? ' MAX' : ' → ' + nxtS}</span>${p === null ? '' : ` <span class="tp">$${p}</span>`}</button>`;
+    return `<button data-tk="${k}" class="${p === null ? 'max' : ''}" ${p === null || S.money < p ? 'disabled' : ''}>${T.n}<br><span class="tv">${curS}${p === null ? ' MAX' : ' → ' + nxtS}</span>${p === null ? '' : ` <span class="tp">$${p}</span>`}<span class="upgrade-desc">${md(T.d)}</span></button>`;
   }).join('');
   body.innerHTML = `
     <div class="shopHead"><div class="shopSign t">TACKLE SHOP</div><div class="lbl" style="text-align:right">Day ${S.day + 1} quota<br><span class="c-red" style="font-size:18px">${fmt(quotaFor(S.day + 1))}</span></div></div>
@@ -1424,7 +1455,7 @@ function renderRight() {
       const d = offerDef(o);
       const rc = o.kind === 'bait' ? '#c86a4a' : RARITY[d.rarity][1];
       const icon = o.kind === 'hook' ? `<canvas width="10" height="12" data-hook="${o.key}"></canvas>` : `<div class="oicon">${d.a}</div>`;
-      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.money < o.price ? 'poor' : ''}" data-o="${i}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind.toUpperCase()}</div>${icon}<div class="oname">${d.n}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
+      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.money < o.price ? 'poor' : ''}" data-o="${i}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind.toUpperCase()}</div>${icon}<div class="oname">${d.n}</div><div class="offer-desc">${md(d.d)}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
     }).join('')}</div>
     <div class="tackle">${tk}</div>
     ${baitHtml(S.baitNext, 'Bait for tomorrow:')}
@@ -1464,11 +1495,15 @@ function tipHTML(title, desc, badge = '', badgeCol = '#4a5e6e', sub = '') {
 function showTipAt(html, x, y, below = false) {
   tipEl.innerHTML = html;
   tipEl.classList.add('show');
+  if (isMobile()) { tipEl.style.left = ''; tipEl.style.top = ''; return; }
   const h = tipEl.offsetHeight;
   tipEl.style.left = clamp(x, 140, 1140) + 'px';
   tipEl.style.top = clamp(below ? y : y - h, 6, 714 - h) + 'px';
 }
 function hideTip() { tipEl.classList.remove('show'); }
+document.addEventListener('click', e => {
+  if (!e.target.closest('.crew.full, .hk.full, .offer, [data-tk]')) hideTip();
+}, true);
 
 /* ================= MODALS ================= */
 const modalEl = $('#modal');

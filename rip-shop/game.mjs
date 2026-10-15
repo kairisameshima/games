@@ -96,6 +96,15 @@ function announce(message) {
   if (region) region.textContent = message;
 }
 
+/** @param {string} selector @returns {void} */
+function scrollToMobileSection(selector) {
+  if (!matchMedia('(max-width:900px)').matches) return;
+  element(selector)?.scrollIntoView({
+    block: 'start',
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+  });
+}
+
 /** @returns {void} */
 function startAudio() {
   if (!state.settings.sound || !window.AudioContext) return;
@@ -232,7 +241,10 @@ async function performAction(control) {
       ui.selectedKey = ui.selectedKey === control.dataset.key ? null : control.dataset.key;
       ui.selectedSlot = null;
       draw();
-      if (ui.selectedKey) announce('Choose an unlocked display slot to place this card.');
+      if (ui.selectedKey) {
+        announce('Choose an unlocked display slot to place this card.');
+        scrollToMobileSection('#shelfSection');
+      }
       break;
     case 'slot': {
       const index = Number(control.dataset.index);
@@ -254,6 +266,7 @@ async function performAction(control) {
         ui.tab = 'collection';
         draw();
         showToast('Choose Display on an owned card, then click this slot.');
+        scrollToMobileSection('#tabBody');
       }
       break;
     }
@@ -370,6 +383,7 @@ async function onKeyDown(event) {
 
 /** @param {Event} event @returns {void} */
 function onRelationOver(event) {
+  if (event instanceof PointerEvent && event.pointerType === 'touch') return;
   if (!(event.target instanceof Element)) return;
   const slot = event.target.closest('[data-display-slot]');
   if (slot instanceof HTMLElement) setRelationshipFocus(state, Number(slot.dataset.displaySlot));
@@ -377,6 +391,7 @@ function onRelationOver(event) {
 
 /** @param {MouseEvent} event @returns {void} */
 function onRelationOut(event) {
+  if (event instanceof PointerEvent && event.pointerType === 'touch') return;
   if (!(event.target instanceof Element)) return;
   const from = event.target.closest('[data-display-slot]');
   const to = event.relatedTarget instanceof Element ? event.relatedTarget.closest('[data-display-slot]') : null;

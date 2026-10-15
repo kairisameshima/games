@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>PACHI PACHI: REACH</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap">
@@ -11,11 +11,6 @@
 <body data-phase="title">
 <canvas id="bg"></canvas>
 <div id="stage"><div id="shake">
-  <div id="boardFrame"></div>
-  <canvas id="board" width="1280" height="720"></canvas>
-  <canvas id="balls" width="1280" height="720"></canvas>
-  <canvas id="fxl" width="1280" height="720"></canvas>
-
   <div id="left" class="panel">
     <div id="roundBox">
       <div id="roundName" class="t">Round 1</div>
@@ -41,17 +36,23 @@
     </div>
   </div>
 
+  <div id="boardGroup"><div id="boardInner">
+    <div id="boardFrame"></div>
+    <canvas id="board" width="1280" height="720"></canvas>
+    <canvas id="balls" width="1280" height="720"></canvas>
+    <canvas id="fxl" width="1280" height="720"></canvas>
+    <div id="ov"></div>
+    <div id="banner"></div>
+  </div></div>
+
   <div id="right" class="panel">
     <div class="rhead t">RELICS <span id="relicCount" class="lbl"></span></div>
     <div id="relics"></div>
     <div id="rightBody"></div>
   </div>
-
-  <div id="ov"></div>
-  <div id="banner"></div>
-  <div id="modal"></div>
-  <div id="tip"></div>
 </div></div>
+<div id="modal"></div>
+<div id="tip"></div>
 <div id="crt"></div>
 <script src="data.js"></script>
 <script src="game.js"></script>

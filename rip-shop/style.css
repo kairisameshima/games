@@ -249,6 +249,7 @@ button:disabled{opacity:.42;filter:grayscale(.3);cursor:not-allowed;box-shadow:n
 .dot-source{background:var(--cyan)}
 .dot-target{background:var(--coral)}
 .display-shelf{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.shelf-scroll-hint{display:none}
 @media (max-width:620px){.display-shelf{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .shelf-slot{
   position:relative;border-radius:var(--radius-md);min-height:150px;
@@ -403,4 +404,56 @@ body.opening .stage-sealed>button,body.opening .stage-sealed>.stage-hint{visibil
 body.opening #packStage button{pointer-events:none;filter:brightness(.75)}
 .stage-reveal{position:relative;z-index:1}
 @media (min-width:1100px){.display-shelf{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media (max-width:900px){
+  #app{padding:calc(12px + env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) calc(36px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+  #topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand actions" "stats stats";gap:10px;padding:12px}
+  .brand{grid-area:brand;min-width:0;margin-right:0}
+  .brand-mark{font-size:24px;white-space:nowrap}
+  .brand-tag{font-size:10px;letter-spacing:0;line-height:1.3}
+  #statline{grid-area:stats;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+  .stat{min-width:0;padding:6px 3px}
+  .stat-label{font-size:9px;letter-spacing:0}
+  .stat-value{font-size:14px;overflow-wrap:anywhere}
+  .topbar-right{grid-area:actions;display:grid;grid-template-columns:auto auto;gap:4px 6px}
+  .topbar-right .icon-btn{padding:8px 10px;font-size:13px}
+  #saveStatus{grid-column:1/-1;grid-row:2;font-size:10px;padding:2px 4px;text-align:center}
+  #tabNav button{flex:1;min-height:44px;padding:10px 16px}
+  .panel{padding:12px;min-width:0}
+  .btn-primary,.btn-buy,.btn-small,.icon-btn,.toggle,.filter-row button{min-height:44px;touch-action:manipulation}
+  .btn-small,.filter-row button{font-size:13px}
+  #collectionSearch{min-width:0;min-height:44px;font-size:16px}
+  .collection-grid{grid-template-columns:repeat(auto-fill,minmax(min(130px,100%),1fr));gap:10px}
+  .card-actions .btn-small{white-space:normal}
+  .card-effect{font-size:12.5px}
+  .display-shelf{display:flex;align-items:stretch;overflow-x:auto;gap:10px;padding:8px;scroll-snap-type:x proximity;scroll-padding-inline:8px;overscroll-behavior-x:contain}
+  .display-shelf .shelf-slot{flex:0 0 clamp(128px,30vw,160px);min-height:160px;scroll-snap-align:start}
+  .shelf-scroll-hint{display:inline}
+  .shelf-header{align-items:flex-start}
+  .shelf-header h2{flex-basis:100%}
+  .shelf-hint{font-size:13px}
+  .shelf-slot[data-action]{touch-action:manipulation}
+  .slot-clear{width:44px;height:44px;top:-8px;right:-8px;display:grid;place-items:center;border:0;background:transparent;font-size:20px;isolation:isolate}
+  .slot-clear::before{content:"";position:absolute;inset:11px;border-radius:50%;background:rgba(10,8,20,.85);z-index:-1}
+  #packSeal{min-height:44px}
+  .stage-caption{font-size:13px}
+  .stage-hint{font-size:13px}
+  .reveal-row{overscroll-behavior-x:contain;touch-action:pan-x pan-y pinch-zoom}
+  .modal-backdrop,.offline-backdrop{padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left))}
+  .modal-panel,.offline-panel{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain}
+  .modal-panel header{padding:10px 12px;gap:8px;z-index:1}
+  .modal-panel h2{font-size:20px;min-width:0}
+  .modal-close{width:44px;height:44px;flex:0 0 44px;padding:0;touch-action:manipulation}
+  .modal-body{padding:4px 14px 14px;font-size:14px}
+  .settings-row{gap:12px}
+  .offline-panel{width:100%;max-width:480px;padding:20px}
+  #toastHost{bottom:calc(18px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100% - 24px)}
+}
+@media (max-width:360px){
+  #statline{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .collection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card-actions .btn-small{flex-basis:100%}
+}
+@media (hover:none){
+  .btn-primary:hover:not(:disabled),.btn-buy:hover:not(:disabled),.btn-small:hover:not(:disabled),.icon-btn:hover:not(:disabled){transform:none;filter:none}
+}
 @media (prefers-reduced-motion:reduce){.pack-art,#packSeal,.is-next,.card-art::after{animation:none!important}.card-chip{transition:none}}

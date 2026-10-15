@@ -218,7 +218,7 @@ function shelfHint(ui) {
   if (ui.selectedSlot != null) {
     return `Swapping Slot ${ui.selectedSlot + 1} &mdash; tap another slot to swap, or tap it again to cancel.`;
   }
-  return 'Tap a card in your Collection to place it, or tap a filled slot to pick it up and swap.';
+  return 'Choose Display in your Collection, then tap a slot. Tap a filled slot to swap.<span class="shelf-scroll-hint"> Swipe the shelf to reach more slots.</span>';
 }
 
 function renderShelf(state, ui, income) {
@@ -450,13 +450,13 @@ function renderCollectionTab(state, ui, progress) {
 function helpBody() {
   return `
   <h3>The Rip</h3>
-  <p>Buy a pack from the Shop, drag the gold seal sideways (or tap "Tear It Open") to rip it, then reveal cards one at a time. The last card in every pack is guaranteed uncommon or better. Completing a set adds a bonus fifth card to that set's future packs.</p>
+  <p>Buy a pack from the Shop, drag the gold seal sideways (or tap "Tear It Open") to rip it, then tap the glowing card back or Reveal to turn over each card. On phones, swipe the card row to inspect your pulls. The last card in every pack is guaranteed uncommon or better. Completing a set adds a bonus fifth card to that set's future packs.</p>
   <h3>Finishes &amp; Rarity</h3>
   <p>Cards come in Standard, Foil, and Prismatic finishes &mdash; foil and prismatic multiply income and sale price far beyond standard. Luck upgrades shift the odds toward better rarities and finishes without ever making commons worthless.</p>
   <h3>Display Shelf</h3>
-  <p>Equipped cards earn passive income every second. Same-set neighbors automatically give each other +20% income. Many cards also have their own adjacency, row, diversity, or completion effects &mdash; tap any shelf card to see exactly what it boosts and what boosts it. One card must always stay displayed so the shop never stops earning.</p>
+  <p>Equipped cards earn passive income every second. Same-set neighbors automatically give each other +20% income. Many cards also have their own adjacency, row, diversity, or completion effects &mdash; tap any shelf card to see exactly what it boosts and what boosts it. Swipe the shelf on phones to reach all six slots. One card must always stay displayed so the shop never stops earning.</p>
   <h3>Collection</h3>
-  <p>Discovering a card is permanent. Use Display to equip a copy, Sell 1 to cash out an undisplayed copy (even your last one), or Sell spares to sell duplicates while keeping at least one copy of every finish and all displayed cards.</p>
+  <p>Discovering a card is permanent. Use Display to choose a copy, then tap a shelf slot to place it. On phones, choosing Display brings the shelf into view. Sell 1 cashes out an undisplayed copy (even your last one). Sell spares keeps at least one copy of every finish and all displayed cards.</p>
   <h3>Upgrades</h3>
   <p>Display Slots unlock more shelf space (up to 6), Lighting adds +25% income per level, Luck improves your odds, and the Auto Opener lets the shop rip packs for you.</p>
   <h3>Auto Opener</h3>

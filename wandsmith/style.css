@@ -136,6 +136,7 @@ body[data-phase=shop] .slot.full:hover .sell,body[data-phase=shop] .charm.full:h
 .offer .oprice{font-size:19px;color:var(--gold);line-height:1.1}
 .offer .okind{position:absolute;top:3px;left:6px;font-size:11px;color:#a898c8}
 .offer .olv{position:absolute;top:3px;right:6px;font-size:11px;color:var(--gold)}
+.offer .odesc{display:none}
 @keyframes dealin{from{transform:translateY(-30px) rotate(10deg) scale(.6);opacity:0}}
 .upRow{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .upRow button{font-size:15px;padding:6px 4px;line-height:1.05}
@@ -203,3 +204,99 @@ body[data-phase=shop] .slot.full:hover .sell,body[data-phase=shop] .charm.full:h
 .title .row2 button{font-size:18px}
 body[data-phase=title] #left,body[data-phase=title] #right,body[data-phase=title] #wandPanel{opacity:0;pointer-events:none}
 #left,#right,#wandPanel{transition:opacity .4s}
+
+/* ================= MOBILE / NARROW-SCREEN REFLOW =================
+   Below 900px, #left/#wandPanel/#right/#modal/#ov/#tip are reparented by game.js out of the
+   uniformly-scaled #stage into #mobileUI, a normal-flow scrollable column. The battle/fx
+   canvases and cinematics stay inside #stage untouched, so their internal coordinate math
+   (BX/BY/BS, elCenter's stage-scale division) keeps working exactly as on desktop; only the
+   HUD/editor/dialog chrome gets real, touch-sized, document-flow layout. */
+#mobileUI{display:none}
+#battleViewport{display:contents}
+@media (max-width:899.98px){
+  html,body{overflow-x:hidden;overflow-y:auto;height:auto;min-height:100%;touch-action:pan-y pinch-zoom}
+  #battleViewport{display:block;position:relative;width:100%;overflow:hidden;z-index:1}
+  #mobileUI{
+    display:flex;flex-direction:column;gap:14px;width:100%;max-width:880px;margin:0 auto;
+    padding:0 calc(12px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));box-sizing:border-box;position:relative;z-index:10
+  }
+  body[data-cine] #mobileUI,body[data-cine] #battleViewport{display:none}
+
+  /* left: status/HUD bar */
+  #left{position:static;width:100%;height:auto;padding:12px}
+  #leftBtns{grid-template-columns:1fr 1fr;gap:8px;margin-top:auto}
+  #speedBox{grid-column:1/-1;grid-row:2}
+  #leftBtns>button{font-size:15px;padding:10px 6px;min-height:46px}
+  #speedBtns{flex-wrap:wrap}
+  #speedBtns button{font-size:15px;padding:8px 10px;min-width:44px;min-height:44px}
+
+  /* wand editor */
+  #wandPanel{position:static;width:100%;height:auto;padding:12px}
+  #wandHead{flex-wrap:wrap;row-gap:6px}
+  #estimate{margin-left:0}
+  #slots{flex-wrap:wrap;min-height:0}
+  #slots .slot{flex:0 0 auto;width:58px;height:70px;min-width:58px}
+  #slots .slot canvas{width:44px;height:44px}
+  .wandGroup,.wandLoose{flex:0 0 auto;max-width:100%}
+  .wandLoose,.groupCards,#bag{flex-wrap:wrap}
+  .groupLabel{font-size:13px;min-height:44px;height:auto;display:flex;align-items:center;justify-content:center}
+  #bag .slot{width:56px;height:56px}
+  #bag .slot canvas{width:42px;height:42px}
+  #bagRow{flex-wrap:wrap}
+  #wandHint{text-align:left;flex-basis:100%}
+  #relationshipText{white-space:normal}
+  #tree{columns:1;font-size:16px}
+  /* always-visible, touch-sized sell buttons: shop selling cannot depend on :hover */
+  body[data-phase=shop] #slots .slot.full,body[data-phase=shop] #bag .slot.full{height:auto;min-height:120px;justify-content:flex-start}
+  .slot .sell,.charm .sell{position:static;flex:none;font-size:14px;padding:0;min-height:44px;width:100%;margin-top:auto;border-radius:0 0 8px 8px;touch-action:manipulation}
+  body[data-phase=shop] .slot.full .sell,body[data-phase=shop] .charm.full .sell{display:block}
+
+  /* right: charms + fight/shop */
+  #right{position:static;width:100%;height:auto;padding:12px}
+  .charm{height:60px}
+  body[data-phase=shop] .charm.full{height:96px;flex-direction:column;padding-top:8px}
+  .bigBtn{font-size:30px;padding:12px 24px}
+  .upRow button{min-height:46px}
+  .shopBtns button{min-height:50px}
+  .log{max-height:220px;overflow-y:auto;mask-image:none}
+  /* shop: the effect must be readable before a tap commits to buying, not only via a hover tooltip */
+  .offer{padding:6px 8px 8px;text-align:left}
+  .offer .okind,.offer .olv{position:static;display:inline-block;margin-right:6px}
+  .offer canvas{margin:4px auto}
+  .offer .oname{text-align:center;font-size:16px;margin-top:2px}
+  .offer .odesc{display:block;font-size:14px;line-height:1.25;color:#d8c8f0;margin:4px 0;text-align:left}
+  .offer .oprice{text-align:center}
+
+  /* dialogs: fixed to the viewport, not the (tiny, width-fit) stage */
+  #modal{position:fixed;padding:16px}
+  #modal .box{min-width:0;width:100%;max-width:520px;max-height:85vh;max-height:85dvh;padding:16px}
+  #modal h1{font-size:34px}
+  #modal h2{font-size:22px}
+  #modal .row{flex-wrap:wrap}
+  #modal .row button{min-width:0;flex:1 1 140px;font-size:18px;height:48px}
+  .infoGrid{grid-template-columns:1fr 1fr}
+  .stgrid{font-size:17px}
+  .opt{flex-wrap:wrap;row-gap:8px}
+  .opt .seg button,.fxGrid .opt .seg button{min-width:44px;min-height:44px}
+  .howto{font-size:16px}
+  #ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px}
+  .cash{position:static;width:100%;max-width:460px;max-height:85vh;max-height:85dvh;overflow:auto}
+  #tip{position:fixed!important;left:50%!important;right:auto!important;top:auto!important;
+    bottom:calc(12px + env(safe-area-inset-bottom))!important;transform:translateX(-50%)!important;
+    max-width:92vw;min-width:0;width:max-content}
+
+  /* title screen */
+  .title{padding:18px 16px}
+  .logo{font-size:min(10.5vw,64px);letter-spacing:2px}
+  .title .subt{font-size:15px;margin:6px 0 16px}
+  .title button.big{font-size:26px;padding:12px 32px}
+  .title .row2{flex-wrap:wrap}
+  .title .bestline{font-size:14px}
+
+  /* banner/overlay text scales with the stage's own width instead of fixed desktop px */
+  #banner .bt{font-size:14vw}
+  #banner .bs{font-size:5vw}
+}
+@media (min-width:600px) and (max-width:899.98px){
+  #tree{columns:2}
+}

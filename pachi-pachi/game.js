@@ -206,20 +206,57 @@ function drawBg(dt) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-/* ================= STAGE ================= */
+/* ================= STAGE =================
+   Desktop (>900px): the whole 1280x720 stage is scaled uniformly to fit the
+   viewport (unchanged legacy behaviour). Narrow screens (<=900px) stop doing
+   that for the WHOLE page (it made every button/label tiny); only the
+   board itself (#boardGroup/#boardInner, the (300,14)-(972,706) board-frame
+   area) keeps a scaled copy of the 1280x720 canvases, cropped to just that
+   area, while #left/#right reflow as normal full-width blocks (see CSS).
+   stagePt()/elCenter() always return logical 1280x720-space coordinates
+   (physics/render space is untouched); boardToClient() is the inverse, used
+   to place the (now viewport-fixed) tooltip over board content. */
 const stageEl = $('#stage');
-let scale = 1;
+const boardGroupEl = $('#boardGroup');
+const mobileMQ = matchMedia('(max-width:900px)');
+const uiMobile = () => mobileMQ.matches;
+let scale = 1, boardScale = 1;
+const BOARD_OX = 300, BOARD_OY = 14;
+/** @param {string} selector @returns {void} */
+function scrollToMobileSection(selector) {
+  if (!uiMobile()) return;
+  $(selector).scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
 function fit() {
   const w = innerWidth, h = innerHeight;
-  scale = Math.min(w / 1280, h / 720);
-  stageEl.style.transform = `translate(${(w - 1280 * scale) / 2}px,${(h - 720 * scale) / 2}px) scale(${scale})`;
+  if (uiMobile()) {
+    stageEl.style.transform = '';
+    boardScale = boardGroupEl.getBoundingClientRect().width / 672 || 1;
+    $('#boardInner').style.transform = `translate(${-BOARD_OX * boardScale}px,${-BOARD_OY * boardScale}px) scale(${boardScale})`;
+  } else {
+    scale = Math.min(w / 1280, h / 720);
+    stageEl.style.transform = `translate(${(w - 1280 * scale) / 2}px,${(h - 720 * scale) / 2}px) scale(${scale})`;
+    $('#boardInner').style.transform = '';
+  }
   bgCanvas.width = Math.ceil(w / 2); bgCanvas.height = Math.ceil(h / 2);
   if (gl) gl.viewport(0, 0, bgCanvas.width, bgCanvas.height);
 }
 addEventListener('resize', fit);
-addEventListener('scroll', () => scrollTo(0, 0));
-function stagePt(e) { const r = stageEl.getBoundingClientRect(); return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }; }
-function elCenter(el) { const r = el.getBoundingClientRect(), s = stageEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale }; }
+mobileMQ.addEventListener('change', fit);
+addEventListener('scroll', () => { if (!uiMobile()) scrollTo(0, 0); });
+function stagePt(e) {
+  if (uiMobile()) { const r = boardGroupEl.getBoundingClientRect(); return { x: (e.clientX - r.left) / boardScale + BOARD_OX, y: (e.clientY - r.top) / boardScale + BOARD_OY }; }
+  const r = stageEl.getBoundingClientRect(); return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+}
+function elCenter(el) {
+  if (uiMobile()) { const r = el.getBoundingClientRect(), g = boardGroupEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - g.left) / boardScale + BOARD_OX, y: (r.top + r.height / 2 - g.top) / boardScale + BOARD_OY }; }
+  const r = el.getBoundingClientRect(), s = stageEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale };
+}
+// inverse of stagePt/elCenter: logical board-space (lx,ly) -> real viewport px, for #tip (position:fixed)
+function boardToClient(lx, ly) {
+  if (uiMobile()) { const r = boardGroupEl.getBoundingClientRect(); return { x: r.left + (lx - BOARD_OX) * boardScale, y: r.top + (ly - BOARD_OY) * boardScale }; }
+  const r = stageEl.getBoundingClientRect(); return { x: r.left + lx * scale, y: r.top + ly * scale };
+}
 let shakeAmt = 0;
 const shakeEl = $('#shake');
 function shake(a) { if (prefs.fx.shake) shakeAmt = Math.max(shakeAmt, a); }
@@ -758,6 +795,7 @@ function drop() {
   // heatmap data covers exactly one drop: cleared here, shown afterwards until the next drop
   S.slots.forEach(s => (s.hits = 0)); S.cups.forEach(c => (c.count = 0)); S.heatData = true;
   renderRight();
+  scrollToMobileSection('#boardGroup');
 }
 let endTimer = 0;
 function checkRoundEnd(dt) {
@@ -797,7 +835,9 @@ function showCashout() {
   const ok = over >= 2 ? Math.min(5, Math.floor(Math.log2(over))) : 0;
   if (ok > 0) lines.push({ t: `Overkill <span class="lbl">(${over.toFixed(1)}x target)</span>`, v: ok });
   const total = lines.reduce((a, l) => a + l.v, 0);
-  $('#ov').innerHTML = `<div class="cash panel"><button id="cashBtn" class="b-orange" disabled>Cash Out: $${total}</button><div id="cashLines"></div></div>`;
+  const inner = `<button id="cashBtn" class="b-orange" disabled>Cash Out: $${total}</button><div id="cashLines"></div>`;
+  const mobile = uiMobile();
+  if (mobile) showModal(`<div class="box panel">${inner}</div>`); else $('#ov').innerHTML = `<div class="cash panel">${inner}</div>`;
   const box = $('#cashLines');
   lines.forEach((l, i) => setTimeout(() => {
     const row = document.createElement('div'); row.className = 'cl';
@@ -806,9 +846,8 @@ function showCashout() {
   }, 350 + i * 260));
   $('#cashBtn').addEventListener('click', () => {
     S.money += total; SFX.buy();
-    const c = elCenter($('#cashBtn'));
-    burst(c.x, c.y, 30, ['#f3b958', '#fff6c8'], 6);
-    clearOv();
+    if (!mobile) { const c = elCenter($('#cashBtn')); burst(c.x, c.y, 30, ['#f3b958', '#fff6c8'], 6); }
+    if (mobile) hideModal(); else clearOv();
     if (S.round >= ROUNDS_TO_WIN && !S.won) { S.won = true; best.wins++; saveBest(); showGameOver(true); return; }
     showRewardPick();
   }, { once: true });
@@ -816,18 +855,23 @@ function showCashout() {
 function showRewardPick() {
   const picks = [];
   while (picks.length < 3) { const o = randomOffer(); if (!picks.some(p => p.key === o.key)) picks.push(o); }
-  $('#ov').innerHTML = `<div class="reward panel"><div class="rtitle t">FREE PICK</div><div class="lbl">Take one and place it on the board. Drop it on a matching part to level it up.</div>
+  const inner = `<div class="rtitle t">FREE PICK</div><div class="lbl">Take one and place it on the board. Drop it on a matching part to level it up.</div>
     <div class="rcards">${picks.map((o, i) => { const d = o.kind === 'cup' ? CUPS[o.key] : PARTS[o.key]; return `<div class="rcard" data-i="${i}" style="--rc:${RAR[d.rarity][1]};animation-delay:${i * 0.08}s"><div class="okind">${o.kind === 'cup' ? 'CUP' : 'PART'} · ${RAR[d.rarity][0]}</div>${offerIcon(o)}<div class="oname">${d.n}</div><div class="rdesc">${md(d.d(1))}</div></div>`; }).join('')}</div>
-    <button class="b-gray" id="skipPick">Skip: take $4 instead</button></div>`;
-  paintIcons($('#ov'));
+    <button class="b-gray" id="skipPick">Skip: take $4 instead</button>`;
+  const mobile = uiMobile();
+  if (mobile) showModal(`<div class="box panel">${inner}</div>`); else $('#ov').innerHTML = `<div class="reward panel">${inner}</div>`;
+  const root = mobile ? modalEl : $('#ov');
+  paintIcons(root);
   SFX.fountain();
-  $('#ov').querySelectorAll('.rcard').forEach(el => el.addEventListener('click', () => {
+  const done = () => { if (mobile) hideModal(); else clearOv(); };
+  root.querySelectorAll('.rcard').forEach(el => el.addEventListener('click', () => {
     const o = picks[+el.dataset.i];
-    SFX.buy(); clearOv(); goShop();
+    SFX.buy(); done(); goShop();
     S.held = { kind: o.kind, type: o.key, lvl: 1, part: o.kind === 'part' ? newPart(o.key) : null, from: { reward: true } };
     renderRight();
+    scrollToMobileSection('#boardGroup');
   }));
-  $('#skipPick').addEventListener('click', () => { S.money += 4; SFX.coin(); clearOv(); goShop(); });
+  root.querySelector('#skipPick').addEventListener('click', () => { S.money += 4; SFX.coin(); done(); goShop(); });
 }
 function clearOv() { $('#ov').innerHTML = ''; }
 
@@ -854,6 +898,7 @@ function goShop() {
   setBg('shop');
   genOffers();
   renderRight(); renderRelics();
+  scrollToMobileSection('#right');
 }
 function buyOffer(i) {
   const o = S.offers[i];
@@ -865,6 +910,7 @@ function buyOffer(i) {
   if (o.kind === 'relic') { S.relics.push(o.key); if (o.key === 'bank') { /* interest cap read live */ } banner(RELICS[o.key].n, '#b49aff', md(RELICS[o.key].d)); renderRelics(); }
   else S.held = { kind: o.kind, type: o.key, lvl: 1, from: { shop: i }, part: o.kind === 'part' ? newPart(o.key) : null };
   renderRight();
+  if (S.held) scrollToMobileSection('#boardGroup');
 }
 function buyUpgrade(k) {
   const p = upgradePrice(k);
@@ -906,19 +952,20 @@ function nextRound() {
 }
 let hintTimer = null;
 function flashHint(text) { const el = $('#hint'); if (!el) return; el.textContent = text; el.style.color = '#ffd27a'; clearTimeout(hintTimer); hintTimer = setTimeout(() => { el.style.color = ''; el.textContent = defaultHint(); }, 1600); }
-function defaultHint() { return S.held ? 'Click a glowing slot to place · right-click or Esc to undo' : 'Click a part on the board to move it'; }
+function defaultHint() { return S.held ? 'Tap a glowing slot to place · Esc/right-click or the buttons below to undo' : 'Tap a part on the board to move it'; }
 
 /* ================= PLACEMENT INPUT ================= */
 let mouse = { x: -999, y: -999, in: false };
 function slotAt(x, y) { let bestS = null, bd = 22 * 22; for (const s of S.slots) { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; bestS = s; } } return bestS; }
 function cupAt(x, y) { if (y < CUP_TOP - 6 || y > BBOT || x < BX0 || x > BX1) return -1; return clamp(Math.floor((x - BX0) / CUPW), 0, NCUPS - 1); }
 cv.addEventListener('pointermove', e => {
+  if (e.pointerType === 'touch') return;
   const p = stagePt(e); mouse = { x: p.x, y: p.y, in: true };
   updateHoverTip();
 });
 cv.addEventListener('pointerleave', () => { mouse.in = false; hideTip(); });
 cv.addEventListener('contextmenu', e => { e.preventDefault(); cancelHeld(); });
-cv.addEventListener('pointerdown', e => {
+cv.addEventListener('click', e => {
   audioInit();
   if (e.button !== 0) return;
   if (S.phase !== 'shop') { if (S.phase === 'ready') drop(); return; }
@@ -974,18 +1021,18 @@ function tipHTML(title, desc, badge = '', badgeCol = '#5b6b6e', sub = '') {
 const RAR = { 0: ['Basic', '#5b6b6e'], 1: ['Common', '#009dff'], 2: ['Uncommon', '#4bc292'], 3: ['Rare', '#fe5f55'] };
 function showTipAt(html, x, y, below = false) {
   tipEl.innerHTML = html; tipEl.classList.add('show');
-  const h = tipEl.offsetHeight;
-  tipEl.style.left = clamp(x, 140, 1140) + 'px';
-  tipEl.style.top = clamp(below ? y : y - h, 4, 716 - h) + 'px';
+  const h = tipEl.offsetHeight, margin = 130;
+  tipEl.style.left = clamp(x, margin, Math.max(margin, innerWidth - margin)) + 'px';
+  tipEl.style.top = clamp(below ? y : y - h, 4, innerHeight - h - 4) + 'px';
 }
 function hideTip() { tipEl.classList.remove('show'); }
 function updateHoverTip() {
   if (!mouse.in || S.phase === 'title' || (S.phase === 'drop' && S.balls.length > 3)) { hideTip(); return; }
   const s = slotAt(mouse.x, mouse.y);
   const lastDrop = S.heatData && S.phase !== 'drop' ? ` · hit ${s && s.hits} times last drop` : '';
-  if (s && s.part) { const d = PARTS[s.part.type], L = s.part.lvl; showTipAt(tipHTML(`${d.n}${L > 1 ? ' · Lv' + L : ''}`, d.d(L), RAR[d.rarity][0], RAR[d.rarity][1], (S.phase === 'shop' ? (S.held && S.held.type === s.part.type && L + S.held.lvl <= MAX_LVL ? 'Click to MERGE (level up)' : 'Click to pick up / swap') : '') + lastDrop), s.x, s.y - 30); return; }
+  if (s && s.part) { const d = PARTS[s.part.type], L = s.part.lvl, p = boardToClient(s.x, s.y - 30); showTipAt(tipHTML(`${d.n}${L > 1 ? ' · Lv' + L : ''}`, d.d(L), RAR[d.rarity][0], RAR[d.rarity][1], (S.phase === 'shop' ? (S.held && S.held.type === s.part.type && L + S.held.lvl <= MAX_LVL ? 'Click to MERGE (level up)' : 'Click to pick up / swap') : '') + lastDrop), p.x, p.y); return; }
   const ci = cupAt(mouse.x, mouse.y);
-  if (ci >= 0) { const cup = S.cups[ci], c = CUPS[cup.type]; showTipAt(tipHTML(`${c.n}${cup.lvl > 1 ? ' · Lv' + cup.lvl : ''} · x${+cupMult(ci).toFixed(2)}`, c.d(cup.lvl), RAR[c.rarity][0], RAR[c.rarity][1], `Caught ${cup.count} this round`), BX0 + (ci + 0.5) * CUPW, CUP_TOP - 10); return; }
+  if (ci >= 0) { const cup = S.cups[ci], c = CUPS[cup.type], p = boardToClient(BX0 + (ci + 0.5) * CUPW, CUP_TOP - 10); showTipAt(tipHTML(`${c.n}${cup.lvl > 1 ? ' · Lv' + cup.lvl : ''} · x${+cupMult(ci).toFixed(2)}`, c.d(cup.lvl), RAR[c.rarity][0], RAR[c.rarity][1], `Caught ${cup.count} this round`), p.x, p.y); return; }
   hideTip();
 }
 
@@ -1467,8 +1514,10 @@ function renderRelics() {
   const el = $('#relics'); el.innerHTML = html;
   el.querySelectorAll('.relic.full').forEach(r => {
     const k = S.relics[+r.dataset.i];
-    r.addEventListener('mouseenter', () => { const c = elCenter(r); showTipAt(tipHTML(RELICS[k].n, RELICS[k].d, 'Relic', '#8a71e1', S.phase === 'shop' ? 'Hover and click $ to sell' : ''), Math.min(c.x, 1140), c.y + 38, true); });
+    const showRelicTip = () => { const rc = r.getBoundingClientRect(); showTipAt(tipHTML(RELICS[k].n, RELICS[k].d, 'Relic', '#8a71e1', S.phase === 'shop' ? (uiMobile() ? 'Tap $ to sell' : 'Hover and click $ to sell') : ''), rc.left + rc.width / 2, rc.bottom + 8, true); };
+    r.addEventListener('mouseenter', showRelicTip);
     r.addEventListener('mouseleave', hideTip);
+    r.addEventListener('click', e => { if (e.target.closest('[data-sell]')) return; showRelicTip(); });
   });
   el.querySelectorAll('[data-sell]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); hideTip(); sellRelic(+b.dataset.sell); }));
 }
@@ -1495,7 +1544,7 @@ function renderRight() {
   if (S.phase === 'ready' || S.phase === 'drop' || S.phase === 'cashout' || S.phase === 'over') {
     const ready = S.phase === 'ready';
     body.innerHTML = `<div class="dropBox">
-      ${ready ? `<button class="b-blue bigDrop pulse" id="dropBtn">DROP!</button><div class="feed">${S.ballsLeft} balls · random launcher<br><span class="lbl">Space / click the board</span></div>` : `<div class="chaosLbl">BALLS IN PLAY</div><div class="chaos t" id="chaosNum">0</div>`}
+      ${ready ? `<button class="b-blue bigDrop pulse" id="dropBtn">DROP!</button><div class="feed">${S.ballsLeft} balls · random launcher<br><span class="lbl">Space / tap the board</span></div>` : `<div class="chaosLbl">BALLS IN PLAY</div><div class="chaos t" id="chaosNum">0</div>`}
       <div class="feed">${S.boss ? `<span class="c-red">BOSS</span> ${S.boss.a} ${S.boss.n}<br>${S.boss.d}` : `Next boss: round ${Math.ceil(S.round / 3) * 3}`}</div>
       <div class="feed lbl">Balls start at <span class="c-blue">${S.startValue}</span> value</div>
     ${S.phase !== 'drop' ? heatBtnHtml() : ''}</div>`;
@@ -1517,7 +1566,7 @@ function renderRight() {
     <div class="offers">${S.offers.map((o, i) => {
       const d = o.kind === 'relic' ? RELICS[o.key] : o.kind === 'cup' ? CUPS[o.key] : PARTS[o.key];
       const rc = o.kind === 'relic' ? '#8a71e1' : RAR[d.rarity][1];
-      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.money < o.price ? 'poor' : ''}" data-o="${i}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind === 'relic' ? 'RELIC' : o.kind === 'cup' ? 'CUP' : 'PART'}</div>${offerIcon(o)}<div class="oname">${d.n}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
+      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.money < o.price ? 'poor' : ''}" data-o="${i}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind === 'relic' ? 'RELIC' : o.kind === 'cup' ? 'CUP' : 'PART'}</div>${offerIcon(o)}<div class="oname">${d.n}</div><div class="offer-desc">${md(typeof d.d === 'function' ? d.d(1) : d.d)}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
     }).join('')}</div>
     <div class="upRow">
       <button class="b-blue" id="upBalls">+2 Balls<br>$${upgradePrice('balls')}</button>
@@ -1531,7 +1580,7 @@ function renderRight() {
     const o = S.offers[+el.dataset.o];
     const d = o.kind === 'relic' ? RELICS[o.key] : o.kind === 'cup' ? CUPS[o.key] : PARTS[o.key];
     el.addEventListener('click', () => { hideTip(); buyOffer(+el.dataset.o); });
-    el.addEventListener('mouseenter', () => { const c = elCenter(el); showTipAt(tipHTML(d.n, typeof d.d === 'function' ? d.d(1) : d.d, o.kind === 'relic' ? 'Relic' : RAR[d.rarity][0], o.kind === 'relic' ? '#8a71e1' : RAR[d.rarity][1], o.kind === 'relic' ? '' : 'Drop on a matching part to level it up'), Math.min(c.x, 1100), c.y - 80); });
+    el.addEventListener('mouseenter', () => { const rc = el.getBoundingClientRect(); showTipAt(tipHTML(d.n, typeof d.d === 'function' ? d.d(1) : d.d, o.kind === 'relic' ? 'Relic' : RAR[d.rarity][0], o.kind === 'relic' ? '#8a71e1' : RAR[d.rarity][1], o.kind === 'relic' ? '' : 'Drop on a matching part to level it up'), rc.left + rc.width / 2, rc.top - 8); });
     el.addEventListener('mouseleave', hideTip);
   });
   $('#upBalls').addEventListener('click', () => buyUpgrade('balls'));

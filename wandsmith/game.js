@@ -244,19 +244,48 @@ function drawBg(dt) {
 
 /* ================= STAGE ================= */
 const stageEl = $('#stage');
+const shakeEl = $('#shake');
+const mobileUIEl = $('#mobileUI');
+const battleViewportEl = $('#battleViewport');
+const MOBILE_BATTLE_PADDING = 12;
+const MOBILE_BATTLE_MAX_WIDTH = 736;
+const BATTLE_FRAME = { left: 297, top: 12, width: 678, height: 342 };
 let scale = 1;
+// Below 900px #left/#wandPanel/#right/#modal/#ov/#tip move out of the uniformly-scaled stage into
+// #mobileUI (plain document flow). Battle/fx canvases and cinematics stay put, so BX/BY/BS/toStage
+// and the rest of the stage-space math never need to change.
+const mq = matchMedia('(max-width:899.98px)');
+const MOBILE_REFLOW_IDS = ['left', 'wandPanel', 'right', 'modal', 'ov', 'tip'];
+function applyLayout() {
+  const target = mq.matches ? mobileUIEl : shakeEl;
+  for (const id of MOBILE_REFLOW_IDS) { const el = document.getElementById(id); if (el && el.parentNode !== target) target.appendChild(el); }
+  const cinemaRoot = document.querySelector('.cinema-root');
+  if (cinemaRoot) (mq.matches ? document.body : stageEl).appendChild(cinemaRoot);
+  fit();
+}
+mq.addEventListener('change', applyLayout);
 function fit() {
-  const w = innerWidth, h = innerHeight;
-  scale = Math.min(w / 1280, h / 720);
-  stageEl.style.transform = `translate(${(w - 1280 * scale) / 2}px,${(h - 720 * scale) / 2}px) scale(${scale})`;
+  const w = innerWidth, h = innerHeight, mob = mq.matches;
+  // Crop only the battle frame on phones, keeping the canvas and its effects in stage coordinates.
+  scale = mob
+    ? Math.min(Math.min(w - MOBILE_BATTLE_PADDING * 2, MOBILE_BATTLE_MAX_WIDTH) / BATTLE_FRAME.width, (h - MOBILE_BATTLE_PADDING * 2) / BATTLE_FRAME.height)
+    : Math.min(w / 1280, h / 720);
+  const tx = mob ? (w - BATTLE_FRAME.width * scale) / 2 - BATTLE_FRAME.left * scale : (w - 1280 * scale) / 2;
+  const ty = mob ? MOBILE_BATTLE_PADDING - BATTLE_FRAME.top * scale : (h - 720 * scale) / 2;
+  stageEl.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+  battleViewportEl.style.height = mob ? Math.ceil(BATTLE_FRAME.height * scale + MOBILE_BATTLE_PADDING * 2) + 'px' : '';
   bgCanvas.width = Math.ceil(w / 2); bgCanvas.height = Math.ceil(h / 2);
   if (gl) gl.viewport(0, 0, bgCanvas.width, bgCanvas.height);
 }
 addEventListener('resize', fit);
-addEventListener('scroll', () => scrollTo(0, 0));
-function elCenter(el) { const r = el.getBoundingClientRect(), s = stageEl.getBoundingClientRect(); return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale }; }
+addEventListener('scroll', () => { if (!mq.matches) scrollTo(0, 0); });
+function elCenter(el) {
+  const r = el.getBoundingClientRect();
+  if (mq.matches) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; // reparented: plain viewport px, matches #tip's fixed positioning
+  const s = stageEl.getBoundingClientRect();
+  return { x: (r.left + r.width / 2 - s.left) / scale, y: (r.top + r.height / 2 - s.top) / scale };
+}
 let shakeAmt = 0;
-const shakeEl = $('#shake');
 function shake(a) { if (prefs.shake) shakeAmt = Math.max(shakeAmt, a); }
 function stepShake(dt) {
   if (shakeAmt < 0.2) { if (shakeAmt) { shakeEl.style.transform = ''; shakeAmt = 0; } return; }
@@ -459,7 +488,7 @@ function groupedSlotsHtml(model) {
 function clearWandRelationships() {
   $('#wandPanel').classList.remove('relating');
   $('#wandPanel').querySelectorAll('.rel-focus,.rel-in,.rel-out').forEach(element => element.classList.remove('rel-focus', 'rel-in', 'rel-out'));
-  setText('relationshipText', 'Hover a card or group to trace its relationships');
+  setText('relationshipText', 'Tap or hover a card or group to trace its relationships');
 }
 function highlightWandRelationships(model, node, slot = null) {
   clearWandRelationships();
@@ -727,6 +756,7 @@ function fightBtn() {
   audioInit();
   S.phase = 'fight';
   renderAll();
+  if (mq.matches) battleViewportEl.scrollIntoView({ block: 'start', behavior: 'auto' });
   beginTurn();
 }
 function beginTurn() {
@@ -1070,7 +1100,7 @@ function clickSlot(where, i) {
 }
 let hintTimer = null;
 function flashHint(text) { const el = $('#wandHint'); if (!el) return; el.textContent = text; el.style.color = '#ffd27a'; clearTimeout(hintTimer); hintTimer = setTimeout(() => { el.style.color = ''; el.textContent = defaultHint(); }, 1800); }
-const defaultHint = () => (canEdit() ? 'Click two slots to swap parts · bag holds spares' : 'Wand locked during the fight');
+const defaultHint = () => (canEdit() ? 'Tap two slots to swap parts · bag holds spares' : 'Wand locked during the fight');
 function nextFight() { if (S.phase !== 'shop') return; SFX.button(); goToFight(); }
 
 /* ================= CINEMATICS ================= */
@@ -1078,8 +1108,9 @@ async function playCine(key) {
   if (typeof Cinema === 'undefined') return;
   const prev = S.phase;
   S.phase = 'cine';
+  document.body.dataset.cine = '1';
   hideTip();
-  try { await Cinema.play(key); } finally { S.phase = prev === 'cine' ? 'title' : prev; }
+  try { await Cinema.play(key); } finally { S.phase = prev === 'cine' ? 'title' : prev; delete document.body.dataset.cine; }
 }
 if (typeof Cinema !== 'undefined') Cinema.sfx = name => {
   const map = { talk: SFX.talk, door: () => { noise(0.2, 0.4, 300, { type: 'lowpass' }); osc(110, 0.15, 'square', 0.1); }, smash: () => { noise(0.35, 0.4, 2500); osc(180, 0.2, 'square', 0.08, { slide: 60 }); }, boom: SFX.boom, coin: SFX.coin, step: () => noise(0.05, 0.15, 400), sting: SFX.phase, cheer: SFX.win };
@@ -1203,14 +1234,17 @@ function renderCharms() {
   let html = '';
   for (let i = 0; i < S.charmSlots; i++) {
     const k = S.charms[i];
-    html += k ? `<div class="charm full ${charmsSilenced() ? 'muted' : ''}" data-i="${i}" style="--cc:${CHARMS[k].col}"><canvas width="16" height="16" data-charm="${k}"></canvas><button class="b-red sell" data-sell="${i}">$${charmOn('scrapper') && k !== 'scrapper' ? CHARMS[k].price : Math.floor(CHARMS[k].price / 2)}</button></div>` : '<div class="charm"></div>';
+    html += k ? `<div class="charm full ${charmsSilenced() ? 'muted' : ''}" data-i="${i}" tabindex="0" aria-label="${CHARMS[k].n}" style="--cc:${CHARMS[k].col}"><canvas width="16" height="16" data-charm="${k}"></canvas><button class="b-red sell" data-sell="${i}">$${charmOn('scrapper') && k !== 'scrapper' ? CHARMS[k].price : Math.floor(CHARMS[k].price / 2)}</button></div>` : '<div class="charm"></div>';
   }
   const el = $('#charms'); el.innerHTML = html;
   paintIcons(el);
   el.querySelectorAll('.charm.full').forEach(r => {
     const k = S.charms[+r.dataset.i];
-    r.addEventListener('mouseenter', () => { const c = elCenter(r); showTipAt(tipHTML(CHARMS[k].n, CHARMS[k].d, RARITY[CHARMS[k].rarity][0] + ' charm', RARITY[CHARMS[k].rarity][1], charmsSilenced() ? 'Silenced by Velvet' : S.phase === 'shop' ? 'Hover and click $ to sell' : ''), Math.min(c.x, 1140), c.y + 32, true); });
+    const showCharmTip = () => { const c = elCenter(r); showTipAt(tipHTML(CHARMS[k].n, CHARMS[k].d, RARITY[CHARMS[k].rarity][0] + ' charm', RARITY[CHARMS[k].rarity][1], charmsSilenced() ? 'Silenced by Velvet' : S.phase === 'shop' ? 'Tap $ to sell' : ''), Math.min(c.x, 1140), c.y + 32, true); };
+    r.addEventListener('mouseenter', showCharmTip);
+    r.addEventListener('focus', showCharmTip);
     r.addEventListener('mouseleave', hideTip);
+    r.addEventListener('blur', hideTip);
   });
   el.querySelectorAll('[data-sell]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); if (S.phase === 'shop') sellCharm(+b.dataset.sell); }));
 }
@@ -1262,8 +1296,11 @@ function renderWand() {
       el.addEventListener('keydown', event => { if (event.target === el && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); clickSlot(where, i); } });
       const p = where === 'wand' ? S.wand[i] : S.bag[i];
       if (p) {
-        el.addEventListener('mouseenter', () => { const c = elCenter(el); showTipAt(partTip(p), c.x, c.y - 40); });
+        const showPartTip = () => { const c = elCenter(el); showTipAt(partTip(p), c.x, c.y - 40); };
+        el.addEventListener('mouseenter', showPartTip);
+        el.addEventListener('focus', showPartTip);
         el.addEventListener('mouseleave', hideTip);
+        el.addEventListener('blur', hideTip);
       }
     });
     root.querySelectorAll('[data-sellp]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); const [w, i] = b.dataset.sellp.split(':'); if (S.phase === 'shop') sellPart(w, +i); }));
@@ -1309,7 +1346,7 @@ function renderRight() {
     const f = S.fight;
     const foes = f ? f.foes.map(o => `<div>${o.name}${o.boss ? ' <span class="c-pink">BOSS</span>' : ''} · ${fmt(o.maxHp)} hp</div>`).join('') : '';
     body.innerHTML = `<div class="fightBox">
-      ${S.phase === 'ready' ? `<button class="b-pink bigBtn pulse" id="fightBtn">FIGHT!</button><div class="feed">${f.turns} turns to win · the wand fires every turn<br><span class="lbl">Space to start · you can still rearrange parts</span></div>` : `<div class="phaseLbl t c-gold">${S.phase === 'fight' ? 'CASTING' : 'DONE'}</div>`}
+      ${S.phase === 'ready' ? `<button class="b-pink bigBtn pulse" id="fightBtn">FIGHT!</button><div class="feed">${f.turns} turns to win · the wand fires every turn<br><span class="lbl">Tap FIGHT (or press Space) to start · you can still rearrange parts</span></div>` : `<div class="phaseLbl t c-gold">${S.phase === 'fight' ? 'CASTING' : 'DONE'}</div>`}
       <div class="feed">${foes}</div>
       <div class="log" id="fightLog">${S.log.map(l => `<div>${l}</div>`).join('')}</div></div>`;
     const fb = $('#fightBtn'); if (fb) fb.addEventListener('click', fightBtn);
@@ -1324,24 +1361,28 @@ function renderRight() {
       const rc = o.kind === 'frame' ? '#ffcf4a' : RARITY[d.rarity][1];
       const owned = o.kind === 'part' ? ownedParts().find(p => p.k === o.key && p.lvl < MAX_LVL) : null;
       const icon = o.kind === 'frame' ? `<canvas class="wide" width="40" height="12" data-frame="${o.key}"></canvas>` : `<canvas width="16" height="16" data-${o.kind}="${o.key}"></canvas>`;
-      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.gold < o.price ? 'poor' : ''}" data-o="${i}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind === 'part' ? KIND_LABEL[d.kind] : o.kind.toUpperCase()}</div>${owned ? `<div class="olv">Lv${owned.lvl}→${owned.lvl + 1}</div>` : ''}${icon}<div class="oname">${d.n}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
+      const subNote = o.kind === 'frame' ? ' Replaces your wand body. Parts are kept.' : '';
+      return `<div class="offer ${o.sold ? 'sold' : ''} ${S.gold < o.price ? 'poor' : ''}" data-o="${i}" tabindex="0" aria-label="${d.n}" style="--rc:${rc};animation-delay:${i * 0.06}s"><div class="okind">${o.kind === 'part' ? KIND_LABEL[d.kind] : o.kind.toUpperCase()}</div>${owned ? `<div class="olv">Lv${owned.lvl}→${owned.lvl + 1}</div>` : ''}${icon}<div class="oname">${d.n}</div><div class="odesc">${md(d.d)}${subNote}</div><div class="oprice">${o.sold ? 'SOLD' : '$' + o.price}</div></div>`;
     }).join('')}</div>
     <div class="upRow">
       <button class="b-blue" id="slotBtn" ${slotCount() >= MAX_SLOTS || S.gold < S.slotPrice ? 'disabled' : ''}>+1 Wand slot<br>${slotCount() >= MAX_SLOTS ? 'MAX' : '$' + S.slotPrice}</button>
       <button class="b-red" id="healBtn" ${S.hearts >= maxHearts() || S.gold < HEAL_PRICE ? 'disabled' : ''}>Bandage ♥<br>$${HEAL_PRICE}</button>
     </div>
-    <div class="hint">Buying a part you own levels it up. Hover parts and charms to sell.</div>
+    <div class="hint">Buying a part you own levels it up. Tap parts and charms to sell.</div>
     <div class="shopBtns"><button class="b-green" id="rerollBtn" ${S.gold < S.rerollCost ? 'disabled' : ''}>Reroll<br>$${S.rerollCost}</button><button class="b-pink pulse" id="nextBtn">Next<br>${nextBoss ? 'Boss' : 'Fight'}</button></div>`;
   paintIcons(body);
   body.querySelectorAll('.offer').forEach(el => {
     const o = S.offers[+el.dataset.o], d = offerDef(o);
     el.addEventListener('click', () => { hideTip(); buyOffer(+el.dataset.o); });
-    el.addEventListener('mouseenter', () => {
+    const showOfferTip = () => {
       const c = elCenter(el);
       const badge = o.kind === 'frame' ? 'Wand body' : `${RARITY[d.rarity][0]} ${o.kind === 'part' ? KIND_LABEL[d.kind].toLowerCase() : 'charm'}`;
       showTipAt(tipHTML(d.n, d.d, badge, o.kind === 'frame' ? '#d99a22' : RARITY[d.rarity][1], o.kind === 'frame' ? 'Replaces your wand body. Parts are kept.' : ''), Math.min(c.x, 1100), c.y - 80);
-    });
+    };
+    el.addEventListener('mouseenter', showOfferTip);
+    el.addEventListener('focus', showOfferTip);
     el.addEventListener('mouseleave', hideTip);
+    el.addEventListener('blur', hideTip);
   });
   $('#slotBtn').addEventListener('click', buySlot);
   $('#healBtn').addEventListener('click', buyHeal);
@@ -1455,7 +1496,7 @@ function frame(now) {
   musicTick();
   requestAnimationFrame(frame);
 }
-fit();
+applyLayout();
 renderSpeed();
 if (!restoreRun()) showTitle();
 requestAnimationFrame(frame);

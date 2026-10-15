@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>DEEP CAST</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap">
@@ -11,9 +11,11 @@
 <body data-phase="title">
 <canvas id="bg"></canvas>
 <div id="stage"><div id="shake">
+  <div id="oceanWrap"><div id="oceanInner">
   <div id="oceanFrame"></div>
   <canvas id="ocean" width="224" height="230"></canvas>
   <canvas id="fx" width="1280" height="720"></canvas>
+  </div></div>
 
   <div id="left" class="panel">
     <div id="dayBox">
@@ -54,11 +56,12 @@
     <div id="rightBody"></div>
   </div>
 
-  <div id="ov"></div>
-  <div id="banner"></div>
-  <div id="modal"></div>
-  <div id="tip"></div>
-</div></div>
+</div>
+<div id="ov"></div>
+<div id="banner"></div>
+<div id="modal"></div>
+<div id="tip"></div>
+</div>
 <div id="crt"></div>
 <script src="data.js"></script>
 <script src="sprites.js"></script>

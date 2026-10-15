@@ -39,6 +39,25 @@ const Cinema = (function () {
 .cinema-line{font-size:28px;color:#fff;line-height:1.25;min-height:70px;white-space:pre-wrap;}
 .cinema-skip{position:absolute;right:24px;top:20px;font-family:'Jersey 10',monospace;font-size:22px;background:rgba(10,10,20,0.75);color:#fff;border:2px solid #ffe066;border-radius:20px;padding:6px 18px;cursor:pointer;}
 .cinema-skip:hover{background:rgba(255,224,102,0.25);}
+@media(max-width:899.98px){
+  .cinema-root{position:fixed;inset:0;width:100%;height:100vh;height:100dvh;background:#000}
+  .cinema-canvas{width:100%;height:100%;object-fit:contain}
+  .cinema-title{padding:16px}
+  .cinema-title-main{font-size:clamp(36px,10vw,72px);letter-spacing:2px;overflow-wrap:anywhere}
+  .cinema-title-sub{font-size:20px}
+  .cinema-title.cinema-caption{padding-top:calc(72px + env(safe-area-inset-top))}
+  .cinema-title.cinema-caption .cinema-title-sub{font-size:20px}
+  .cinema-dialogue{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));padding:12px;gap:10px;max-height:55dvh;overflow:auto}
+  .cinema-portrait{width:56px;height:56px}
+  .cinema-dtext{min-width:0;padding-top:0}
+  .cinema-name{font-size:20px}
+  .cinema-line{font-size:20px;min-height:0}
+  .cinema-skip{top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));min-width:44px;min-height:44px;font-size:18px}
+}
+@media(max-width:899.98px) and (max-height:450px){
+  .cinema-portrait{width:44px;height:44px}
+  .cinema-line{font-size:18px}
+}
 `;
 
   // ---- tiny colour helpers for shaded custom props (match Art's flat outline style) ----
@@ -98,7 +117,7 @@ const Cinema = (function () {
     root.addEventListener('click', onRootClick);
     document.addEventListener('keydown', onKey);
 
-    const stage = document.getElementById('stage') || document.body;
+    const stage = matchMedia('(max-width:899.98px)').matches ? document.body : document.getElementById('stage') || document.body;
     stage.appendChild(root);
 
     world = {
