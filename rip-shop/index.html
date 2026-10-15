@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RIP SHOP</title>
+<meta name="description" content="RIP SHOP — a late-night trading card counter. Rip packs, build a collection, arrange your display shelf for passive income.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark">RIP SHOP</span>
+      <span class="brand-tag">open late &middot; cards never sleep</span>
+    </div>
+    <div id="statline">
+      <div class="stat"><span class="stat-label">Cash</span><span id="cash" class="stat-value">$24</span></div>
+      <div class="stat"><span class="stat-label">Income</span><span id="incomeRate" class="stat-value">$0.00/s</span></div>
+      <div class="stat"><span class="stat-label">Collection</span><span id="collectionCount" class="stat-value">1/24</span></div>
+      <div class="stat"><span class="stat-label">Opened</span><span id="packsOpened" class="stat-value">0</span></div>
+      <div class="stat"><span class="stat-label">Queue</span><span id="queueCount" class="stat-value">0</span></div>
+    </div>
+    <div class="topbar-right">
+      <span id="saveStatus" data-save-error="0">Saved</span>
+      <button type="button" data-action="settings" class="icon-btn" aria-label="Settings">Settings</button>
+      <button type="button" data-action="help" class="icon-btn" aria-label="How to play">Help</button>
+    </div>
+  </header>
+
+  <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+
+  <nav id="tabNav" role="tablist" aria-label="Sections">
+    <button type="button" data-action="tab" data-tab="shop" role="tab" aria-selected="true" class="is-active">Shop</button>
+    <button type="button" data-action="tab" data-tab="collection" role="tab" aria-selected="false">Collection</button>
+  </nav>
+
+  <main id="main">
+    <section id="packStage" class="panel" aria-label="Pack opening stage"></section>
+    <section id="shelfSection" class="panel" aria-label="Display shelf"></section>
+    <section id="tabBody" class="panel" aria-label="Shop and collection"></section>
+  </main>
+
+  <div id="modalLayer"></div>
+  <div id="offlineOverlay"></div>
+  <div id="toastHost" aria-live="polite"></div>
+</div>
+<script type="module" src="./game.mjs"></script>
+</body>
+</html>
