@@ -62,6 +62,7 @@ const S = {
   relics: [], relicSlots: 5, slots: [], cups: [], balls: [], boss: null, held: null, offers: [], bestBall: 0,
   simTime: 0, launcher: { cool: 0, flash: 0, power: 0 }, upgrades: { balls: 0, value: 0 }, interestCap: 5,
   stats: { balls: 0, caught: 0, bestRound: 0 }, world: { g: 1050, wind: 0, drag: 0, rest: 1 }, rerollCost: 2,
+  trace: null, traceOn: false, traceReturn: null,
 };
 window.__S = S;
 
@@ -393,9 +394,10 @@ function cupMult(i) {
 }
 
 /* ================= BALLS ================= */
-function newBall(x, y, vx, vy, value, from = null) {
-  const b = { id: ++BID, x, y, vx, vy, r: BALL_R, mass: 1, value, hits: 0, mega: false, used: from ? Object.assign({}, from.used) : {}, cd: {}, age: 0, still: 0, recyc: from ? from.recyc : 0, hydra: from ? from.hydra : false, trail: [], dead: false };
+function newBall(x, y, vx, vy, value, from = null, origin = null) {
+  const b = { id: ++BID, x, y, vx, vy, r: BALL_R, mass: 1, value, hits: 0, mega: false, used: from ? Object.assign({}, from.used) : {}, cd: {}, age: 0, still: 0, recyc: from ? from.recyc : 0, hydra: from ? from.hydra : false, trail: [], dead: false, rec: null };
   if (from && from.mega) makeMega(b, 1);
+  if (origin && S.phase === 'drop') traceSpawn(b, origin);
   S.balls.push(b);
   S.stats.balls++;
   return b;
@@ -406,12 +408,60 @@ function makeMega(b, mult) {
 }
 // New balls stop after a minute of sim time so every round is guaranteed to drain; overflow doubles value instead.
 const canSpawn = () => S.balls.length < MAX_BALLS && (S.phase === 'title' || S.simTime < 60);
-function spawnTop(value, from = null) {
+function spawnTop(value, from = null, origin = null) {
   if (!canSpawn()) {
     if (from) { from.value *= 2; popAt(from, 'OVERFLOW X2', '#ff4fd8', 16); }
     return null;
   }
-  return newBall(ARC_CX + (rnd() - 0.5) * 220, TOP_Y, (rnd() - 0.5) * 220, 40 + rnd() * 80, value, from);
+  return newBall(ARC_CX + (rnd() - 0.5) * 220, TOP_Y, (rnd() - 0.5) * 220, 40 + rnd() * 80, value, from, origin);
+}
+
+/* ================= BALL TRACE (recording) =================
+   During a drop every ball keeps a record of how it was spawned, the parts it triggered and a sampled
+   path. Records outlive their balls so a child can be traced back through its parents. When the round
+   ends only the top scorers and their ancestors are kept. */
+const TRACE_TOP = 5, TRACE_SAMPLE_STEPS = 8, TRACE_JUMP = 80;
+/** origin: { kind: 'launch' | 'fountain' | 'splitter' | 'cloner' | 'prism' | 'hydra', parent?: ball id, x?, y? } */
+function traceSpawn(b, origin) {
+  const parent = origin.parent ? S.trace.recs.get(origin.parent) : null;
+  // the parent's triggering event is pushed right after the spawn, so it lands at eventIdx
+  const at = parent ? { pathIdx: parent.path.length, eventIdx: parent.events.length } : {};
+  b.rec = { id: b.id, origin: Object.assign({}, origin, at), v0: b.value, path: [b.x, b.y], events: [], score: 0, ticks: 0 };
+  S.trace.recs.set(b.id, b.rec);
+}
+// teleports (warp, relaunch, refire) show up as a jump between samples and start a new path segment
+function tracePoint(rec, x, y) {
+  const p = rec.path, n = p.length;
+  if (Math.abs(x - p[n - 2]) + Math.abs(y - p[n - 1]) > TRACE_JUMP) p.push(NaN, NaN);
+  p.push(x, y);
+}
+function traceEvent(b, ev) {
+  tracePoint(b.rec, b.x, b.y);
+  recordEvent(b.rec, ev);
+}
+// pi: path length when the event happened, so a timeline row can light up its stretch of the path
+function recordEvent(rec, ev) {
+  ev.pi = rec.path.length;
+  rec.events.push(ev);
+}
+/* Every part trigger goes through here so the trace sees the value before and after, including
+   relic bonuses (compounding, overflow) applied inside the hit. Sensors run every step while a ball
+   overlaps them, so only calls that registered a hit (s.hits moved) are recorded. */
+function triggerPart(b, s, p, sensor) {
+  const before = b.value, slotHits = s.hits, x = b.x, y = b.y, firstKid = BID + 1;
+  if (sensor) onSensor(b, s, p); else onHit(b, s, p);
+  if (!b.rec || s.hits === slotHits) return;
+  tracePoint(b.rec, x, y);
+  recordEvent(b.rec, { kind: 'part', type: p.type, lvl: p.lvl, x: s.x, y: s.y, before, after: b.value, kids: BID >= firstKid ? [firstKid, BID] : null });
+}
+function finalizeTrace() {
+  const T = S.trace;
+  T.top = [...T.recs.values()].filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, TRACE_TOP);
+  const keep = new Map();
+  for (const r of T.top) for (let c = r; c && !keep.has(c.id); c = T.recs.get(c.origin.parent)) keep.set(c.id, c);
+  T.recs = keep;
+  T.sel = 0; T.hover = -1; T.roundScore = S.score;
+  T.view = T.top.length ? buildTraceView(T.top[0]) : null;
 }
 function popAt(b, text, col, size = 16, bg = null) { pop(b.x + (rnd() - 0.5) * 8, b.y - b.r - 10, text, col, size, bg); }
 function countHit(b) {
@@ -457,7 +507,7 @@ function onHit(b, s, p) {
       if (used || t - p.last < 2.5) { addVal(b, 1); break; }
       p.last = t; addVal(b, 1);
       const n = v + (hasR('geyser') ? 2 : 0);
-      for (let i = 0; i < n; i++) { const c = spawnTop(S.startValue); if (c) { c.used = Object.assign({}, b.used); c.used[p.id] = 1; } }
+      for (let i = 0; i < n; i++) { const c = spawnTop(S.startValue, null, { kind: 'fountain', parent: b.id, x: b.x, y: b.y }); if (c) { c.used = Object.assign({}, b.used); c.used[p.id] = 1; } }
       pop(s.x, s.y - 26, `+${n} BALLS`, '#fff', 18, '#1aa3d6'); SFX.fountain(); burst(s.x, s.y, 16, ['#5fd3ff', '#fff'], 4);
       break;
     }
@@ -467,7 +517,7 @@ function onHit(b, s, p) {
       const n = v + relicN('mitosis');
       for (let i = 0; i < n; i++) {
         if (!canSpawn()) { b.value *= 2; popAt(b, 'OVERFLOW X2', '#ff4fd8'); continue; }
-        const c = newBall(b.x, b.y, -b.vx + (rnd() - 0.5) * 260, b.vy * 0.6 - 60 - rnd() * 60, b.value, b);
+        const c = newBall(b.x, b.y, -b.vx + (rnd() - 0.5) * 260, b.vy * 0.6 - 60 - rnd() * 60, b.value, b, { kind: 'splitter', parent: b.id, x: b.x, y: b.y });
         c.hits = b.hits;
       }
       b.vx += (rnd() - 0.5) * 200;
@@ -478,7 +528,7 @@ function onHit(b, s, p) {
       if (used) { addVal(b, 1); break; }
       b.used[p.id] = 1; addVal(b, 1);
       const n = v * (hasR('cloneArmy') ? 2 : 1);
-      for (let i = 0; i < n; i++) { const c = spawnTop(b.value, b); if (c) { c.hits = b.hits; burst(c.x, c.y, 10, ['#a98cff', '#fff'], 3); } }
+      for (let i = 0; i < n; i++) { const c = spawnTop(b.value, b, { kind: 'cloner', parent: b.id, x: b.x, y: b.y }); if (c) { c.hits = b.hits; burst(c.x, c.y, 10, ['#a98cff', '#fff'], 3); } }
       popAt(b, n > 1 ? `CLONE ×${n}!` : 'CLONE!', '#fff', 18, '#7a5cd6'); SFX.clone(); burst(s.x, s.y, 10, ['#a98cff', '#fff'], 3);
       break;
     }
@@ -486,7 +536,7 @@ function onHit(b, s, p) {
       const cdTime = hasR('demolition') ? 1 : 3;
       if (t - p.last < cdTime) { addVal(b, 1); break; }
       p.last = t;
-      explode(s.x, s.y, v + (hasR('demolition') ? 100 : 0));
+      explode(s.x, s.y, v + (hasR('demolition') ? 100 : 0), b);
       break;
     }
     case 'mega':
@@ -527,7 +577,7 @@ function onSensor(b, s, p) {
       mulVal(b, m);
       for (let i = 0; i < 2; i++) {
         if (!canSpawn()) { b.value *= 2; continue; }
-        const c = newBall(b.x, b.y, b.vx + (i ? 1 : -1) * (160 + rnd() * 120), b.vy * 0.8, b.value, b);
+        const c = newBall(b.x, b.y, b.vx + (i ? 1 : -1) * (160 + rnd() * 120), b.vy * 0.8, b.value, b, { kind: 'prism', parent: b.id, x: b.x, y: b.y });
         c.hits = b.hits;
       }
       popAt(b, `PRISM X${+m.toFixed(2)} ×3`, '#fff', 20, '#2ab8c8'); SFX.split(); SFX.mult(2);
@@ -536,7 +586,8 @@ function onSensor(b, s, p) {
     }
   }
 }
-function explode(x, y, add) {
+/* trigger is the ball that set the bomb off: its own gain is recorded with the bomb hit itself */
+function explode(x, y, add, trigger) {
   const R = 130;
   let n = 0;
   for (const o of S.balls) {
@@ -544,7 +595,9 @@ function explode(x, y, add) {
     if (d > R || d === 0) continue;
     const f = (1 - d / R) * 900 / o.mass;
     o.vx += (dx / d) * f; o.vy += (dy / d) * f - 150;
+    const before = o.value;
     addVal(o, add); n++;
+    if (o.rec && o !== trigger) traceEvent(o, { kind: 'blast', x, y, before, after: o.value });
   }
   pop(x, y - 24, `BOOM +${add}${n > 1 ? ' ×' + n : ''}`, '#fff', 22, '#c8203a');
   burst(x, y, 40, ['#ff4a1c', '#ffd23a', '#fff6c8', '#e5304a'], 7);
@@ -587,12 +640,13 @@ function physStep(h) {
     if (S.magnetX !== null && hasR('magnet') && b.y > 420) b.vx += Math.sign(S.magnetX - b.x) * 160 * h;
     if (holeOn) {
       const dx = CX - b.x, dy = 340 - b.y, d = Math.hypot(dx, dy);
-      if (d < 20) { b.dead = true; burst(b.x, b.y, 10, ['#b49aff', '#3a2a6a', '#fff'], 3); SFX.eaten(); if (fewBalls()) pop(b.x, b.y - 16, 'EATEN', '#b49aff'); continue; }
+      if (d < 20) { b.dead = true; if (b.rec) traceEvent(b, { kind: 'eaten', x: b.x, y: b.y }); burst(b.x, b.y, 10, ['#b49aff', '#3a2a6a', '#fff'], 3); SFX.eaten(); if (fewBalls()) pop(b.x, b.y - 16, 'EATEN', '#b49aff'); continue; }
       if (d < 120) { const f = 900 * (1 - d / 120); b.vx += (dx / d) * f * h; b.vy += (dy / d) * f * h; }
     }
     const sp2 = b.vx * b.vx + b.vy * b.vy;
     if (sp2 > 1600 * 1600) { const k = 1600 / Math.sqrt(sp2); b.vx *= k; b.vy *= k; }
     b.x += b.vx * h; b.y += b.vy * h;
+    if (b.rec && ++b.rec.ticks % TRACE_SAMPLE_STEPS === 0) tracePoint(b.rec, b.x, b.y);
     // walls
     if (railCollide(b)) continue;
     if (b.x < BX0 + 20 || b.x > BX1 - 20) for (const n of WALL_NAILS) collideCircle(b, n.x, n.y, WALL_NAIL_R, 0.5);
@@ -604,14 +658,14 @@ function physStep(h) {
         const d = PARTS[p.type];
         if (d.kind === 'sensor') {
           const dx = b.x - s.x, dy = b.y - s.y;
-          if (dx * dx + dy * dy < (d.r + b.r * 0.5) ** 2) onSensor(b, s, p);
+          if (dx * dx + dy * dy < (d.r + b.r * 0.5) ** 2) triggerPart(b, s, p, true);
         } else if (d.kind === 'spinner') {
           const c = Math.cos(p.ang) * d.len, sn = Math.sin(p.ang) * d.len;
           const hit = collideSeg(b, s.x - c, s.y - sn, s.x + c, s.y + sn, 0.7);
           if (hit) {
             const rx = hit.cx - s.x, ry = hit.cy - s.y;
             b.vx += -3.2 * ry * 1.6; b.vy += 3.2 * rx * 1.6;
-            if (S.simTime - (b.cd[p.id] || -9) > 0.12) { b.cd[p.id] = S.simTime; onHit(b, s, p); }
+            if (S.simTime - (b.cd[p.id] || -9) > 0.12) { b.cd[p.id] = S.simTime; triggerPart(b, s, p, false); }
           }
           collideCircle(b, s.x, s.y, d.r, 0.5);
         } else {
@@ -619,7 +673,7 @@ function physStep(h) {
           const hit = collideCircle(b, s.x, s.y, d.r, e);
           if (hit) {
             if (d.kick) { const vn = b.vx * hit.nx + b.vy * hit.ny; if (vn < d.kick) { b.vx += hit.nx * (d.kick - vn); b.vy += hit.ny * (d.kick - vn); } }
-            if (S.simTime - (b.cd[p.id] || -9) > 0.1) { b.cd[p.id] = S.simTime; onHit(b, s, p); }
+            if (S.simTime - (b.cd[p.id] || -9) > 0.1) { b.cd[p.id] = S.simTime; triggerPart(b, s, p, false); }
           }
         }
         if (b.dead) break;
@@ -644,7 +698,12 @@ function physStep(h) {
   }
   if (S.balls.some(b => b.dead)) S.balls = S.balls.filter(b => !b.dead);
 }
-function wallHit(b) { if (hasR('ricochet') && S.simTime - (b.cd.wall || -9) > 0.15) { b.cd.wall = S.simTime; addVal(b, 5); } }
+function wallHit(b) {
+  if (!hasR('ricochet') || S.simTime - (b.cd.wall || -9) <= 0.15) return;
+  const before = b.value;
+  b.cd.wall = S.simTime; addVal(b, 5);
+  if (b.rec) traceEvent(b, { kind: 'wall', x: b.x, y: b.y, before, after: b.value });
+}
 function catchBall(b, i) {
   if (b.dead) return;
   const cup = S.cups[i], C = CUPS[cup.type];
@@ -656,16 +715,22 @@ function catchBall(b, i) {
   S.stats.caught++;
   S.caughtRound++;
   SFX.catch(m);
+  if (b.rec) { b.rec.score += pts; traceEvent(b, { kind: 'catch', cup: i, type: cup.type, lvl: cup.lvl, x: b.x, y: b.y, mult: m, value: b.value, pts, timeout: b.age > 30 }); }
   if (hasR('piggyBank') && S.caughtRound % 10 === 0 && S.gooseEarned < 10) { S.gooseEarned++; S.money++; pop(b.x, CUP_TOP - 30, '$1', '#f3b958', 18); SFX.coin(); }
   if (cup.type === 'piggy' && cup.earned < 6 * cup.lvl) { cup.earned++; S.money++; pop(b.x, CUP_TOP - 46, '$1', '#f3b958', 18); SFX.coin(); }
   if (cup.type === 'recycler' && b.recyc < 2) {
     const rm = xm(1 + cup.lvl);
+    const before = b.value;
     b.recyc++; mulVal(b, rm);
+    if (b.rec) traceEvent(b, { kind: 'recycle', cup: i, x: b.x, y: b.y, before, after: b.value });
     relaunch(b); pop(BX0 + (i + 0.5) * CUPW, CUP_TOP - 46, `RECYCLE X${+rm.toFixed(2)}`, '#fff', 16, '#2f9a72'); return;
   }
   if (cup.type === 'hydra' && !b.hydra) {
+    const x = b.x, y = b.y, firstKid = BID + 1;
     b.hydra = true; relaunch(b);
-    for (let k = 0; k < cup.lvl; k++) { const c = spawnTop(b.value, b); if (c) c.hydra = true; }
+    for (let k = 0; k < cup.lvl; k++) { const c = spawnTop(b.value, b, { kind: 'hydra', parent: b.id, x, y }); if (c) c.hydra = true; }
+    // pushed after the spawn (and without a path point, the ball is already back in the lane) so children find it at their eventIdx
+    if (b.rec) recordEvent(b.rec, { kind: 'hydra', cup: i, x, y, kids: BID >= firstKid ? [firstKid, BID] : null });
     pop(BX0 + (i + 0.5) * CUPW, CUP_TOP - 46, `HYDRA ×${cup.lvl + 1}`, '#fff', 16, '#8a3ad6'); return;
   }
   b.dead = true;
@@ -742,8 +807,12 @@ function fire() {
   const L = S.launcher;
   S.ballsLeft--; S.launched++;
   const p = shotPower();
-  const b = newBall(LANE_X, LAUNCH_Y, 0, -p, S.startValue + (hasR('heavy') ? 5 : 0));
-  if (hasR('megaEvery') && S.launched % 6 === 0) { makeMega(b, xm(5)); popAt(b, 'MEGA!', '#fff', 20, '#d63cb5'); SFX.mega(); }
+  const b = newBall(LANE_X, LAUNCH_Y, 0, -p, S.startValue + (hasR('heavy') ? 5 : 0), null, { kind: 'launch', shot: S.launched });
+  if (hasR('megaEvery') && S.launched % 6 === 0) {
+    const before = b.value;
+    makeMega(b, xm(5)); popAt(b, 'MEGA!', '#fff', 20, '#d63cb5'); SFX.mega();
+    if (b.rec) recordEvent(b.rec, { kind: 'loader', x: b.x, y: b.y, before, after: b.value });
+  }
   L.flash = 1; L.power = p / Math.sqrt(S.world.g / 1050); SFX.launch();
   burst(LANE_X, LAUNCH_Y + 8, 8, ['#fff', '#ffd23a'], 3, { up: 3 });
 }
@@ -764,6 +833,7 @@ function newRun() {
   Object.assign(S, {
     round: 1, money: 6, relics: [], ballsPerRound: 10, startValue: 1, interestCap: 5, bestBall: 0, balls: [], held: null,
     upgrades: { balls: 0, value: 0 }, stats: { balls: 0, caught: 0, bestRound: 0 }, won: false, rerollBase: 2, heatData: false,
+    trace: null, traceOn: false, traceReturn: null,
   });
   S.slots = buildSlots(); S.slots.forEach(s => (s.part = newPart('peg')));
   S.cups = BASE_CUP_MULTS.map(() => ({ type: 'cup', lvl: 1, flash: 0, count: 0, earned: 0 }));
@@ -794,6 +864,8 @@ function drop() {
   S.phase = 'drop'; S.launcher.cool = 0.15;
   // heatmap data covers exactly one drop: cleared here, shown afterwards until the next drop
   S.slots.forEach(s => (s.hits = 0)); S.cups.forEach(c => (c.count = 0)); S.heatData = true;
+  // the trace covers one drop as well: kept after the round until the next drop
+  S.trace = { recs: new Map(), top: [], sel: 0, hover: -1, view: null }; S.traceOn = false;
   renderRight();
   scrollToMobileSection('#boardGroup');
 }
@@ -806,6 +878,7 @@ function checkRoundEnd(dt) {
 }
 function finishRound() {
   S.shownScore = S.score;
+  finalizeTrace();
   S.stats.bestRound = Math.max(S.stats.bestRound, S.score);
   if (S.score > best.roundScore) best.roundScore = S.score;
   if (S.bestBall > best.ball) best.ball = S.bestBall;
@@ -1011,6 +1084,7 @@ addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (S.held) cancelHeld(); else if (modalEl.classList.contains('show') && S.phase !== 'title' && S.phase !== 'over') hideModal(); }
   if ((e.key === ' ' || e.key === 'Enter') && S.phase === 'ready' && !modalEl.classList.contains('show')) { e.preventDefault(); drop(); }
   if ((e.key === 'h' || e.key === 'H') && !modalEl.classList.contains('show')) toggleHeat();
+  if ((e.key === 't' || e.key === 'T') && !modalEl.classList.contains('show')) toggleTrace();
 });
 
 /* ================= TOOLTIP ================= */
@@ -1349,11 +1423,171 @@ function ensureStatic() {
 }
 /* ================= HEATMAP (post-drop overlay) ================= */
 const heatVisible = () => S.heatOn && S.heatData && S.phase !== 'drop' && S.phase !== 'title';
-function heatBtnHtml() { return S.heatData ? `<button class="b-gray heatBtn ${S.heatOn ? 'on' : ''}" id="heatBtn">Heatmap: ${S.heatOn ? 'ON' : 'OFF'} <span class="lbl">(H)</span></button>` : ''; }
-function bindHeatBtn() { const hb = $('#heatBtn'); if (hb) hb.addEventListener('click', toggleHeat); }
+const hasTrace = () => !!(S.trace && S.trace.top.length);
+// the trace view replaces the right panel, so it steps aside while a part is held
+const traceVisible = () => S.traceOn && hasTrace() && S.phase !== 'drop' && S.phase !== 'title' && !S.held;
+function viewBtnsHtml() {
+  const heat = S.heatData ? `<button class="b-gray heatBtn ${S.heatOn ? 'on' : ''}" id="heatBtn">Heatmap: ${S.heatOn ? 'ON' : 'OFF'} <span class="lbl">(H)</span></button>` : '';
+  const trace = hasTrace() ? `<button class="b-gray heatBtn" id="traceBtn">Top balls <span class="lbl">(T)</span></button>` : '';
+  return heat || trace ? `<div class="viewBtns">${heat}${trace}</div>` : '';
+}
+function bindViewBtns() {
+  const hb = $('#heatBtn'); if (hb) hb.addEventListener('click', toggleHeat);
+  const tb = $('#traceBtn'); if (tb) tb.addEventListener('click', toggleTrace);
+}
 function toggleHeat() {
   if (!S.heatData || S.phase === 'drop' || S.phase === 'title') return;
-  S.heatOn = !S.heatOn; SFX.button(); renderRight();
+  S.heatOn = !S.heatOn; if (S.heatOn) S.traceOn = false;
+  SFX.button(); renderRight();
+}
+
+/* ================= BALL TRACE (post-drop view) ================= */
+const TRACE_SEL_COL = '#ffd23a';
+const TRACE_GEN_COLS = ['#7fd0ff', '#b49aff', '#4bc292', '#ff9a00', '#5fd3ff'];
+// plain additive hits: consecutive runs collapse into one row so the list stays readable
+const TRACE_GROUPED = new Set(['peg', 'silver', 'gold', 'spinner', 'bumper']);
+const SPAWN_VERB = { splitter: 'split from', prism: 'prism copy of', cloner: 'clone of', fountain: 'fountain ball from', hydra: 'hydra copy of' };
+const traceGenCol = (g, last) => (g === last ? TRACE_SEL_COL : TRACE_GEN_COLS[g % TRACE_GEN_COLS.length]);
+const traceGroupable = ev => ev.kind === 'wall' || (ev.kind === 'part' && TRACE_GROUPED.has(ev.type) && !ev.kids);
+function toggleTrace() {
+  if (!hasTrace() || S.phase === 'drop' || S.phase === 'title' || S.held) return;
+  S.traceOn = !S.traceOn; if (S.traceOn) S.heatOn = false;
+  SFX.button(); renderRight();
+  if (!S.traceOn && S.traceReturn !== null) { const won = S.traceReturn; S.traceReturn = null; showGameOver(won); }
+}
+function selectTrace(i) {
+  const T = S.trace;
+  T.sel = i; T.hover = -1; T.view = buildTraceView(T.top[i]);
+  SFX.button(); renderRight();
+}
+/* Chain runs from the launched root down to the selected ball. Each ancestor contributes its events
+   up to and including the one that spawned the next ball in the chain. */
+function buildTraceView(top) {
+  const T = S.trace, chain = [], rows = [];
+  for (let r = top; r; r = T.recs.get(r.origin.parent)) chain.unshift(r);
+  chain.forEach((r, g) => {
+    const next = chain[g + 1], end = next ? Math.min(r.events.length, next.origin.eventIdx + 1) : r.events.length;
+    // each row covers the path from the previous event's point up to its own (last) event
+    let from = 0;
+    for (let k = 0; k < end; k++) {
+      const ev = r.events[k], prev = rows[rows.length - 1];
+      const isSpawn = !!next && k === next.origin.eventIdx;
+      if (!isSpawn && traceGroupable(ev) && prev && prev.gen === g && !prev.spawnsNext && traceGroupable(prev.ev) && prev.ev.kind === ev.kind && prev.ev.type === ev.type) {
+        prev.n++; prev.after = ev.after; prev.pts.push(ev.x, ev.y); prev.to = ev.pi;
+      } else {
+        rows.push({ gen: g, ev, n: 1, before: ev.before, after: ev.after, pts: [ev.x, ev.y], spawnsNext: isSpawn, from, to: ev.pi });
+      }
+      from = ev.pi - 2;
+    }
+  });
+  return { chain, rows };
+}
+function traceRowLabel(row) {
+  const ev = row.ev, times = row.n > 1 ? ` ×${row.n}` : '';
+  switch (ev.kind) {
+    case 'part': return `${PARTS[ev.type].n}${ev.lvl > 1 ? ' Lv' + ev.lvl : ''}${times}`;
+    case 'wall': return `Wall (Ricochet)${times}`;
+    case 'blast': return 'Bomb blast';
+    case 'loader': return 'Mega Loader';
+    case 'catch': return `${CUPS[ev.type].n} (cup ${ev.cup + 1}) X${+ev.mult.toFixed(2)}${ev.timeout ? ' · timeout' : ''}`;
+    case 'recycle': return 'Recycler relaunch';
+    case 'hydra': return 'Hydra relaunch';
+    case 'eaten': return 'Eaten by the void';
+  }
+  return ev.kind;
+}
+function traceRowValue(row) {
+  const ev = row.ev;
+  if (ev.kind === 'catch') return `${fmt(ev.value)} → <span class="c-gold">+${fmt(ev.pts)} pts</span>`;
+  return row.before !== undefined ? `${fmt(row.before)} → ${fmt(row.after)}` : '';
+}
+function traceOriginText(r) {
+  const o = r.origin;
+  return o.kind === 'launch' ? `launched (shot ${o.shot})` : `${SPAWN_VERB[o.kind]} #${o.parent}`;
+}
+function renderTrace(body) {
+  const T = S.trace, { chain, rows } = T.view, last = chain.length - 1, sel = T.top[T.sel];
+  const share = T.roundScore > 0 ? ` · ${((100 * sel.score) / T.roundScore).toFixed(1)}% of round` : '';
+  let list = '';
+  chain.forEach((r, g) => {
+    const col = traceGenCol(g, last), next = chain[g + 1];
+    list += `<div class="trHead" style="--gc:${col}">Ball #${r.id} · ${traceOriginText(r)} · starts at ${fmt(r.v0)}</div>`;
+    rows.forEach((row, i) => {
+      if (row.gen !== g) return;
+      const kids = row.ev.kids ? `spawned #${row.ev.kids[0]}${row.ev.kids[1] > row.ev.kids[0] ? '–#' + row.ev.kids[1] : ''}` : '';
+      const note = row.spawnsNext ? `<div class="trNote" style="color:${traceGenCol(g + 1, last)}">${kids || 'spawned'} · follows #${next.id}</div>` : kids ? `<div class="trNote">${kids}</div>` : '';
+      list += `<div class="trRow${row.spawnsNext ? ' spawn' : ''}" data-r="${i}" style="--gc:${col}"><span class="trN">${i + 1}</span><div><div class="trWhat">${traceRowLabel(row)}</div><div class="trVal">${traceRowValue(row)}</div>${note}</div></div>`;
+    });
+  });
+  body.innerHTML = `<div class="trace">
+    <div class="traceHead"><div class="t traceTitle">TOP BALLS</div><button class="b-gray heatBtn" id="traceClose">Close <span class="lbl">(T)</span></button></div>
+    <div class="trTabs">${T.top.map((r, i) => `<button class="b-gray trTab ${i === T.sel ? 'on' : ''}" data-i="${i}">#${i + 1}<br><span>${fmt(r.score)}</span></button>`).join('')}</div>
+    <div class="trSum">Ball #${sel.id} scored <span class="c-gold">${fmt(sel.score)}</span>${share}<br><span class="lbl">${chain.length > 1 ? `${chain.length} generations, traced back to launch` : 'launched directly'}</span></div>
+    <div class="trList">${list}</div>
+  </div>`;
+  $('#traceClose').addEventListener('click', toggleTrace);
+  body.querySelectorAll('.trTab').forEach(el => el.addEventListener('click', () => selectTrace(+el.dataset.i)));
+  body.querySelectorAll('.trRow').forEach(el => {
+    el.addEventListener('mouseenter', () => { T.hover = +el.dataset.r; });
+    el.addEventListener('mouseleave', () => { T.hover = -1; });
+  });
+}
+// NaN pairs in the path mark teleports: the pen lifts instead of drawing a line across the board
+function strokeTracePath(path, start, end, tailX, tailY) {
+  ctx.beginPath();
+  let pen = false;
+  for (let k = start; k < end; k += 2) {
+    if (Number.isNaN(path[k])) { pen = false; continue; }
+    if (pen) ctx.lineTo(path[k], path[k + 1]); else { ctx.moveTo(path[k], path[k + 1]); pen = true; }
+  }
+  if (tailX !== undefined && pen) ctx.lineTo(tailX, tailY);
+  ctx.stroke();
+}
+function drawTraceBadge(row, i, col, hot) {
+  const x = row.pts[0] + 9, y = row.pts[1] - 9, r = hot ? 12 : 8;
+  if (hot) {
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    for (let k = 0; k < row.pts.length; k += 2) { ctx.beginPath(); ctx.arc(row.pts[k], row.pts[k + 1], 11, 0, Math.PI * 2); ctx.stroke(); }
+  }
+  ctx.fillStyle = hot ? '#fff' : 'rgba(10,16,18,.92)'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = hot ? '#000' : col; ctx.fillText(i + 1, x, y + 1);
+}
+function drawTrace() {
+  const T = S.trace, { chain, rows } = T.view, last = chain.length - 1, sel = T.top[T.sel], hot = rows[T.hover];
+  ctx.fillStyle = 'rgba(4,7,9,.62)'; ctx.fillRect(300, 14, 672, 692);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // while a row is hovered the rest of the path fades so its stretch stands out
+  ctx.globalAlpha = hot ? 0.35 : 1;
+  chain.forEach((r, g) => {
+    const next = chain[g + 1], col = traceGenCol(g, last);
+    ctx.strokeStyle = col; ctx.lineWidth = g === last ? 3 : 2.5;
+    if (next) strokeTracePath(r.path, 0, next.origin.pathIdx, next.origin.x, next.origin.y);
+    else strokeTracePath(r.path, 0, r.path.length);
+    // fountain, cloner and hydra balls appear at the top: dashed jump from the trigger to the spawn point
+    if (next && Math.abs(next.path[0] - next.origin.x) + Math.abs(next.path[1] - next.origin.y) > TRACE_JUMP) {
+      ctx.setLineDash([5, 6]); ctx.strokeStyle = traceGenCol(g + 1, last); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(next.origin.x, next.origin.y); ctx.lineTo(next.path[0], next.path[1]); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(r.path[0], r.path[1], 5, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  if (hot) {
+    const path = chain[hot.gen].path;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 7; ctx.globalAlpha = 0.3; strokeTracePath(path, hot.from, hot.to);
+    ctx.strokeStyle = traceGenCol(hot.gen, last); ctx.lineWidth = 3.5; ctx.globalAlpha = 1; strokeTracePath(path, hot.from, hot.to);
+  }
+  for (const row of rows) {
+    ctx.fillStyle = traceGenCol(row.gen, last);
+    for (let k = 0; k < row.pts.length; k += 2) { ctx.beginPath(); ctx.arc(row.pts[k], row.pts[k + 1], 3.5, 0, Math.PI * 2); ctx.fill(); }
+  }
+  setFont(ctx, '14px "Jersey 10", monospace'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  rows.forEach((row, i) => { if (i !== T.hover) drawTraceBadge(row, i, traceGenCol(row.gen, last), false); });
+  if (hot) drawTraceBadge(hot, T.hover, traceGenCol(hot.gen, last), true);
+  ctx.fillStyle = 'rgba(10,16,18,.9)'; ctx.beginPath(); ctx.roundRect(ARC_CX - 130, 30, 260, 30, 8); ctx.fill();
+  setFont(ctx, '18px "Jersey 10", monospace'); ctx.fillStyle = '#fff';
+  ctx.fillText(`TOP BALL ${T.sel + 1}/${T.top.length} · #${sel.id} · ${fmt(sel.score)} PTS`, ARC_CX, 46);
 }
 let legendGrad = null, meterGrad = null;
 function drawHeatmap() {
@@ -1432,6 +1666,7 @@ function render(rt) {
     if (placing && S.held.kind === 'cup') { const hov = mouse.in && cupAt(mouse.x, mouse.y) === i; ctx.strokeStyle = hov ? '#fff' : `rgba(255,210,58,${0.4 + Math.sin(t * 5) * 0.2})`; ctx.lineWidth = 3; ctx.strokeRect(BX0 + i * CUPW + 4, CUP_TOP + 9, CUPW - 8, BBOT - CUP_TOP - 14); }
   }
   if (heatVisible()) drawHeatmap();
+  if (traceVisible()) drawTrace();
   // balls: one instanced WebGL draw on their own layer, or 2D sprites as a fallback
   if (BallGL) BallGL.draw(S.balls); else for (const b of S.balls) drawBall(ctx, b);
   // launcher
@@ -1541,15 +1776,16 @@ function paintIcons(root) {
 function renderRight() {
   const body = $('#rightBody');
   document.body.dataset.phase = S.phase;
+  if (traceVisible()) { renderTrace(body); return; }
   if (S.phase === 'ready' || S.phase === 'drop' || S.phase === 'cashout' || S.phase === 'over') {
     const ready = S.phase === 'ready';
     body.innerHTML = `<div class="dropBox">
       ${ready ? `<button class="b-blue bigDrop pulse" id="dropBtn">DROP!</button><div class="feed">${S.ballsLeft} balls · random launcher<br><span class="lbl">Space / tap the board</span></div>` : `<div class="chaosLbl">BALLS IN PLAY</div><div class="chaos t" id="chaosNum">0</div>`}
       <div class="feed">${S.boss ? `<span class="c-red">BOSS</span> ${S.boss.a} ${S.boss.n}<br>${S.boss.d}` : `Next boss: round ${Math.ceil(S.round / 3) * 3}`}</div>
       <div class="feed lbl">Balls start at <span class="c-blue">${S.startValue}</span> value</div>
-    ${S.phase !== 'drop' ? heatBtnHtml() : ''}</div>`;
+    ${S.phase !== 'drop' ? viewBtnsHtml() : ''}</div>`;
     const db = $('#dropBtn'); if (db) db.addEventListener('click', drop);
-    bindHeatBtn();
+    bindViewBtns();
     return;
   }
   if (S.phase !== 'shop') { body.innerHTML = ''; return; }
@@ -1562,7 +1798,7 @@ function renderRight() {
       ${fromShop ? `<button class="b-gray" id="cancelBtn">Refund $${S.offers[h.from.shop].price}</button>` : `<button class="b-red" id="sellBtn">${sellValueOf(h) ? 'Sell $' + sellValueOf(h) : 'Discard'}</button>${h.from.reward ? '' : ' <button class="b-gray" id="cancelBtn">Put back</button>'}`}</div>`;
   }
   body.innerHTML = `
-    <div class="shopHead"><div class="shopSign t">SHOP</div>${heatBtnHtml() || '<div class="lbl" style="text-align:right">Buy, then place<br>on the board</div>'}</div>
+    <div class="shopHead"><div class="shopSign t">SHOP</div>${viewBtnsHtml() || '<div class="lbl" style="text-align:right">Buy, then place<br>on the board</div>'}</div>
     <div class="offers">${S.offers.map((o, i) => {
       const d = o.kind === 'relic' ? RELICS[o.key] : o.kind === 'cup' ? CUPS[o.key] : PARTS[o.key];
       const rc = o.kind === 'relic' ? '#8a71e1' : RAR[d.rarity][1];
@@ -1590,7 +1826,7 @@ function renderRight() {
   $('#rerollBtn').addEventListener('click', reroll);
   $('#rerollBtn').disabled = S.money < S.rerollCost || !!S.held;
   $('#nextBtn').addEventListener('click', nextRound);
-  bindHeatBtn();
+  bindViewBtns();
   const sb = $('#sellBtn'); if (sb) sb.addEventListener('click', sellHeld);
   const cb = $('#cancelBtn'); if (cb) cb.addEventListener('click', cancelHeld);
 }
@@ -1618,9 +1854,11 @@ function showGameOver(won) {
       <span>Build</span><b style="font-size:17px">${build}</b>
       <span>All-time best ball</span><b>${fmt(best.ball)}</b>
     </div>
-    <div class="row">${won ? '<button class="b-blue" id="endlessBtn">Endless</button>' : ''}<button class="b-orange" id="newRunBtn">New Run</button><button class="b-gray" id="menuBtn">Main Menu</button></div>
+    <div class="row">${won ? '<button class="b-blue" id="endlessBtn">Endless</button>' : ''}${hasTrace() ? '<button class="b-gray" id="goTraceBtn">Top Balls</button>' : ''}<button class="b-orange" id="newRunBtn">New Run</button><button class="b-gray" id="menuBtn">Main Menu</button></div>
   </div>`);
   if (won) { confetti(200); SFX.win(); $('#endlessBtn').addEventListener('click', () => { hideModal(); goShop(); }); }
+  const gt = $('#goTraceBtn');
+  if (gt) gt.addEventListener('click', () => { hideModal(); S.traceReturn = won; S.traceOn = false; toggleTrace(); });
   $('#newRunBtn').addEventListener('click', () => { SFX.button(); newRun(); });
   $('#menuBtn').addEventListener('click', () => { SFX.button(); showTitle(); });
 }

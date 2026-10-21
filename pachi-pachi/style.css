@@ -95,6 +95,26 @@ body[data-phase=shop] .relic.full:hover .sell,body[data-phase=shop] .relic.full:
 .hint{font-size:13px;color:#9fb0b3;text-align:center;line-height:1.2}
 .heatBtn{font-size:15px;padding:6px 10px;white-space:nowrap}
 .heatBtn.on{background:linear-gradient(90deg,#4678ff,#3cd2ff,#ffee6e,#ff9620,#ff3728);color:#14100c;text-shadow:none}
+.viewBtns{display:flex;flex-direction:column;gap:5px}
+
+/* ball trace panel (replaces the right panel body while open) */
+.trace{flex:1;display:flex;flex-direction:column;gap:6px;min-height:0}
+.traceHead{display:flex;align-items:center;justify-content:space-between}
+.traceTitle{font-size:26px;color:var(--gold)}
+.trTabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.trTab{font-size:14px;padding:4px 2px;line-height:1.05}
+.trTab span{font-size:12px;color:#ffe0b0}
+.trTab.on{box-shadow:0 0 0 2px #ffd23a,0 3px 0 rgba(0,0,0,.35);background:#7a6a2e}
+.trSum{font-size:16px;line-height:1.2;background:var(--inset);border-radius:8px;padding:6px 8px}
+.trList{flex:1;min-height:0;overflow-y:auto;background:var(--inset);border-radius:8px;padding:4px 6px;user-select:text;-webkit-user-select:text}
+.trHead{font-size:14px;color:var(--gc);border-bottom:2px solid var(--gc);padding:6px 0 2px;margin-bottom:2px}
+.trRow{display:grid;grid-template-columns:24px 1fr;gap:6px;align-items:start;padding:3px 2px;border-bottom:1px dashed rgba(255,255,255,.08);cursor:default}
+.trRow:hover{background:rgba(255,255,255,.08)}
+.trRow.spawn{background:rgba(255,210,58,.08)}
+.trN{font-size:13px;text-align:center;color:var(--gc);border:2px solid var(--gc);border-radius:9px;line-height:14px}
+.trWhat{font-size:15px;line-height:1.1}
+.trVal{font-size:13px;color:#cfd8da}
+.trNote{font-size:13px;color:#9fb0b3}
 
 /* tooltip */
 #tip{position:fixed;z-index:4000;pointer-events:none;display:none;min-width:170px;max-width:250px;background:#f2f4f4;color:#333;border-radius:10px;padding:8px 10px;box-shadow:0 0 0 3px #142023,0 5px 0 3px rgba(0,0,0,.35);text-align:center;font-size:15px;line-height:1.2;transform:translateX(-50%)}
@@ -205,6 +225,7 @@ body[data-phase=title] #left,body[data-phase=title] #right{opacity:0;pointer-eve
   .offer{padding:8px 8px}
   .offer-desc{display:block;font-size:14px;line-height:1.25;text-align:left;color:#cfd8da;margin:6px 2px}
   .heatBtn{min-height:44px}
+  .trList{max-height:60vh;max-height:60dvh}
 
   /* hover-only sell control doesn't work with touch: always show it on narrow screens */
   body[data-phase=shop] .relic.full{height:96px;align-items:flex-start;padding-top:8px}
