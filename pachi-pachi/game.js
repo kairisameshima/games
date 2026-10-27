@@ -62,7 +62,7 @@ const S = {
   relics: [], relicSlots: 5, slots: [], cups: [], balls: [], boss: null, held: null, offers: [], bestBall: 0,
   simTime: 0, launcher: { cool: 0, flash: 0, power: 0 }, upgrades: { balls: 0, value: 0 }, interestCap: 5,
   stats: { balls: 0, caught: 0, bestRound: 0 }, world: { g: 1050, wind: 0, drag: 0, rest: 1 }, rerollCost: 2,
-  trace: null, traceOn: false, traceReturn: null,
+  trace: null, traceOn: false, traceReturn: null, queue: [], queueHead: 0,
 };
 window.__S = S;
 
@@ -394,26 +394,47 @@ function cupMult(i) {
 }
 
 /* ================= BALLS ================= */
-function newBall(x, y, vx, vy, value, from = null, origin = null) {
-  const b = { id: ++BID, x, y, vx, vy, r: BALL_R, mass: 1, value, hits: 0, mega: false, used: from ? Object.assign({}, from.used) : {}, cd: {}, age: 0, still: 0, recyc: from ? from.recyc : 0, hydra: from ? from.hydra : false, trail: [], dead: false, rec: null };
-  if (from && from.mega) makeMega(b, 1);
+/** kin: what a spawned ball inherits ({ used, recyc, hydra, mega, hits }). It is a fresh snapshot owned by
+    the new ball, so a queued spawn keeps the state its source had when it was triggered. */
+function newBall(x, y, vx, vy, value, kin = null, origin = null) {
+  const b = { id: ++BID, x, y, vx, vy, r: BALL_R, mass: 1, value, hits: kin ? kin.hits : 0, mega: false, used: kin ? kin.used : {}, cd: {}, age: 0, still: 0, recyc: kin ? kin.recyc : 0, hydra: kin ? kin.hydra : false, trail: [], dead: false, rec: null };
+  if (kin && kin.mega) makeMega(b, 1);
   if (origin && S.phase === 'drop') traceSpawn(b, origin);
   S.balls.push(b);
   S.stats.balls++;
   return b;
 }
+const kinOf = b => ({ used: Object.assign({}, b.used), recyc: b.recyc, hydra: b.hydra, mega: b.mega, hits: b.hits });
 function makeMega(b, mult) {
   b.mega = true; b.r = 14; b.mass = 4;
   b.value *= mult;
 }
-// New balls stop after a minute of sim time so every round is guaranteed to drain; overflow doubles value instead.
-const canSpawn = () => S.balls.length < MAX_BALLS && (S.phase === 'title' || S.simTime < 60);
-function spawnTop(value, from = null, origin = null) {
-  if (!canSpawn()) {
-    if (from) { from.value *= 2; popAt(from, 'OVERFLOW X2', '#ff4fd8', 16); }
-    return null;
+/* Spawning closes after a minute of sim time so every round is guaranteed to drain. Before that, a spawn
+   that hits the ball cap waits in the overflow queue and launches from the lane once a slot frees; the
+   queue keeps draining after the cutoff but takes nothing new. A spawn refused after the cutoff doubles
+   its source ball's value instead. */
+const SPAWN_CUTOFF = 60;
+const spawnOpen = () => S.phase === 'title' || S.simTime < SPAWN_CUTOFF;
+const canSpawn = () => S.balls.length < MAX_BALLS && spawnOpen();
+const queuedCount = () => S.queue.length - S.queueHead;
+/** Returns the new ball, or null when it was queued or refused. source: the ball that doubles on refusal. */
+function spawnBall(x, y, vx, vy, value, kin, origin, source) {
+  if (canSpawn()) return newBall(x, y, vx, vy, value, kin, anchorOrigin(origin));
+  if (S.phase === 'drop' && spawnOpen()) { S.queue.push({ value, kin, origin: anchorOrigin(origin), queuedAt: S.simTime }); return null; }
+  if (source) { source.value *= 2; popAt(source, 'OVERFLOW X2', '#ff4fd8', 16); }
+  return null;
+}
+function spawnTop(value, kin, origin, source) {
+  return spawnBall(ARC_CX + (rnd() - 0.5) * 220, TOP_Y, (rnd() - 0.5) * 220, 40 + rnd() * 80, value, kin, origin, source);
+}
+function launchQueued() {
+  while (queuedCount() > 0 && S.balls.length < MAX_BALLS) {
+    const q = S.queue[S.queueHead++];
+    const b = newBall(LANE_X, LAUNCH_Y, 0, -shotPower(), q.value, q.kin, q.origin);
+    if (b.rec) b.rec.queuedFor = S.simTime - q.queuedAt;
+    S.launcher.flash = 1; SFX.launch();
   }
-  return newBall(ARC_CX + (rnd() - 0.5) * 220, TOP_Y, (rnd() - 0.5) * 220, 40 + rnd() * 80, value, from, origin);
+  if (S.queueHead === S.queue.length && S.queueHead) { S.queue = []; S.queueHead = 0; }
 }
 
 /* ================= BALL TRACE (recording) =================
@@ -422,11 +443,14 @@ function spawnTop(value, from = null, origin = null) {
    ends only the top scorers and their ancestors are kept. */
 const TRACE_TOP = 5, TRACE_SAMPLE_STEPS = 8, TRACE_JUMP = 80;
 /** origin: { kind: 'launch' | 'fountain' | 'splitter' | 'cloner' | 'prism' | 'hydra', parent?: ball id, x?, y? } */
+// Pins the child to the parent's path and events as they are at the trigger, which matters for queued
+// spawns that launch later. The triggering event is pushed right after, so it lands at eventIdx.
+function anchorOrigin(origin) {
+  const parent = origin && origin.parent && S.phase === 'drop' ? S.trace.recs.get(origin.parent) : null;
+  return parent ? Object.assign({}, origin, { pathIdx: parent.path.length, eventIdx: parent.events.length }) : origin;
+}
 function traceSpawn(b, origin) {
-  const parent = origin.parent ? S.trace.recs.get(origin.parent) : null;
-  // the parent's triggering event is pushed right after the spawn, so it lands at eventIdx
-  const at = parent ? { pathIdx: parent.path.length, eventIdx: parent.events.length } : {};
-  b.rec = { id: b.id, origin: Object.assign({}, origin, at), v0: b.value, path: [b.x, b.y], events: [], score: 0, ticks: 0 };
+  b.rec = { id: b.id, origin, v0: b.value, path: [b.x, b.y], events: [], score: 0, ticks: 0, queuedFor: 0 };
   S.trace.recs.set(b.id, b.rec);
 }
 // teleports (warp, relaunch, refire) show up as a jump between samples and start a new path segment
@@ -448,11 +472,11 @@ function recordEvent(rec, ev) {
    relic bonuses (compounding, overflow) applied inside the hit. Sensors run every step while a ball
    overlaps them, so only calls that registered a hit (s.hits moved) are recorded. */
 function triggerPart(b, s, p, sensor) {
-  const before = b.value, slotHits = s.hits, x = b.x, y = b.y, firstKid = BID + 1;
+  const before = b.value, slotHits = s.hits, x = b.x, y = b.y, firstKid = BID + 1, queuedBefore = queuedCount();
   if (sensor) onSensor(b, s, p); else onHit(b, s, p);
   if (!b.rec || s.hits === slotHits) return;
   tracePoint(b.rec, x, y);
-  recordEvent(b.rec, { kind: 'part', type: p.type, lvl: p.lvl, x: s.x, y: s.y, before, after: b.value, kids: BID >= firstKid ? [firstKid, BID] : null });
+  recordEvent(b.rec, { kind: 'part', type: p.type, lvl: p.lvl, x: s.x, y: s.y, before, after: b.value, kids: BID >= firstKid ? [firstKid, BID] : null, queued: queuedCount() - queuedBefore });
 }
 function finalizeTrace() {
   const T = S.trace;
@@ -507,7 +531,7 @@ function onHit(b, s, p) {
       if (used || t - p.last < 2.5) { addVal(b, 1); break; }
       p.last = t; addVal(b, 1);
       const n = v + (hasR('geyser') ? 2 : 0);
-      for (let i = 0; i < n; i++) { const c = spawnTop(S.startValue, null, { kind: 'fountain', parent: b.id, x: b.x, y: b.y }); if (c) { c.used = Object.assign({}, b.used); c.used[p.id] = 1; } }
+      for (let i = 0; i < n; i++) spawnTop(S.startValue, { used: Object.assign({}, b.used, { [p.id]: 1 }), recyc: 0, hydra: false, mega: false, hits: 0 }, { kind: 'fountain', parent: b.id, x: b.x, y: b.y }, null);
       pop(s.x, s.y - 26, `+${n} BALLS`, '#fff', 18, '#1aa3d6'); SFX.fountain(); burst(s.x, s.y, 16, ['#5fd3ff', '#fff'], 4);
       break;
     }
@@ -515,11 +539,7 @@ function onHit(b, s, p) {
       if (used) { addVal(b, 1); break; }
       b.used[p.id] = 1; addVal(b, 1);
       const n = v + relicN('mitosis');
-      for (let i = 0; i < n; i++) {
-        if (!canSpawn()) { b.value *= 2; popAt(b, 'OVERFLOW X2', '#ff4fd8'); continue; }
-        const c = newBall(b.x, b.y, -b.vx + (rnd() - 0.5) * 260, b.vy * 0.6 - 60 - rnd() * 60, b.value, b, { kind: 'splitter', parent: b.id, x: b.x, y: b.y });
-        c.hits = b.hits;
-      }
+      for (let i = 0; i < n; i++) spawnBall(b.x, b.y, -b.vx + (rnd() - 0.5) * 260, b.vy * 0.6 - 60 - rnd() * 60, b.value, kinOf(b), { kind: 'splitter', parent: b.id, x: b.x, y: b.y }, b);
       b.vx += (rnd() - 0.5) * 200;
       popAt(b, n > 1 ? `SPLIT ×${n + 1}!` : 'SPLIT!', '#fff', 18, '#2f9a72'); SFX.split(); burst(s.x, s.y, 10, ['#4bc292', '#fff'], 3);
       break;
@@ -528,7 +548,7 @@ function onHit(b, s, p) {
       if (used) { addVal(b, 1); break; }
       b.used[p.id] = 1; addVal(b, 1);
       const n = v * (hasR('cloneArmy') ? 2 : 1);
-      for (let i = 0; i < n; i++) { const c = spawnTop(b.value, b, { kind: 'cloner', parent: b.id, x: b.x, y: b.y }); if (c) { c.hits = b.hits; burst(c.x, c.y, 10, ['#a98cff', '#fff'], 3); } }
+      for (let i = 0; i < n; i++) { const c = spawnTop(b.value, kinOf(b), { kind: 'cloner', parent: b.id, x: b.x, y: b.y }, b); if (c) burst(c.x, c.y, 10, ['#a98cff', '#fff'], 3); }
       popAt(b, n > 1 ? `CLONE ×${n}!` : 'CLONE!', '#fff', 18, '#7a5cd6'); SFX.clone(); burst(s.x, s.y, 10, ['#a98cff', '#fff'], 3);
       break;
     }
@@ -575,11 +595,7 @@ function onSensor(b, s, p) {
       b.used[p.id] = 1; p.pulse = 1; s.hits++;
       const m = xm(v + (hasR('rainbow') ? 0.5 : 0));
       mulVal(b, m);
-      for (let i = 0; i < 2; i++) {
-        if (!canSpawn()) { b.value *= 2; continue; }
-        const c = newBall(b.x, b.y, b.vx + (i ? 1 : -1) * (160 + rnd() * 120), b.vy * 0.8, b.value, b, { kind: 'prism', parent: b.id, x: b.x, y: b.y });
-        c.hits = b.hits;
-      }
+      for (let i = 0; i < 2; i++) spawnBall(b.x, b.y, b.vx + (i ? 1 : -1) * (160 + rnd() * 120), b.vy * 0.8, b.value, kinOf(b), { kind: 'prism', parent: b.id, x: b.x, y: b.y }, b);
       popAt(b, `PRISM X${+m.toFixed(2)} ×3`, '#fff', 20, '#2ab8c8'); SFX.split(); SFX.mult(2);
       burst(b.x, b.y, 20, ['#7ff0ff', '#ff9aff', '#fff6a0', '#fff'], 4);
       break;
@@ -726,11 +742,11 @@ function catchBall(b, i) {
     relaunch(b); pop(BX0 + (i + 0.5) * CUPW, CUP_TOP - 46, `RECYCLE X${+rm.toFixed(2)}`, '#fff', 16, '#2f9a72'); return;
   }
   if (cup.type === 'hydra' && !b.hydra) {
-    const x = b.x, y = b.y, firstKid = BID + 1;
+    const x = b.x, y = b.y, firstKid = BID + 1, queuedBefore = queuedCount();
     b.hydra = true; relaunch(b);
-    for (let k = 0; k < cup.lvl; k++) { const c = spawnTop(b.value, b, { kind: 'hydra', parent: b.id, x, y }); if (c) c.hydra = true; }
+    for (let k = 0; k < cup.lvl; k++) spawnTop(b.value, Object.assign(kinOf(b), { hits: 0 }), { kind: 'hydra', parent: b.id, x, y }, b);
     // pushed after the spawn (and without a path point, the ball is already back in the lane) so children find it at their eventIdx
-    if (b.rec) recordEvent(b.rec, { kind: 'hydra', cup: i, x, y, kids: BID >= firstKid ? [firstKid, BID] : null });
+    if (b.rec) recordEvent(b.rec, { kind: 'hydra', cup: i, x, y, kids: BID >= firstKid ? [firstKid, BID] : null, queued: queuedCount() - queuedBefore });
     pop(BX0 + (i + 0.5) * CUPW, CUP_TOP - 46, `HYDRA ×${cup.lvl + 1}`, '#fff', 16, '#8a3ad6'); return;
   }
   b.dead = true;
@@ -819,6 +835,7 @@ function fire() {
 function stepLauncher(h) {
   const L = S.launcher;
   L.flash = Math.max(0, L.flash - h * 4);
+  if (S.phase === 'drop') launchQueued();
   const want = S.phase === 'drop' ? S.ballsLeft > 0 : S.phase === 'title' && S.balls.length < 80;
   if (!want) return;
   L.cool -= h;
@@ -845,7 +862,7 @@ function startRound() {
   S.phase = 'ready'; S.score = 0; S.shownScore = 0; S.target = roundTarget(S.round);
   S.boss = isBossRound(S.round) ? pick(BOSSES.filter(b => S.round > 3 || !b.harsh)) : null;
   S.ballsLeft = S.ballsPerRound + relicN('extraBalls') * 3 - (bossK() === 'drought' ? 4 : 0);
-  S.gooseEarned = 0; S.caughtRound = 0; S.launched = 0; S.balls = []; S.simTime = 0;
+  S.gooseEarned = 0; S.caughtRound = 0; S.launched = 0; S.balls = []; S.simTime = 0; S.queue = []; S.queueHead = 0;
   S.cups.forEach(c => { c.earned = 0; });
   S.slots.forEach(s => { if (s.part) { s.part.earned = 0; s.part.last = -99; } });
   const k = bossK();
@@ -872,7 +889,7 @@ function drop() {
 let endTimer = 0;
 function checkRoundEnd(dt) {
   if (S.phase !== 'drop') return;
-  if (S.ballsLeft > 0 || S.balls.length > 0) { endTimer = 0; return; }
+  if (S.ballsLeft > 0 || S.balls.length > 0 || queuedCount() > 0) { endTimer = 0; return; }
   endTimer += dt;
   if (endTimer > 0.9 && Math.abs(S.shownScore - S.score) < Math.max(1, S.score * 0.001)) { endTimer = 0; finishRound(); }
 }
@@ -1503,7 +1520,8 @@ function traceRowValue(row) {
 }
 function traceOriginText(r) {
   const o = r.origin;
-  return o.kind === 'launch' ? `launched (shot ${o.shot})` : `${SPAWN_VERB[o.kind]} #${o.parent}`;
+  const wait = r.queuedFor ? ` · queued ${r.queuedFor.toFixed(1)}s` : '';
+  return (o.kind === 'launch' ? `launched (shot ${o.shot})` : `${SPAWN_VERB[o.kind]} #${o.parent}`) + wait;
 }
 function renderTrace(body) {
   const T = S.trace, { chain, rows } = T.view, last = chain.length - 1, sel = T.top[T.sel];
@@ -1514,7 +1532,8 @@ function renderTrace(body) {
     list += `<div class="trHead" style="--gc:${col}">Ball #${r.id} · ${traceOriginText(r)} · starts at ${fmt(r.v0)}</div>`;
     rows.forEach((row, i) => {
       if (row.gen !== g) return;
-      const kids = row.ev.kids ? `spawned #${row.ev.kids[0]}${row.ev.kids[1] > row.ev.kids[0] ? '–#' + row.ev.kids[1] : ''}` : '';
+      const ev = row.ev, spawned = ev.kids ? `spawned #${ev.kids[0]}${ev.kids[1] > ev.kids[0] ? '–#' + ev.kids[1] : ''}` : '';
+      const kids = [spawned, ev.queued ? `queued ${ev.queued}` : ''].filter(Boolean).join(' · ');
       const note = row.spawnsNext ? `<div class="trNote" style="color:${traceGenCol(g + 1, last)}">${kids || 'spawned'} · follows #${next.id}</div>` : kids ? `<div class="trNote">${kids}</div>` : '';
       list += `<div class="trRow${row.spawnsNext ? ' spawn' : ''}" data-r="${i}" style="--gc:${col}"><span class="trN">${i + 1}</span><div><div class="trWhat">${traceRowLabel(row)}</div><div class="trVal">${traceRowValue(row)}</div>${note}</div></div>`;
     });
