@@ -487,8 +487,9 @@ export class World {
     const width = boss ? 9 : 2.6;
     back.scale.set(width + 0.2, 0.42, 1);
     front.scale.set(width, 0.28, 1);
-    front.center.set(0, 0.5);
-    front.position.x = -width / 2;
+    // Sprite centers are in screen space, so anchoring the fill by its center keeps it aligned with the
+    // backing at any camera angle. A world-space x offset drifts off the bar when the view rotates.
+    front.center.set(0.5, 0.5);
     back.renderOrder = 10;
     front.renderOrder = 11;
     bar.add(back, front);
@@ -545,7 +546,9 @@ export class World {
       }
       const fraction = Math.max(0, unit.hp / unit.maxHp);
       view.barInner.visible = fraction < 0.999 || view.boss;
-      view.barFront.scale.x = view.barWidth * fraction;
+      const shown = Math.max(0.001, fraction);
+      view.barFront.scale.x = view.barWidth * shown;
+      view.barFront.center.x = 0.5 / shown;
     }
     for (const [id, view] of this.units) {
       if (alive.has(id)) continue;
