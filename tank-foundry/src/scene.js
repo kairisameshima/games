@@ -169,6 +169,11 @@ export class World {
     sun.shadow.bias = -0.0006;
     sun.shadow.normalBias = 0.04;
     this.scene.add(sun, sun.target);
+    // Shadowless sky bounce from behind the plant, so walls facing away from the sun keep their detail.
+    const backFill = new THREE.DirectionalLight(0xcdd8e6, 0.8);
+    backFill.position.set(20, 45, -70);
+    backFill.target.position.set(-20, 0, 0);
+    this.scene.add(backFill, backFill.target);
   }
 
   addGround() {

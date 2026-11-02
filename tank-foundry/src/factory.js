@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { PARTS } from "./data.js";
 import { createTankMesh, paintMaterial } from "./models.js";
 import { block, canvasTexture, column, contactShadow, mesh, seeded, SHARED } from "./scene-kit.js";
-import { MODEL_BY_ID, storageCap } from "./sim.js";
+import { MODEL_BY_ID, STATION_BY_ID, storageCap } from "./sim.js";
 
 export const FLOOR_Y = 0.2;
 const BELT_HEIGHT = 0.75;
@@ -577,8 +577,73 @@ export class Factory {
     };
   }
 
+  /**
+   * Dresses the outside of a back wall so the plant also reads from behind: brick piers, a concrete plinth,
+   * lit windows, a painted name sign, downpipes and a service hatch. `outer` is the z of the outside face,
+   * which faces -z. Window rows are { y, height } and skip the hatch.
+   */
+  decorateBack(group, { width, height, outer, title, accent, windowRows, hatch, piers = true }) {
+    const materials = this.materials;
+    const face = outer - 0.03;
+    block(group, width + 0.1, 0.5, 0.14, materials.concreteDark, 0, 0, outer - 0.07);
+    if (piers) {
+      const pierCount = Math.max(2, Math.round(width / 2.4) + 1);
+      for (let index = 0; index < pierCount; index += 1) {
+        const x = -width / 2 + 0.2 + ((width - 0.4) * index) / (pierCount - 1);
+        texturedBlock(group, 0.4, height - 0.1, 0.2, materials.brick, x, 0, outer - 0.1);
+        block(group, 0.5, 0.18, 0.26, materials.brickDark, x, height - 0.1, outer - 0.12);
+      }
+    }
+    block(group, width + 0.1, 0.22, 0.22, materials.brickDark, 0, height - 0.95, outer - 0.1);
+    const hatchHalf = hatch ? hatch.width / 2 + 0.3 : -1;
+    for (const row of windowRows) {
+      for (let x = -width / 2 + 1.1; x <= width / 2 - 1.0; x += 1.6) {
+        if (hatch && Math.abs(x - hatch.x) < hatchHalf && row.y < hatch.height + 0.2) continue;
+        block(group, 0.95, row.height, 0.06, materials.window, x, row.y, face);
+        block(group, 1.1, 0.1, 0.16, materials.concreteDark, x, row.y - 0.1, face - 0.05);
+      }
+    }
+    const signWidth = Math.min(width * 0.62, 6.5);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(signWidth, signWidth * 0.18).rotateY(Math.PI), this.signMaterial(title, accent));
+    sign.position.set(0, height - 0.45, outer - 0.215);
+    group.add(sign);
+    for (const side of [-1, 1]) {
+      const x = side * (width / 2 - 0.1);
+      column(group, 0.07, 0.07, height - 0.2, materials.steelDark, x, 0, outer - 0.12, 8);
+      block(group, 0.3, 0.16, 0.3, materials.steelDark, x, height - 0.25, outer - 0.12);
+    }
+    if (!hatch) return;
+    block(group, hatch.width, hatch.height, 0.06, materials.steelDark, hatch.x, 0, face);
+    const frame = new THREE.Mesh(worldUvBox(hatch.width + 0.5, 0.3, 0.12), materials.hazard);
+    frame.position.set(hatch.x, hatch.height + 0.15, outer - 0.08);
+    group.add(frame);
+    for (const side of [-1, 1]) block(group, 0.18, hatch.height, 0.14, materials.stripe, hatch.x + side * (hatch.width / 2 + 0.09), 0, outer - 0.08);
+    block(group, 0.5, 0.08, 0.3, materials.steelDark, hatch.x, hatch.height + 0.55, outer - 0.2);
+    const lamp = mesh(SHARED.sphere, materials.lampBulb, hatch.x, hatch.height + 0.5, outer - 0.3);
+    lamp.scale.setScalar(0.1);
+    group.add(lamp);
+  }
+
+  signMaterial(title, accent) {
+    const texture = canvasTexture(512, 92, (context, width, height) => {
+      context.fillStyle = `#${new THREE.Color(accent).multiplyScalar(0.7).getHexString()}`;
+      context.fillRect(0, 0, width, height);
+      context.strokeStyle = "#e8e2cc";
+      context.lineWidth = 6;
+      context.strokeRect(6, 6, width - 12, height - 12);
+      context.fillStyle = "#f1ead6";
+      context.font = "bold 58px Impact, 'Arial Narrow', sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(title.toUpperCase(), width / 2, height / 2 + 3, width - 40);
+    });
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    return new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85 });
+  }
+
   /** Brick hall cut away toward the camera: full back wall, side walls that slope down to the open front. */
-  buildHall(group, { width, depth, height, accent }) {
+  buildHall(group, { width, depth, height, accent, title }) {
     const materials = this.materials;
     const back = -depth / 2;
     texturedBlock(group, width + 0.8, 0.14, depth + 0.6, materials.concreteDark, 0, -0.06, 0).castShadow = false;
@@ -629,11 +694,24 @@ export class Factory {
     group.add(hazard);
     group.userData.beacon = new THREE.Vector3(width / 2 - 0.3, height + 0.45, back);
     block(group, 0.18, 0.3, 0.18, materials.steelDark, width / 2 - 0.3, height, back);
+    this.decorateBack(group, {
+      width,
+      height,
+      outer: back - 0.175,
+      title,
+      accent,
+      windowRows: [{ y: height * 0.45, height: 1.4 }],
+      hatch: { x: 0, width: 1.5, height: 1.5 },
+    });
+    for (const x of [-width / 4, width / 4]) {
+      column(group, 0.28, 0.32, 0.5, materials.steelBeam, x, height + 0.12, back + 1.2, 10);
+      group.add(mesh(new THREE.ConeGeometry(0.45, 0.35, 10), materials.steelDark, x, height + 0.8, back + 1.2));
+    }
   }
 
   addShop(id) {
     const group = new THREE.Group();
-    this.buildHall(group, { ...SHOP_SIZE, accent: ACCENTS[id] });
+    this.buildHall(group, { ...SHOP_SIZE, accent: ACCENTS[id], title: STATION_BY_ID[id].name });
     const builder = MACHINE_BUILDERS[id];
     const machinePaint = paintMaterial(new THREE.Color(ACCENTS[id]).lerp(new THREE.Color(0x4d6a6f), 0.45).getHex());
     const machines = [];
@@ -789,6 +867,23 @@ export class Factory {
     texturedBlock(group, 4, 3.4, 3.2, materials.brick, -6.5, 0, 0.6);
     block(group, 4.3, 0.3, 3.5, materials.roof, -6.5, 3.4, 0.6);
     for (let x = -3.8; x <= 3.8; x += 1.9) block(group, 1.0, 2.2, 0.06, materials.window, x, 1.8, 2.78);
+    this.decorateBack(group, {
+      width: 10,
+      height: 5.5,
+      outer: -2.75,
+      title: STATION_BY_ID.power.name,
+      accent: 0x8e4b35,
+      windowRows: [{ y: 1.6, height: 2.2 }],
+      hatch: null,
+    });
+    texturedBlock(group, 2.6, 3.2, 1.6, materials.brick, 2.6, 0, -3.5);
+    block(group, 2.8, 0.25, 1.8, materials.roof, 2.6, 3.2, -3.5);
+    block(group, 1.4, 2.0, 0.06, materials.steelDark, 2.6, 0, -4.31);
+    for (const [x, y] of [[-4.2, 3.6], [-1.2, 3.6]]) {
+      const pipe = mesh(new THREE.CylinderGeometry(0.22, 0.22, 2.4, 10).rotateX(Math.PI / 2), materials.steelBeam, x, y, -3.9);
+      group.add(pipe);
+      column(group, 0.22, 0.22, y, materials.steelBeam, x, 0, -5.05, 10);
+    }
     const stackPositions = [[-2.6, -0.8], [0.4, -0.8], [3.4, -0.8]];
     const stacks = stackPositions.map(([x, z]) => {
       const stack = new THREE.Group();
@@ -844,6 +939,15 @@ export class Factory {
     const back = -depth / 2;
     texturedBlock(group, width + 0.8, 0.14, depth + 0.6, materials.concreteDark, 0, -0.06, 0).castShadow = false;
     texturedBlock(group, width, height, 0.4, materials.brick, 0, 0, back);
+    this.decorateBack(group, {
+      width,
+      height,
+      outer: back - 0.2,
+      title: STATION_BY_ID.assembly.name,
+      accent: ACCENTS.assembly,
+      windowRows: [{ y: height * 0.2, height: 1.0 }, { y: height * 0.5, height: 1.6 }],
+      hatch: { x: 2.5, width: 3.6, height: 3.4 },
+    });
     for (let x = -width / 2 + 1.2; x <= width / 2 - 1.0; x += 1.7) {
       block(group, 1.1, 1.6, 0.06, materials.window, x, height * 0.5, back + 0.22);
       block(group, 1.1, 1.0, 0.06, materials.window, x, height * 0.2, back + 0.22);
