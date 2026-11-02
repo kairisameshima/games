@@ -1,3 +1,4 @@
 import { defineConfig } from "vite";
 
-export default defineConfig({ base: "./" });
+// The build is committed to play/ so GitHub Pages serves it at /games/tank-foundry/play/.
+export default defineConfig({ base: "./", build: { outDir: "play", emptyOutDir: true } });

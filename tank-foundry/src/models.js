@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { contactShadow } from "./scene-kit.js";
 
 export const MODEL_SCALE = 0.5;
 
@@ -413,6 +414,11 @@ const templateCache = new Map();
 function buildTemplate(kind, side, paint) {
   const parts = newParts(side === "ally" ? paint : ENEMY_PAINT);
   BUILDERS[kind](parts, side === "ally");
+  const bounds = new THREE.Box3().setFromObject(parts.root);
+  const size = bounds.getSize(new THREE.Vector3());
+  const shadow = contactShadow(size.x * 1.3, size.z * 1.35, 0.5);
+  shadow.position.x = (bounds.min.x + bounds.max.x) / 2;
+  parts.root.add(shadow);
   parts.root.scale.setScalar(MODEL_SCALE);
   return parts.root;
 }
@@ -445,6 +451,6 @@ export const CHARRED = paintMaterial(0x26231f, { roughness: 1 });
 
 export function charTank(object) {
   object.traverse((child) => {
-    if (child.isMesh) child.material = CHARRED;
+    if (child.isMesh && !child.userData.contactShadow) child.material = CHARRED;
   });
 }
