@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Tank Foundry</title>
 <meta name="description" content="Tank Foundry: run a WW2 tank factory, send tanks to an endless front, and research better designs from the Stuart to the Maus.">
+<script>
+  // GitHub Pages serves this source page at /tank-foundry/, where it cannot run. Send visitors to the build.
+  if (/\/tank-foundry\/(index\.html)?$/.test(location.pathname)) location.replace("play/" + location.search + location.hash);
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Barlow+Condensed:wght@500;600;700&display=swap">
 </head>

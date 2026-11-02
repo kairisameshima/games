@@ -17,11 +17,12 @@ npm run build
 npm run preview
 ```
 
-`play/` is the committed static build that GitHub Pages serves at `/games/tank-foundry/play/`. Rebuild and commit it to update the live game. Asset paths are relative. Three.js is bundled locally. Progress is stored in `localStorage`.
+`play/` is the committed static build that GitHub Pages serves at `/games/tank-foundry/play/`. To publish, bring the changes onto `main` and run `npm run deploy`: it checks for a clean tree, pulls, tests, rebuilds `play/`, commits it and pushes. `/games/tank-foundry/` redirects to the build. Asset paths are relative. Three.js is bundled locally. Progress is stored in `localStorage`.
 
 ## Loop
 
 - **Factory.** The Steel Mill feeds the Hull Works, Turret Shop and Engine Plant. The Assembly Hall turns parts into the selected model. Each station reports running, starved, output full or low power. Every machine level draws power from the Power Station, and a shortfall slows the whole plant by the same factor. Upgrades show on the floor: shops add machine bays, the mill adds furnaces, the power station adds cooling towers, and the hall adds a second crane and more welders.
+- **Bottleneck.** The Factory panel names the stage holding back tank output, the slowest station's label pulses, and a power shortfall or a full front takes precedence.
 - **Front.** Finished tanks wait in the depot and roll out while the front is below its Logistics limit. Enemies come in endless waves that grow by 15% HP per wave, with a Landship boss every 10 waves. Enemy artillery wears down tanks no matter how strong they are, so the factory always has losses to replace.
 - **Fallback.** If an enemy reaches the factory gate, or a wave is not cleared in 90 seconds, the front drops back one wave and keeps farming it.
 - **Currencies.** Kills pay salvage (factory upgrades) and intel (research).

@@ -8,6 +8,7 @@ import {
   createInitialState,
   deployCap,
   depotCap,
+  findBottleneck,
   powerFactor,
   researchCost,
   setAutomation,
@@ -97,6 +98,28 @@ test("assembly stops when the front and the depot are full", () => {
   assert.equal(state.units.filter((unit) => unit.side === "ally").length, deployCap(state));
   assert.equal(state.depot.length, depotCap(state));
   assert.equal(state.stations.assembly.status, "blocked");
+});
+
+test("the bottleneck is the stage with the lowest tank throughput", () => {
+  const state = createInitialState(0);
+  state.stations.power.level = 50;
+  for (const id of ["mill", "hull", "turret", "engine", "assembly"]) state.stations[id].level = 10;
+  state.stations.turret.level = 2;
+  const bottleneck = findBottleneck(state);
+  assert.equal(bottleneck.kind, "station");
+  assert.equal(bottleneck.stationId, "turret");
+  state.stations.turret.level = 10;
+  state.stations.mill.level = 1;
+  assert.equal(findBottleneck(state).stationId, "mill", "the mill feeds every shop, so one level starves them all");
+});
+
+test("a power shortfall outranks every station, and a full front means no station is to blame", () => {
+  const state = createInitialState(0);
+  state.stations.hull.level = 8;
+  assert.deepEqual(findBottleneck(state), { kind: "power", stationId: "power" });
+  state.stations.power.level = 50;
+  state.stations.assembly.status = "blocked";
+  assert.deepEqual(findBottleneck(state), { kind: "front", stationId: null });
 });
 
 test("upgrade costs rise and fail without salvage", () => {

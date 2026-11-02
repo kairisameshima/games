@@ -624,10 +624,11 @@ export class World {
       if (!visible) continue;
       station.label.style.transform = `translate(-50%, -100%) translate(${((projected.x + 1) / 2) * width}px, ${((1 - projected.y) / 2) * height}px)`;
       const label = labels[id];
-      const text = `${label.title}|${label.status}|${label.detail}`;
+      const text = `${label.title}|${label.status}|${label.detail}|${label.bottleneck}`;
       if (text !== station.labelText) {
         station.labelText = text;
         station.label.dataset.status = label.status;
+        station.label.classList.toggle("bottleneck", label.bottleneck);
         station.label.innerHTML = `<strong>${label.title}</strong><span>${label.detail}</span>`;
       }
     }

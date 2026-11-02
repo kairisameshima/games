@@ -5,6 +5,7 @@ import {
   canBuyResearch,
   deployCap,
   depotCap,
+  findBottleneck,
   isBossWave,
   isModelUnlocked,
   isResearchMaxed,
@@ -97,10 +98,14 @@ export class UI {
 
   buildFactoryPanel() {
     const panel = this.root.querySelector("#factory-panel");
-    panel.innerHTML = `<div class="panel-head"><h2>Factory</h2><label class="auto-toggle" data-auto="upgrades"><input type="checkbox"> Auto-upgrade</label></div><div class="panel-body"></div>`;
+    panel.innerHTML = `<div class="panel-head"><h2>Factory</h2><label class="auto-toggle" data-auto="upgrades"><input type="checkbox"> Auto-upgrade</label></div><button type="button" class="bottleneck-banner"></button><div class="panel-body"></div>`;
     const body = panel.querySelector(".panel-body");
     this.autoUpgrade = panel.querySelector('[data-auto="upgrades"]');
     this.autoUpgrade.querySelector("input").addEventListener("change", (event) => this.handlers.toggleAutomation("upgrades", event.target.checked));
+    this.bottleneck = { button: panel.querySelector(".bottleneck-banner"), stationId: null };
+    this.bottleneck.button.addEventListener("click", () => {
+      if (this.bottleneck.stationId) this.handlers.selectStation(this.bottleneck.stationId);
+    });
     for (const station of STATIONS) {
       const card = element("section", "station-card");
       card.dataset.station = station.id;
@@ -304,11 +309,24 @@ export class UI {
     };
   }
 
+  bottleneckText(state, bottleneck) {
+    if (bottleneck.kind === "power") return `Bottleneck: Power Station · plant at ${Math.round(powerFactor(state) * 100)}%`;
+    if (bottleneck.kind === "front") return "Front is full · research Logistics to field more tanks";
+    const name = STATIONS.find((station) => station.id === bottleneck.stationId).name;
+    return `Bottleneck: ${name} · ${formatShort(bottleneck.tanksPerSecond * 60)} tanks/min`;
+  }
+
   updateStations(state) {
+    const bottleneck = findBottleneck(state);
+    this.bottleneck.stationId = bottleneck.stationId;
+    setText(this.bottleneck.button, this.bottleneckText(state, bottleneck));
+    this.bottleneck.button.dataset.kind = bottleneck.kind;
     for (const station of STATIONS) {
       const refs = this.stationCards[station.id];
       const view = this.stationView(state, station);
       const cost = stationUpgradeCost(state, station.id);
+      const limiting = bottleneck.stationId === station.id;
+      refs.card.classList.toggle("bottleneck", limiting);
       setText(refs.level, `Lv ${state.stations[station.id].level}`);
       setText(refs.status, STATUS_TEXT[view.status]);
       refs.status.dataset.status = view.status;
@@ -319,7 +337,7 @@ export class UI {
       setText(refs.button, `Upgrade · ${formatShort(cost)} salvage`);
       setDisabled(refs.button, state.resources.salvage < cost);
       if (refs.select) this.updateProductionSelect(state, refs);
-      this.labels[station.id] = { title: `${station.name} · Lv ${state.stations[station.id].level}`, status: view.status, detail: view.label };
+      this.labels[station.id] = { title: `${station.name} · Lv ${state.stations[station.id].level}`, status: view.status, detail: view.label, bottleneck: limiting };
     }
   }
 

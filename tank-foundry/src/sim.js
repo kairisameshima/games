@@ -198,6 +198,32 @@ export function stationRate(state, stationId) {
   return (base * level * stationResearchMultiplier(state, stationId) * powerFactor(state)) / complexity;
 }
 
+/** Tanks per second each stage could sustain on its own for the model in production. */
+export function stageThroughput(state) {
+  const model = MODEL_BY_ID[state.production];
+  const throughput = { assembly: stationRate(state, "assembly") / model.buildSeconds };
+  let steelPerTank = 0;
+  for (const part of PARTS) {
+    throughput[part] = stationRate(state, part) / model.parts[part];
+    steelPerTank += model.parts[part] * STATION_BY_ID[part].inputs.steel;
+  }
+  throughput.mill = stationRate(state, "mill") / steelPerTank;
+  return throughput;
+}
+
+/**
+ * The one thing holding tank output back. A power shortfall slows every machine, so it wins outright.
+ * A full depot means the factory already outpaces the front, so the limit is Logistics, not a station.
+ */
+export function findBottleneck(state) {
+  if (powerFactor(state) < 1) return { kind: "power", stationId: "power" };
+  if (state.stations.assembly.status === "blocked") return { kind: "front", stationId: null };
+  const throughput = stageThroughput(state);
+  let stationId = "assembly";
+  for (const id of Object.keys(throughput)) if (throughput[id] < throughput[stationId]) stationId = id;
+  return { kind: "station", stationId, tanksPerSecond: throughput[stationId] };
+}
+
 export function stationUpgradeCost(state, stationId) {
   const station = STATION_BY_ID[stationId];
   return Math.ceil(station.baseCost * station.costGrowth ** (state.stations[stationId].level - 1));
