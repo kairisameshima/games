@@ -156,8 +156,11 @@ export const STATIONS = {
   /** Doors span the bay between the spar bulkheads (interior/layout.ts BULKHEADS), less the bulkhead flanges. */
   bombBay: { start: 5.84, end: 8.41, halfWidth: 0.56 },
   radioHatch: { start: 8.95, end: 10.05 },
-  /** `glazingHalfAngle`: the round front glazing's half-angle from the gun axis; the guns run just outside it. */
-  ballTurret: { d: 11.12, h: -1.55, radius: 0.54, glazingHalfAngle: 0.52 },
+  /**
+   * Sperry ball: `sidePlateZ` is where the flat glazed sides cut the sphere, just outboard of the guns' receivers;
+   * `windowHalfAngle` sizes the round front window (about 0.4 of the ball's diameter in photographs).
+   */
+  ballTurret: { d: 11.12, h: -1.55, radius: 0.54, sidePlateZ: 0.39, windowHalfAngle: 0.4 },
   waistWindowStarboard: { start: 13.1, end: 14.2 },
   waistWindowPort: { start: 13.6, end: 14.7 },
   waistWindowBand: { top: 0.49, bottom: -0.25 },

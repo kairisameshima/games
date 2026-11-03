@@ -8,6 +8,7 @@ import {
 import { mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
+import { addBallTurretShell, addBallTurretYoke } from './ball-turret';
 import { addM2 } from './m2';
 import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
@@ -655,36 +656,6 @@ function buildChinFairingGeometry(): THREE.BufferGeometry {
   return loftGeometry(rings, stations.map((d) => d / FUSELAGE_LENGTH), true, true);
 }
 
-/** Central sighting pane inside the ball's front glazing; frames divide the rest of it into sectors (Pilot's Manual, section IX). */
-const BALL_SIGHTING_PANE_HALF_ANGLE = 0.2;
-const BALL_GLAZING_SECTORS = 8;
-const BALL_FRAME_RADIUS = 0.011;
-
-/** A spherical shell piece around +x: polar angles from `from` to `to` measured off the gun axis. */
-function ballShellGeometry(radius: number, from: number, to: number, rings: number): THREE.BufferGeometry {
-  return new THREE.SphereGeometry(radius, 48, rings, 0, Math.PI * 2, from, to - from).rotateZ(-Math.PI / 2);
-}
-
-/** Point on the ball at polar angle `polar` off the gun axis and `around` about it. */
-function ballPoint(radius: number, polar: number, around: number): THREE.Vector3 {
-  return new THREE.Vector3(radius * Math.cos(polar), radius * Math.sin(polar) * Math.cos(around), radius * Math.sin(polar) * Math.sin(around));
-}
-
-/** Sperry ball: the armour shell, open in front for the round glazing, with its frame of rings and radial bars. */
-function addBallTurretShell(ballPitch: THREE.Object3D, materials: AircraftMaterials): void {
-  const { radius, glazingHalfAngle } = STATIONS.ballTurret;
-  part(ballPitch, ballShellGeometry(radius, glazingHalfAngle, Math.PI, 24), materials.neutralGray, 0, 0, 0);
-  part(ballPitch, ballShellGeometry(radius - 0.004, 0, glazingHalfAngle, 8), materials.canopy, 0, 0, 0, { castShadow: false });
-  for (const polar of [glazingHalfAngle, BALL_SIGHTING_PANE_HALF_ANGLE]) {
-    part(ballPitch, new THREE.TorusGeometry(radius * Math.sin(polar), BALL_FRAME_RADIUS * (polar === glazingHalfAngle ? 1.6 : 1), 8, 48), materials.neutralGray, radius * Math.cos(polar), 0, 0, { rotation: [0, Math.PI / 2, 0] });
-  }
-  for (let sector = 0; sector < BALL_GLAZING_SECTORS; sector++) {
-    const around = ((sector + 0.5) / BALL_GLAZING_SECTORS) * Math.PI * 2;
-    const points = Array.from({ length: 6 }, (_, step) => ballPoint(radius, THREE.MathUtils.lerp(BALL_SIGHTING_PANE_HALF_ANGLE, glazingHalfAngle, step / 5), around));
-    part(ballPitch, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 8, BALL_FRAME_RADIUS, 6, false), materials.neutralGray, 0, 0, 0);
-  }
-}
-
 function buildChinTurret(materials: AircraftMaterials): THREE.Group {
   const spec = STATIONS.chinTurret;
   const turret = new THREE.Group();
@@ -940,7 +911,8 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   const ballYaw = new THREE.Group();
   ballYaw.position.set(toX(ballSpec.d), ballSpec.h, 0);
   const ballPitch = new THREE.Group();
-  addBallTurretShell(ballPitch, materials);
+  addBallTurretShell(ballPitch, { shell: materials.neutralGray, frame: materials.neutralGray, glass: materials.canopy, trunnion: materials.gunmetal });
+  addBallTurretYoke(ballYaw, materials.neutralGray);
   for (const offset of [-BALL_TURRET_GUN_SPACING / 2, BALL_TURRET_GUN_SPACING / 2]) addM2(ballPitch, new THREE.Vector3(0.2, -0.05, offset), FORWARD, 'turret');
   ballYaw.add(ballPitch);
   root.add(ballYaw);

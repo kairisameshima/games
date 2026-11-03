@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { STATIONS } from '../b17-dimensions';
+import { ballShellGeometry } from '../ball-turret';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part } from '../kit';
@@ -87,10 +88,10 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   for (const side of [-1, 1]) rod(parent, v(ball.d, hullSectionAt(ball.d).top - 0.1, 0), v(ball.d + side * 0.45, ballFloor + 0.04, 0), 0.025, materials.aluminium);
 
   // The ball turret's own interior: shell lining, ammunition boxes either side of the gunner, the sight.
-  // Lining stops at the front glazing, so the gunner can be seen through it.
-  part(ballTurretPitch, new THREE.SphereGeometry(ball.radius - 0.012, 32, 20, 0, Math.PI * 2, ball.glazingHalfAngle, Math.PI - ball.glazingHalfAngle).rotateZ(-Math.PI / 2), materials.turretLining, 0, 0, 0, { castShadow: false });
-  // Ammunition boxes against the sides, outboard of the guns.
-  for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.16, 0.28, 0.07), materials.ammunitionBox, -0.05, -0.05, side * 0.43);
+  // Lining stops at the front window and the glazed sides, so the gunner can be seen through them.
+  part(ballTurretPitch, ballShellGeometry(ball.radius - 0.012), materials.turretLining, 0, 0, 0, { castShadow: false });
+  // Ammunition boxes along the sides above the guns, inboard of the glazed side wheels.
+  for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.26, 0.12, 0.08), materials.ammunitionBox, -0.12, 0.17, side * 0.31);
   // Sperry K-4 sight hangs in front of his face; the grips flank it, ahead of his shoulders.
   part(ballTurretPitch, new THREE.BoxGeometry(0.1, 0.1, 0.09), materials.crinkle, 0.08, 0.26, 0);
   part(ballTurretPitch, new THREE.BoxGeometry(0.004, 0.06, 0.06), materials.glass, 0.025, 0.3, 0);
