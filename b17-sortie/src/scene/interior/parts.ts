@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
+import type { MountedGun } from '../gunnery';
+import type { M2Gun } from '../m2';
 import { part, roundedBox } from '../kit';
 import type { InteriorMaterials } from './materials';
 
@@ -22,6 +24,11 @@ export interface CompartmentContext {
   topTurretYaw: THREE.Object3D;
   /** The top turret's gun cradle, inside its yaw group: the guns' belts go with it. */
   topTurretPitch: THREE.Object3D;
+  /** The turrets' guns, port then starboard, built with the airframe; the interior feeds them. */
+  topTurretGuns: M2Gun[];
+  ballTurretGuns: M2Gun[];
+  /** Every gun the interior builds or feeds is registered here for the gunnery. */
+  guns: MountedGun[];
   ballTurretPitch: THREE.Object3D;
   createBomb: () => THREE.Object3D;
 }

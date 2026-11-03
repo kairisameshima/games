@@ -44,14 +44,23 @@ const MERGED_ATTRIBUTES = ['position', 'normal', 'uv'];
 
 /**
  * Replaces the static meshes under `root` with one merged mesh per material, which keeps the
- * reflection, AO and main passes at a few dozen draw calls.
+ * reflection, AO and main passes at a few dozen draw calls. Objects flagged `userData.unmerged` (moving parts) are
+ * kept whole and carried over into the merged group at the same place.
  */
 export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
   root.updateMatrixWorld(true);
   const geometriesByMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const shadowByMaterial = new Map<THREE.Material, boolean>();
+  const kept: THREE.Object3D[] = [];
+  const keptMeshes = new Set<THREE.Object3D>();
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh) || Array.isArray(object.material)) return;
+    if (object !== root && object.userData.unmerged) {
+      kept.push(object);
+      object.traverse((inner) => keptMeshes.add(inner));
+    }
+  });
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || Array.isArray(object.material) || keptMeshes.has(object)) return;
     const source = object.geometry.index ? object.geometry.toNonIndexed() : object.geometry.clone();
     for (const attributeName of Object.keys(source.attributes)) {
       if (!MERGED_ATTRIBUTES.includes(attributeName)) source.deleteAttribute(attributeName);
@@ -77,6 +86,11 @@ export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
     mesh.castShadow = shadowByMaterial.get(material) ?? false;
     mesh.receiveShadow = !isUnlit;
     merged.add(mesh);
+  }
+  // Same space as the baked geometry: world space of the source tree.
+  for (const object of kept) {
+    object.matrixWorld.decompose(object.position, object.quaternion, object.scale);
+    merged.add(object);
   }
   return merged;
 }

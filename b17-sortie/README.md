@@ -15,17 +15,19 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Turrets | Sperry top turret; Sperry ball turret to its handbook's installation drawing (glazed end bells, sighting window, ring gear, hanger, gunner folded as figure 39 shows); Bendix chin turret, Cheyenne tail guns, cheek, waist and radio-hatch guns |
 | Guns | Thirteen Browning AN/M2 .50s at true size (1.44 m, TM 9-225): receiver with feed cover, feedways and slide handle, perforated cooling jacket, flash hider; hand-held guns add spade grips, butterfly trigger and ring-and-bead sight |
 | Ammunition | Riveted boxes (tall bare-metal boxes at the waist windows and either side of the tail gunner, as in Pilot's Manual figures 76 and 78), articulated feed chutes routed to each gun's feedway, and linked .50 BMG belts at true size in a 1944 AP, incendiary, API, AP, tracer order |
+| Gunnery | Each M2 fires 800-rpm bursts: the barrel recoils inside its jacket, the bolt stud runs back in its slot, the belt steps a link, the flash leaves the flash hider, every fifth round is a tracer (slowed for display), and the spent case drops out of the receiver onto the floor inside, or overboard from the ball, chin and tail guns to the studio floor; cases are cleared after 30 seconds |
 | Interior | Every compartment from the Norden sight to the tail guns, laid out from the Standard Aircraft Characteristics inboard profile and the Pilot's Manual figures: Z-section frames and stringers, quilted insulation, plywood floors, bulkheads 4–7, instrument panel, pedestal, top-turret basket, racks and catwalk, radio sets, waist guns on K-6 mounts, ball turret, tail station, oxygen system |
 | Crew | Ten men posed with IK onto the real controls (wheels, grips, Norden knobs, throttles, Morse key). Each is a signed-distance sculpture meshed in a worker: anatomy under B-3/A-3 sheepskin, A-2 or F-3 heated suit, A-6 boots, A-11 helmet, A-14 mask and hose to his regulator, B-8 goggles, M4 helmet, M1 vest, M3 apron, B-4 life vest, harness |
 | Bomb bay | Twelve 500 lb bombs in two vertical racks either side of the catwalk, released bottom tier first through a real opening |
 
 The cutaway (**C**) peels the lead ship's starboard skin, frames and bulkheads back to the centreline and labels each crew station. The skin is clipped in the shader, so the cut follows the aircraft as it banks and the turrets keep turning with their gunners inside. Equipment hung on the starboard wall hides once the cut passes it. With the skin on, the crew show through glazed window openings.
 
-The sortie loop runs 64 seconds:
+The sortie loop runs 72 seconds:
 
 | Phase | What happens |
 |---|---|
 | Formation cruise | Gunners scan, formation wander |
+| Fighter attack | Unseen fighters press in; every gun in the box fires short bursts |
 | Initial point | Turn onto the run, bomb bay doors open, flak starts |
 | Bomb run | Held level through heavy flak |
 | Bombs away | Twelve 500 lb bombs leave in train from each ship |
@@ -55,6 +57,6 @@ npm run build      # typecheck + production build into dist/
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
 - `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
-- `src/scene/effects.ts` runs flak bursts, contrail ribbons and falling bombs.
+- `src/scene/effects.ts` runs flak bursts, contrail ribbons and falling bombs; `src/scene/gunnery.ts` fires the guns.
 - `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.
 - `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view.

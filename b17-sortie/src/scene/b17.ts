@@ -9,7 +9,8 @@ import { mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
 import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
-import { addM2 } from './m2';
+import type { MountedGun } from './gunnery';
+import { addM2, type M2Gun } from './m2';
 import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
 import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
@@ -652,7 +653,7 @@ function buildChinFairingGeometry(): THREE.BufferGeometry {
   return loftGeometry(rings, stations.map((d) => d / FUSELAGE_LENGTH), true, true);
 }
 
-function buildChinTurret(materials: AircraftMaterials): THREE.Group {
+function buildChinTurret(materials: AircraftMaterials): { turret: THREE.Group; guns: M2Gun[] } {
   const spec = STATIONS.chinTurret;
   const turret = new THREE.Group();
   turret.position.set(toX(spec.d), 0, 0);
@@ -663,11 +664,11 @@ function buildChinTurret(materials: AircraftMaterials): THREE.Group {
   const slotMiddle = (CHIN_GUN_SLOT.top + CHIN_GUN_SLOT.bottom) / 2;
   // Photographs show the guns resting a little below level, emerging from the upper part of the slots.
   const gunDirection = new THREE.Vector3(1, -Math.tan(THREE.MathUtils.degToRad(CHIN_GUN_REST_DEPRESSION_DEGREES)), 0);
-  for (const side of [-1, 1]) {
+  const guns = [-1, 1].map((side) => {
     part(turret, roundedBox(0.05, CHIN_GUN_SLOT.top - CHIN_GUN_SLOT.bottom, CHIN_GUN_SLOT.width, 0.015), materials.gunBlack, faceX - 0.01, slotMiddle, side * slotZ);
-    addM2(turret, new THREE.Vector3(faceX - 0.08, CHIN_GUN_SLOT.top - 0.1, side * slotZ), gunDirection, 'turret');
-  }
-  return turret;
+    return addM2(turret, new THREE.Vector3(faceX - 0.08, CHIN_GUN_SLOT.top - 0.1, side * slotZ), gunDirection, 'turret');
+  });
+  return { turret, guns };
 }
 
 /** Basis whose z axis is the surface normal and whose x axis runs along `along`, for decal projectors. */
@@ -735,6 +736,8 @@ export interface B17 {
   rackedBombs: THREE.Object3D[];
   crewStations: CrewStation[];
   crew: B17Interior['crew'];
+  /** All thirteen guns, for the gunnery. */
+  guns: MountedGun[];
   /** Materials a cutaway clips: the fuselage skin and everything mounted on it. */
   cutawayMaterials: THREE.Material[];
   /** Hidden once the cut opens; they hang on the starboard skin the cut removes. */
@@ -901,7 +904,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.oliveDrab, -0.4, 0.1, 0);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.position.set(0.18, 0.24, 0);
-  for (const side of [-1, 1]) addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret');
+  const topTurretGuns = [-1, 1].map((side) => addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret'));
   topTurretYaw.add(topTurretPitch);
   root.add(topTurretYaw);
 
@@ -911,13 +914,13 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   addBallTurretMount(ballYaw, { structure: materials.neutralGray, steel: materials.gunmetal });
   const ballPitch = new THREE.Group();
   addBallTurretShell(ballPitch, { shell: materials.neutralGray, glass: materials.canopy, seam: materials.rubber, steel: materials.steel });
-  for (const side of [-1, 1] as const) addM2(ballPitch, ballGunOrigin(side), FORWARD, 'turret');
+  const ballTurretGuns = ([-1, 1] as const).map((side) => addM2(ballPitch, ballGunOrigin(side), FORWARD, 'turret'));
   ballYaw.add(ballPitch);
   root.add(ballYaw);
 
   // Bendix chin turret on its fixed fairing.
   part(airframe, buildChinFairingGeometry(), materials.oliveDrab, 0, 0, 0);
-  const chinTurret = buildChinTurret(materials);
+  const { turret: chinTurret, guns: chinGuns } = buildChinTurret(materials);
   root.add(chinTurret);
 
   const tailWindows = STATIONS.tailTurretWindows;
@@ -953,6 +956,8 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     shells: [hullGeometry, tailHousingGeometry],
     topTurretYaw,
     topTurretPitch,
+    topTurretGuns,
+    ballTurretGuns,
     ballTurretPitch: ballPitch,
     createBomb,
     windowCutouts: cutouts,
@@ -978,6 +983,8 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     rackedBombs: interior.rackedBombs,
     crewStations: interior.stations,
     crew: interior.crew,
+    // The chin turret's belts run up from the nose boxes out of sight, and its cases chute overboard.
+    guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null }))],
     cutawayMaterials: [
       materials.hull, materials.oliveDrab, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
       materials.neutralGray, ballWindowMaskMaterial(materials.neutralGray), materials.tailHousing, ...interior.clipMaterials,

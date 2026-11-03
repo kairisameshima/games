@@ -30,7 +30,7 @@ function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { gr
   // The forward (starboard) gun swings aft and the aft (port) gun forward, so the two gunners, who stand back to back
   // near the centreline with the grips 0.6 m inboard of the mounts, are not in each other's way.
   const outward = new THREE.Vector3(side > 0 ? -0.35 : 0.35, -0.1, side).normalize();
-  addM2(parent, mount, outward, 'flexible');
+  const gun = addM2(parent, mount, outward, 'flexible');
   // Mount post down to the window sill, then the yoke up to the trunnions.
   const sill = mount.clone().add(new THREE.Vector3(0, -0.36, 0)).addScaledVector(outward, 0.04);
   rod(parent, sill, mount.clone().add(new THREE.Vector3(0, -0.1, 0)), 0.022, materials.aluminium);
@@ -42,11 +42,13 @@ function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { gr
   // aft side (Pilot's Manual figure 76). Box and chute stay with the gun in a cutaway.
   const floor = waistFloorHeight(d + 0.7);
   const ammunitionBox = v(d + 0.7, floor + WAIST_AMMUNITION_BOX[1] / 2, side * (hullHalfWidthAtHeight(d + 0.7, floor) - WAIST_AMMUNITION_BOX[2] / 2 - 0.03));
-  feedGun(materials, {
+  const belt = feedGun(materials, {
     boxParent: parent,
     box: { centre: ammunitionBox, size: WAIST_AMMUNITION_BOX, material: materials.aluminium },
     gun: { origin: mount, direction: outward, side: receiverSideToward(mount, outward, ammunitionBox) },
   });
+  // The waist floor was ankle-deep in brass after a long fight.
+  context.guns.push({ gun, belt, caseFloorY: waistFloorHeight(d) });
   // The gunner faces the window: his yaw turns him to look out along the gun.
   return { grips: [m2Point(mount, outward, M2_GRIPS.left), m2Point(mount, outward, M2_GRIPS.right)], yaw: Math.atan2(-outward.z, outward.x) };
 }
@@ -118,7 +120,7 @@ function addBallTurretInterior(context: CompartmentContext): [THREE.Vector3, THR
   // Ammunition boxes filling the top of the ball in front of him: forward for the right gun (445 rounds), rear for the
   // left (571). Each feeds its gun's outboard side, the belt coming down into the feedway from above.
   for (const [side, x, length] of [[1, 0.235, 0.13], [-1, 0.09, 0.15]] as const) {
-    feedGun(materials, {
+    const belt = feedGun(materials, {
       boxParent: pitch,
       box: {
         centre: new THREE.Vector3(x, 0.26, 0), size: [length, 0.22, 0.46], material: materials.ammunitionBox,
@@ -127,6 +129,8 @@ function addBallTurretInterior(context: CompartmentContext): [THREE.Vector3, THR
       gun: { origin: ballGunOrigin(side), direction: BALL_FORWARD, side, approach: beltFromAbove(side) },
       rise: 0.25,
     });
+    // Cases and links leave the ball through chutes into the slipstream.
+    context.guns.push({ gun: context.ballTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: null });
   }
   // K-4 computing sight hanging under the boxes, its reflector glass on the line from his eye to the window.
   part(pitch, roundedBox(0.17, 0.13, 0.12, 0.01), materials.crinkle, -0.1, 0.09, 0);
@@ -188,9 +192,10 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   const tailGrips = [v(TAIL.gripD, gripY, -0.12), v(TAIL.gripD, gripY, 0.12)] as const;
   // Twin guns in the Cheyenne mount, receivers inside the housing; links run from his grips back to each backplate.
   const tailGuns = TAIL.gunSpacing.map((z) => v(TAIL.gunMuzzleD - 0.92, TAIL.gunY, z));
-  tailGuns.forEach((origin, index) => {
-    addM2(parent, origin, AFT, 'turret');
+  const tailGunHandles = tailGuns.map((origin, index) => {
+    const handle = addM2(parent, origin, AFT, 'turret');
     rod(parent, tailGrips[index].clone().add(new THREE.Vector3(-0.03, 0.04, 0)), m2Point(origin, AFT, M2_BACKPLATE), 0.012, materials.gunBlack, 8);
+    return handle;
   });
   rod(parent, tailGrips[0].clone().add(new THREE.Vector3(-0.03, 0, 0)), tailGrips[1].clone().add(new THREE.Vector3(-0.03, 0, 0)), 0.015, materials.gunBlack);
   for (const grip of tailGrips) rod(parent, grip.clone().add(new THREE.Vector3(0, -0.06, 0)), grip.clone().add(new THREE.Vector3(0, 0.06, 0)), 0.016, materials.rubber, 10);
@@ -206,7 +211,7 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
     const feedSide = receiverSideToward(gun, AFT, v(boxD, 0, side));
     const trackD = TAIL.gunnerD + 0.3;
     const trackY = tailFloorHeight(trackD) + 0.55;
-    feedGun(materials, {
+    const belt = feedGun(materials, {
       boxParent: parent,
       box: {
         centre: v(boxD, boxFloor + height / 2, side * (hullHalfWidthAtHeight(TAIL.ammunitionD + length, tailFloorHeight(TAIL.ammunitionD + length)) - depth / 2 - 0.02)),
@@ -222,6 +227,8 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
         v(TAIL.gripD + 0.3, TAIL.gunY + 0.1, side * 0.2),
       ],
     });
+    // The Cheyenne mount chutes its cases and links overboard.
+    context.guns.push({ gun: tailGunHandles[side < 0 ? 0 : 1], belt, caseFloorY: null });
   }
   regulator(parent, materials, v(TAIL.gunnerD - 0.4, tailFloor + 0.45, hullHalfWidthAtHeight(TAIL.gunnerD - 0.4, tailFloor + 0.45) - 0.04), -Math.PI / 2);
 

@@ -14,7 +14,7 @@ import type { InteriorMaterials } from './materials';
  */
 
 const CARTRIDGE_LENGTH = 0.138;
-const BELT_PITCH = 0.0254;
+export const BELT_PITCH = 0.0254;
 const CHUTE = { width: 0.155, thickness: 0.038, pitch: 0.026 } as const;
 /** Straight run out of the box's throat and into the chute's mouth when the chute is routed through points. */
 const CHUTE_LEAD = 0.08;
@@ -122,18 +122,26 @@ function feedApproach(gun: GunFeed): { mouth: THREE.Vector3; inward: THREE.Vecto
   return { mouth, inward, forward, feedway };
 }
 
-/** The rounds from the chute's mouth into the feedway, in the gun's parent. */
-export function addExposedBelt(parent: THREE.Object3D, gun: GunFeed): void {
+/**
+ * The rounds from the chute's mouth into the feedway, in the gun's parent. The belt is one group whose local +z is the
+ * direction the belt travels and +x the rounds' axis, kept out of the airframe merge so the gunnery can step it one
+ * pitch (`BELT_PITCH`) along +z per shot.
+ */
+export function addExposedBelt(parent: THREE.Object3D, gun: GunFeed): THREE.Group {
   const { feedway, inward, forward } = feedApproach(gun);
   const up = new THREE.Vector3().crossVectors(inward, forward).normalize();
-  const basis = new THREE.Matrix4().makeBasis(forward, up, inward);
-  // One round inside the side plate so the belt visibly enters it.
-  for (let index = -1; index < EXPOSED_ROUNDS; index++) {
+  const belt = new THREE.Group();
+  belt.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(forward, up, inward));
+  belt.position.copy(feedway);
+  belt.userData.unmerged = true;
+  // One round inside the side plate so the belt visibly enters it, and one more in the chute's mouth to step forward.
+  for (let index = -1; index <= EXPOSED_ROUNDS; index++) {
     const round = roundTemplate(BELT_ORDER[(index + BELT_ORDER.length) % BELT_ORDER.length]).clone();
-    round.quaternion.setFromRotationMatrix(basis);
-    round.position.copy(feedway).addScaledVector(inward, -(index + 0.5) * BELT_PITCH);
-    parent.add(round);
+    round.position.z = -(index + 0.5) * BELT_PITCH;
+    belt.add(round);
   }
+  parent.add(belt);
+  return belt;
 }
 
 /**
@@ -250,8 +258,8 @@ function routedChute(throat: THREE.Vector3, facing: THREE.Vector3, via: THREE.Ve
   return path;
 }
 
-/** Box, chute and belt for one gun. Box and chute are one group, so the cutaway keeps or hides them together. */
-export function feedGun(materials: InteriorMaterials, options: GunFeedOptions): void {
+/** Box, chute and belt for one gun; returns the belt. Box and chute are one group, so the cutaway keeps or hides them together. */
+export function feedGun(materials: InteriorMaterials, options: GunFeedOptions): THREE.Group {
   const feed = new THREE.Group();
   options.boxParent.add(feed);
   const { throat, facing } = addAmmunitionBox(feed, materials, options.box);
@@ -265,5 +273,5 @@ export function feedGun(materials: InteriorMaterials, options: GunFeedOptions): 
   if (startWidth.lengthSq() < 1e-4) startWidth.crossVectors(facing, inward);
   addChute(feed, curve, startWidth.normalize(), forward);
   const belt = options.beltGun ?? { parent: options.boxParent, gun: options.gun };
-  addExposedBelt(belt.parent, belt.gun);
+  return addExposedBelt(belt.parent, belt.gun);
 }

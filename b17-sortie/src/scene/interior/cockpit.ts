@@ -113,12 +113,14 @@ function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vect
   const pitch = context.topTurretPitch;
   for (const side of [-1, 1] as const) {
     const gunInPitch = new THREE.Vector3(0, 0, (side * STATIONS.topTurret.gunSpacing) / 2);
-    feedGun(materials, {
+    const belt = feedGun(materials, {
       boxParent: topTurretYaw,
       box: { centre: new THREE.Vector3(-0.04, -0.42, side * 0.36), size: [0.26, 0.3, 0.13], material: materials.ammunitionBox },
       gun: { origin: gunInPitch.clone().add(pitch.position), direction: FORWARD, side },
       beltGun: { parent: pitch, gun: { origin: gunInPitch, direction: FORWARD, side } },
     });
+    // Empty cases drop out of the receivers through the basket onto the flight deck.
+    context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: FLOORS.flightDeck.y });
   }
   // Computing sight: housing, reflector glass, and the hand grips below.
   part(topTurretYaw, roundedBox(0.12, 0.13, 0.1, 0.015), materials.crinkle, 0.24, 0.17, 0);

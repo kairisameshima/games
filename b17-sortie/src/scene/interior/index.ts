@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { figureMesh, type FigureDetail } from '../crew/figure';
 import { meshFigureInWorker } from '../crew/figure-pool';
+import type { MountedGun } from '../gunnery';
+import type { M2Gun } from '../m2';
 import { hullHalfWidthAtHeight, toX } from '../hull';
 import { buildSkeleton } from '../crew/skeleton';
 import { buildBombBay, buildRadioRoom } from './bomb-bay';
@@ -23,6 +25,8 @@ export interface InteriorHosts {
   shells: THREE.BufferGeometry[];
   topTurretYaw: THREE.Object3D;
   topTurretPitch: THREE.Object3D;
+  topTurretGuns: M2Gun[];
+  ballTurretGuns: M2Gun[];
   ballTurretPitch: THREE.Object3D;
   createBomb: () => THREE.Object3D;
   /** The hull's window openings, cut through the interior skin too. */
@@ -38,6 +42,8 @@ export interface B17Interior {
   clipMaterials: THREE.Material[];
   /** Each man, his figure mesh, and the group carrying it: what the fit audit checks against the hull. */
   crew: { station: StationCrew; mesh: THREE.Mesh }[];
+  /** The guns the interior built or fed, with their belts and where their cases fall. */
+  guns: MountedGun[];
 }
 
 /** Head-top clearance for a callout pinned above a man. */
@@ -82,9 +88,10 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
   hosts.root.updateMatrixWorld(true);
   // Compartment equipment is built into its own group first, then sorted between the airframe and the starboard wall.
   const equipment = new THREE.Group();
+  const guns: MountedGun[] = [];
   const context: CompartmentContext = {
     parent: equipment, root: hosts.root, materials,
-    topTurretYaw: hosts.topTurretYaw, topTurretPitch: hosts.topTurretPitch, ballTurretPitch: hosts.ballTurretPitch, createBomb: hosts.createBomb,
+    topTurretYaw: hosts.topTurretYaw, topTurretPitch: hosts.topTurretPitch, topTurretGuns: hosts.topTurretGuns, ballTurretGuns: hosts.ballTurretGuns, guns, ballTurretPitch: hosts.ballTurretPitch, createBomb: hosts.createBomb,
   };
   const bombBay = buildBombBay(context);
   const compartments = [buildNose(context), buildCockpit(context), bombBay, buildRadioRoom(context), buildWaistAndTail(context)];
@@ -111,7 +118,7 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
     stations.push({ role, anchor, placement: entry.placement, showsBombLoad: false });
   }
   return {
-    rackedBombs: bombBay.rackedBombs, stations, crew: figures, starboardWall,
+    rackedBombs: bombBay.rackedBombs, stations, crew: figures, starboardWall, guns,
     clipMaterials: [materials.frame, materials.frameGreen, materials.bulkheadWeb],
   };
 }

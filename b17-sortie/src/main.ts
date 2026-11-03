@@ -7,6 +7,7 @@ import {
 import { buildB17, createBomb, type B17 } from './scene/b17';
 import { Cutaway } from './scene/cutaway';
 import { BombTrain, Contrails, FlakField } from './scene/effects';
+import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { buildDisplayStand, buildStudioSet, driftClouds, type DisplayStand } from './scene/set';
 import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
@@ -125,7 +126,9 @@ const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
 const flak = new FlakField();
 const contrails = new Contrails(contrailEmitters.length);
 const bombs = new BombTrain(createBomb, 1.0);
-scene.add(flak.root, contrails.mesh, bombs.root);
+const gunnery = new Gunnery(MODEL_SCALE);
+for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
+scene.add(flak.root, contrails.mesh, bombs.root, gunnery.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -256,6 +259,7 @@ let playing = true;
 function resetEffects(): void {
   flak.reset();
   bombs.reset();
+  gunnery.resetTracers();
   for (const ship of formation) ship.bombsDropped = 0;
 }
 
@@ -443,7 +447,9 @@ function frame(timestamp: number): void {
     const state = index === 0 ? leadState : sortieStateAt(Math.max(sortieTime - ship.lag, 0));
     if (state.bombsReleased < ship.bombsDropped) ship.bombsDropped = state.bombsReleased;
     animateShip(ship, state, playing ? elapsed : 0, deltaSec, index);
+    gunnery.updateShip(index, state.time, state.gunfire, deltaSec);
   });
+  gunnery.update(deltaSec, AIR_DRIFT_SPEED);
 
   driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45);
   flak.update(deltaSec, leadState.flakRate, AIR_DRIFT_SPEED, flakZone);
@@ -468,7 +474,7 @@ function frame(timestamp: number): void {
 }
 
 if (import.meta.env.DEV) {
-  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, jumpToPhase, switchView, setCutawayOpen, setPlaying: (value: boolean) => { playing = value; } } });
+  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setCutawayOpen, setPlaying: (value: boolean) => { playing = value; } } });
 }
 
 requestAnimationFrame(frame);

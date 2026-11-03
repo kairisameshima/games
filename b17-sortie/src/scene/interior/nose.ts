@@ -46,14 +46,15 @@ function addCheekGun(context: CompartmentContext, d: number, side: 1 | -1): void
   const mount = v(d, 0.05, side * (hullHalfWidthAtHeight(d, 0.05) - 0.02));
   // The gun points forward and out; its receiver runs back inside the nose.
   const direction = new THREE.Vector3(1, -0.05, side * 0.32);
-  addM2(parent, mount, direction, 'flexible');
+  const gun = addM2(parent, mount, direction, 'flexible');
   // Boxes against the wall are inset from the skin at their bottom edge, where the nose is narrowest.
   const ammunitionBox = v(d + 0.15, FLOORS.nose.y + 0.14, side * (hullHalfWidthAtHeight(d, FLOORS.nose.y) - 0.1));
-  feedGun(materials, {
+  const belt = feedGun(materials, {
     boxParent: parent,
     box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
     gun: { origin: mount, direction, side: receiverSideToward(mount, direction, ammunitionBox) },
   });
+  context.guns.push({ gun, belt, caseFloorY: FLOORS.nose.y });
 }
 
 function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector3; chart: THREE.Vector3 } {

@@ -100,14 +100,15 @@ export function buildRadioRoom(context: CompartmentContext): CompartmentResult {
   const roof = hullSectionAt(hatchD).top;
   const mount = v(hatchD - 0.1, roof - 0.12, 0);
   const elevation = new THREE.Vector3(-0.8, 0.6, 0);
-  addM2(parent, mount, elevation, 'flexible');
+  const gun = addM2(parent, mount, elevation, 'flexible');
   rod(parent, v(hatchD - 0.1, roof - 0.02, 0), mount.clone().add(new THREE.Vector3(0, -0.05, 0)), 0.02, materials.aluminium);
   const ammunitionBox = v(hatchD - 0.2, floor + 0.15, 0.55);
-  feedGun(materials, {
+  const belt = feedGun(materials, {
     boxParent: parent,
     box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
     gun: { origin: mount, direction: elevation, side: receiverSideToward(mount, elevation, ammunitionBox) },
   });
+  context.guns.push({ gun, belt, caseFloorY: floor });
 
   // Oxygen bottles under the starboard wall, a regulator for the operator, extinguisher on the forward bulkhead.
   for (let bottle = 0; bottle < 2; bottle++) {
