@@ -2,11 +2,15 @@ import {
   ARTILLERY,
   AUTOMATION,
   BATTLE,
+  BLUEPRINTS,
+  DOCTRINES,
+  ARMOR_POOL,
+  EMPLACEMENT_POOL,
   ENEMY_KINDS,
-  ENEMY_POOL,
-  ENEMY_SCALING,
+  OFFENSIVE,
   PARTS,
-  RESEARCH,
+  PRESTIGE,
+  SECTOR,
   START,
   STATIONS,
   TANK_MODELS,
@@ -14,7 +18,8 @@ import {
 
 export const MODEL_BY_ID = Object.fromEntries(TANK_MODELS.map((model) => [model.id, model]));
 export const STATION_BY_ID = Object.fromEntries(STATIONS.map((station) => [station.id, station]));
-export const RESEARCH_BY_ID = Object.fromEntries(RESEARCH.map((project) => [project.id, project]));
+export const DOCTRINE_BY_ID = Object.fromEntries(DOCTRINES.map((doctrine) => [doctrine.id, doctrine]));
+export const BLUEPRINT_BY_MODEL = Object.fromEntries(BLUEPRINTS.map((blueprint) => [blueprint.model, blueprint]));
 
 const CRAFTER_IDS = ["mill", "hull", "turret", "engine"];
 const MAX_CYCLES_PER_TICK = 10000;
@@ -28,34 +33,34 @@ export function createInitialState(now = Date.now()) {
   return {
     savedAt: now,
     time: 0,
-    resources: { salvage: START.salvage, intel: 0, steel: START.steel },
+    resources: { salvage: START.salvage, steel: START.steel },
     parts: { hull: 0, turret: 0, engine: 0 },
     stations,
-    research: {},
+    doctrine: {},
+    blueprints: {},
     production: "stuart",
     depot: [],
     units: [],
     nextUnitId: 1,
     battle: {
-      wave: 1,
-      maxWave: 1,
-      queue: [],
-      spawnTimer: 0,
+      sector: 1,
+      maxSector: 1,
+      progressTime: 0,
       pause: 1,
       active: false,
-      autoAdvance: true,
-      killsThisWave: 0,
-      waveSize: 0,
-      elapsed: 0,
+      trenches: [],
+      defensesTotal: 0,
+      reinforceTimer: 0,
       artilleryTimer: 0,
     },
-    automation: { upgrades: false, research: false, timer: 0 },
-    stats: { tanksBuilt: 0, tanksLost: 0, kills: 0, salvageEarned: 0, intelEarned: 0 },
+    prestige: { medals: 0, count: 0, bestSector: 1 },
+    automation: { upgrades: false, timer: 0 },
+    stats: { tanksBuilt: 0, tanksLost: 0, tanksCommitted: 0, kills: 0, offensives: 0, salvageEarned: 0 },
   };
 }
 
-export function researchLevel(state, id) {
-  return state.research[id] ?? 0;
+export function doctrineLevel(state, id) {
+  return state.doctrine[id] ?? 0;
 }
 
 function seededRandom(seed) {
@@ -68,65 +73,84 @@ function seededRandom(seed) {
   };
 }
 
-export function isBossWave(wave) {
-  return wave % BATTLE.bossEvery === 0;
+function pickWeighted(random, pool) {
+  const total = pool.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = random() * total;
+  return (pool.find((entry) => (roll -= entry.weight) < 0) ?? pool[pool.length - 1]).kind;
 }
 
-export function waveComposition(wave) {
-  const random = seededRandom(wave * 7919 + 17);
-  const pool = ENEMY_POOL.filter((entry) => wave >= entry.fromWave);
-  const totalWeight = pool.reduce((sum, entry) => sum + entry.weight, 0);
-  const count = Math.min(
-    ENEMY_SCALING.maxCount,
-    ENEMY_SCALING.baseCount + Math.floor((wave - 1) / ENEMY_SCALING.wavesPerExtraEnemy),
-  );
-  const kinds = [];
-  for (let index = 0; index < count; index += 1) {
-    let roll = random() * totalWeight;
-    const picked = pool.find((entry) => (roll -= entry.weight) < 0) ?? pool[pool.length - 1];
-    kinds.push(picked.kind);
+/**
+ * The fortified position for a sector, generated from the sector number alone so the same sector always
+ * looks and fights the same. Lines get deeper, wider and tougher as sectors rise.
+ */
+export function sectorPlan(sector) {
+  const random = seededRandom(sector * 7919 + 17);
+  const lineCount = Math.min(SECTOR.maxLines, 1 + Math.floor((sector - 1) / SECTOR.sectorsPerExtraLine));
+  const emplacementPool = EMPLACEMENT_POOL.filter((entry) => sector >= entry.fromSector);
+  const armorPool = ARMOR_POOL.filter((entry) => sector >= entry.fromSector);
+  const plan = { trenches: [], emplacements: [], reserve: [], base: { kind: "hq", x: SECTOR.baseX, z: 0 } };
+  for (let line = 0; line < lineCount; line += 1) {
+    const lineX = SECTOR.firstLineX + line * SECTOR.lineSpacing + (random() - 0.5) * 3;
+    if (sector >= SECTOR.trenchFromSector) plan.trenches.push({ x: lineX - SECTOR.trenchOffset, width: SECTOR.trenchWidth });
+    const count = Math.min(SECTOR.maxEmplacementsPerLine, SECTOR.emplacementsBase + Math.floor((sector - 1) / SECTOR.sectorsPerExtraEmplacement) + line);
+    for (let index = 0; index < count; index += 1) {
+      const spread = count === 1 ? 0 : (index / (count - 1)) * 2 - 1;
+      const z = spread * (BATTLE.laneHalfWidth - 1) + (random() - 0.5) * 1.5;
+      plan.emplacements.push({ kind: pickWeighted(random, emplacementPool), x: lineX + (random() - 0.5) * 2, z });
+    }
   }
-  if (isBossWave(wave)) {
-    kinds.splice(Math.floor(kinds.length / 2), 0, "landship");
+  const reserveCount = Math.min(SECTOR.maxReserve, SECTOR.reserveBase + Math.floor((sector - 1) / SECTOR.sectorsPerExtraReserve));
+  for (let index = 0; index < reserveCount; index += 1) {
+    plan.reserve.push({ kind: pickWeighted(random, armorPool), x: SECTOR.baseX - 6 - random() * 10, z: (random() * 2 - 1) * (BATTLE.laneHalfWidth - 1) });
   }
-  return kinds;
+  if (sector % SECTOR.landshipEvery === 0) plan.reserve.push({ kind: "landship", x: SECTOR.baseX - 10, z: 0 });
+  plan.triggerX = SECTOR.firstLineX - SECTOR.reserveTriggerOffset;
+  return plan;
 }
 
-export function enemyStats(kindId, wave) {
+export function enemyStats(kindId, sector) {
   const kind = ENEMY_KINDS[kindId];
-  const step = wave - 1;
+  const step = sector - 1;
+  const growth = SECTOR.growth;
   return {
-    hp: kind.hp * ENEMY_SCALING.hpGrowth ** step,
-    armor: kind.armor * ENEMY_SCALING.armorGrowth ** step,
-    damage: kind.damage * ENEMY_SCALING.damageGrowth ** step,
+    hp: kind.hp * growth.hp ** step,
+    armor: kind.armor * growth.armor ** step,
+    damage: kind.damage * growth.damage ** step,
     reload: kind.reload,
     range: kind.range,
     speed: kind.speed,
-    salvage: kind.salvage * ENEMY_SCALING.salvageGrowth ** step,
-    intel: kind.intel * ENEMY_SCALING.intelGrowth ** step,
+    salvage: kind.salvage * growth.salvage ** step,
   };
 }
 
-export function salvageMultiplier(state) {
-  return 1 + 0.2 * researchLevel(state, "scavenging");
+/** Salvage for destroying everything a sector fields at the start, before reinforcements. */
+export function sectorValue(state, sector) {
+  const plan = sectorPlan(sector);
+  let salvage = 0;
+  for (const entry of [...plan.emplacements, ...plan.reserve, plan.base]) salvage += enemyStats(entry.kind, sector).salvage;
+  return salvage * salvageMultiplier(state);
 }
 
-export function intelMultiplier(state) {
-  return 1 + 0.15 * researchLevel(state, "intelligence");
+export function trenchAt(state, x) {
+  return state.battle.trenches.find((trench) => Math.abs(x - trench.x) <= trench.width / 2) ?? null;
+}
+
+export function salvageMultiplier(state) {
+  return 1 + 0.2 * doctrineLevel(state, "scavenging");
 }
 
 export function tankStats(state, modelId) {
   const model = MODEL_BY_ID[modelId];
-  const plating = researchLevel(state, "plating");
+  const plating = doctrineLevel(state, "plating");
   return {
     hp: model.hp * 1.15 ** plating,
     armor: model.armor * 1.08 ** plating,
-    damage: model.damage * 1.15 ** researchLevel(state, "gun"),
+    damage: model.damage * 1.15 ** doctrineLevel(state, "gun"),
     reload: model.reload,
-    range: model.range * (1 + 0.05 * researchLevel(state, "optics")),
-    speed: model.speed * (1 + 0.1 * researchLevel(state, "engines")),
-    penetration: 1 - 0.07 * researchLevel(state, "penetrator"),
-    regenPerSecond: 0.005 * researchLevel(state, "repair"),
+    range: model.range * (1 + 0.05 * doctrineLevel(state, "optics")),
+    speed: model.speed * (1 + 0.1 * doctrineLevel(state, "engines")),
+    penetration: 1 - 0.07 * doctrineLevel(state, "penetrator"),
+    regenPerSecond: 0.005 * doctrineLevel(state, "repair"),
   };
 }
 
@@ -135,32 +159,50 @@ export function effectiveDamage(damage, armor) {
 }
 
 export function isModelUnlocked(state, modelId) {
-  if (modelId === TANK_MODELS[0].id) return true;
-  const project = RESEARCH.find((entry) => entry.unlocksModel === modelId);
-  return project !== undefined && researchLevel(state, project.id) > 0;
+  return modelId === TANK_MODELS[0].id || state.blueprints[modelId] === true;
+}
+
+/** Blueprints unlock in roster order, so each one needs the model before it. */
+export function previousModel(modelId) {
+  return TANK_MODELS[TANK_MODELS.findIndex((model) => model.id === modelId) - 1] ?? null;
+}
+
+export function canBuyBlueprint(state, modelId) {
+  const blueprint = BLUEPRINT_BY_MODEL[modelId];
+  if (!blueprint || isModelUnlocked(state, modelId)) return false;
+  return isModelUnlocked(state, previousModel(modelId).id) && state.resources.salvage >= blueprint.cost;
+}
+
+export function buyBlueprint(state, modelId, events = []) {
+  if (!canBuyBlueprint(state, modelId)) return false;
+  state.resources.salvage -= BLUEPRINT_BY_MODEL[modelId].cost;
+  state.blueprints[modelId] = true;
+  state.production = modelId;
+  events.push({ type: "blueprint", model: modelId });
+  return true;
 }
 
 export function unlockedModels(state) {
   return TANK_MODELS.filter((model) => isModelUnlocked(state, model.id));
 }
 
-export function deployCap(state) {
-  return START.deployCap + START.deployPerLogistics * researchLevel(state, "logistics");
+export function deployCap() {
+  return START.maxFrontTanks;
 }
 
 export function depotCap(state) {
-  return START.depotCap + researchLevel(state, "warehouses");
+  return START.depotCap + doctrineLevel(state, "warehouses");
 }
 
 export function storageCap(state, resourceId) {
   const station = STATIONS.find((entry) => entry.output === resourceId);
   const level = state.stations[station.id].level;
   const base = station.baseStorage + station.storagePerLevel * (level - 1);
-  return Math.floor(base * (1 + 0.5 * researchLevel(state, "warehouses")));
+  return Math.floor(base * (1 + 0.5 * doctrineLevel(state, "warehouses")));
 }
 
 export function powerSupply(state) {
-  return START.powerPerLevel * state.stations.power.level * (1 + 0.3 * researchLevel(state, "grid"));
+  return START.powerPerLevel * state.stations.power.level * (1 + 0.3 * doctrineLevel(state, "grid"));
 }
 
 export function powerDemand(state) {
@@ -176,17 +218,17 @@ export function powerFactor(state) {
 }
 
 function stationResearchMultiplier(state, stationId) {
-  if (stationId === "mill") return 1 + 0.25 * researchLevel(state, "bessemer");
-  if (stationId === "assembly") return 1 + 0.25 * researchLevel(state, "jigs");
-  return 1 + 0.25 * researchLevel(state, "tooling");
+  if (stationId === "mill") return 1 + 0.25 * doctrineLevel(state, "bessemer");
+  if (stationId === "assembly") return 1 + 0.25 * doctrineLevel(state, "jigs");
+  return 1 + 0.25 * doctrineLevel(state, "tooling");
 }
 
 /**
- * Heavier guns and thicker armor make every tank harder to build, so research
+ * Heavier guns and thicker armor make every tank harder to build, so doctrine
  * keeps pushing the factory to grow instead of letting it idle at the front cap.
  */
 export function tankComplexity(state) {
-  return START.complexityPerUpgrade ** (researchLevel(state, "gun") + researchLevel(state, "plating"));
+  return START.complexityPerUpgrade ** (doctrineLevel(state, "gun") + doctrineLevel(state, "plating"));
 }
 
 /** Cycles per second for crafters, build-seconds of work per second for the assembly hall. */
@@ -198,30 +240,144 @@ export function stationRate(state, stationId) {
   return (base * level * stationResearchMultiplier(state, stationId) * powerFactor(state)) / complexity;
 }
 
-/** Tanks per second each stage could sustain on its own for the model in production. */
-export function stageThroughput(state) {
-  const model = MODEL_BY_ID[state.production];
-  const throughput = { assembly: stationRate(state, "assembly") / model.buildSeconds };
-  let steelPerTank = 0;
-  for (const part of PARTS) {
-    throughput[part] = stationRate(state, part) / model.parts[part];
-    steelPerTank += model.parts[part] * STATION_BY_ID[part].inputs.steel;
-  }
-  throughput.mill = stationRate(state, "mill") / steelPerTank;
-  return throughput;
+/** Relative worth of one tank in an offensive. A Stuart is 1; heavier designs need more parts. */
+export function tankValue(modelId) {
+  const parts = MODEL_BY_ID[modelId].parts;
+  return PARTS.reduce((sum, part) => sum + parts[part], 0) / PARTS.length;
+}
+
+export function offensiveCost(state) {
+  return OFFENSIVE.baseValue + OFFENSIVE.valuePerSector * state.battle.sector;
 }
 
 /**
- * The one thing holding tank output back. A power shortfall slows every machine, so it wins outright.
- * A full depot means the factory already outpaces the front, so the limit is Logistics, not a station.
+ * Offensives only retake ground: the target is capped at the best sector ever reached, so pushing the
+ * record still takes a factory strong enough to break the position.
  */
-export function findBottleneck(state) {
-  if (powerFactor(state) < 1) return { kind: "power", stationId: "power" };
-  if (state.stations.assembly.status === "blocked") return { kind: "front", stationId: null };
-  const throughput = stageThroughput(state);
-  let stationId = "assembly";
-  for (const id of Object.keys(throughput)) if (throughput[id] < throughput[stationId]) stationId = id;
-  return { kind: "station", stationId, tanksPerSecond: throughput[stationId] };
+export function offensiveTarget(state) {
+  return Math.min(state.battle.sector + OFFENSIVE.sectors, state.prestige.bestSector - OFFENSIVE.recordMargin);
+}
+
+export function canFallBack(state) {
+  return state.battle.sector > 1;
+}
+
+/** With no way to lose, a position the factory cannot break would trap the run; falling back frees it. */
+export function fallBack(state, events = []) {
+  if (!canFallBack(state)) return false;
+  const battle = state.battle;
+  clearEnemies(state);
+  battle.trenches = [];
+  battle.active = false;
+  battle.pause = BATTLE.capturePauseSeconds;
+  battle.sector -= 1;
+  events.push({ type: "fallBack", sector: battle.sector });
+  return true;
+}
+
+export function frontStrength(state) {
+  let strength = 0;
+  for (const unit of state.units) if (unit.side === "ally") strength += tankValue(unit.kind);
+  return strength;
+}
+
+export function canLaunchOffensive(state) {
+  return offensiveTarget(state) > state.battle.sector && frontStrength(state) >= offensiveCost(state);
+}
+
+/** Commits the weakest tanks first until the cost is covered, so the strongest stay to hold the new line. */
+function commitTanks(state, cost) {
+  const allies = state.units.filter((unit) => unit.side === "ally").sort((a, b) => tankValue(a.kind) - tankValue(b.kind));
+  const committed = new Set();
+  let paid = 0;
+  for (const unit of allies) {
+    if (paid >= cost) break;
+    committed.add(unit.id);
+    paid += tankValue(unit.kind);
+  }
+  state.units = state.units.filter((unit) => !committed.has(unit.id));
+  state.stats.tanksCommitted += committed.size;
+  return [...committed];
+}
+
+function captureBonus(state, sector) {
+  return sectorValue(state, sector) * SECTOR.captureBonusShare;
+}
+
+/** What the sectors an offensive skips would have paid if fought one by one, capture bonuses included. */
+export function offensiveReward(state) {
+  let salvage = 0;
+  for (let sector = state.battle.sector; sector < offensiveTarget(state); sector += 1) salvage += sectorValue(state, sector) + captureBonus(state, sector);
+  return salvage;
+}
+
+/** Any forward movement resets the stall clock; only fought captures raise the run's record. */
+function advanceTo(state, sector, fought) {
+  const battle = state.battle;
+  battle.sector = sector;
+  battle.progressTime = state.time;
+  if (!fought || sector <= battle.maxSector) return;
+  battle.maxSector = sector;
+  state.prestige.bestSector = Math.max(state.prestige.bestSector, sector);
+}
+
+function clearEnemies(state) {
+  for (const unit of state.units) if (unit.side === "enemy") unit.hp = 0;
+  state.units = state.units.filter((unit) => unit.hp > 0);
+}
+
+/**
+ * Commits front-line tanks to break through several sectors at once: their salvage pays out immediately and
+ * the factory has to rebuild the army, so a stronger factory turns straight into faster progress.
+ */
+export function launchOffensive(state, events = []) {
+  if (!canLaunchOffensive(state)) return false;
+  const battle = state.battle;
+  const salvage = offensiveReward(state);
+  const fromSector = battle.sector;
+  const toSector = offensiveTarget(state);
+  const committed = commitTanks(state, offensiveCost(state));
+  state.resources.salvage += salvage;
+  state.stats.salvageEarned += salvage;
+  state.stats.offensives += 1;
+  clearEnemies(state);
+  battle.active = false;
+  battle.pause = BATTLE.capturePauseSeconds;
+  advanceTo(state, toSector, false);
+  events.push({ type: "offensive", fromSector, toSector, salvage, committed });
+  return true;
+}
+
+export function medalsForSector(sector) {
+  if (sector < PRESTIGE.minSector) return 0;
+  return Math.floor(PRESTIGE.medalsAtMinSector * PRESTIGE.medalGrowth ** (sector - PRESTIGE.minSector));
+}
+
+export function canPrestige(state) {
+  return medalsForSector(state.battle.maxSector) > 0;
+}
+
+/** Seconds since the front last moved forward, by capture or offensive. */
+export function secondsSinceProgress(state) {
+  return state.time - state.battle.progressTime;
+}
+
+/**
+ * Regroup: everything bought with salvage resets (stations, blueprints and the front).
+ * Doctrine, medals, lifetime stats and the auto-upgrade switch carry over.
+ */
+export function prestige(state, now = Date.now()) {
+  if (!canPrestige(state)) return null;
+  const next = createInitialState(now);
+  next.doctrine = { ...state.doctrine };
+  next.prestige = {
+    medals: state.prestige.medals + medalsForSector(state.battle.maxSector),
+    count: state.prestige.count + 1,
+    bestSector: Math.max(state.prestige.bestSector, state.battle.maxSector),
+  };
+  next.stats = { ...state.stats };
+  next.automation.upgrades = state.automation.upgrades && doctrineLevel(state, "requisition") > 0;
+  return next;
 }
 
 export function stationUpgradeCost(state, stationId) {
@@ -237,36 +393,25 @@ export function upgradeStation(state, stationId) {
   return true;
 }
 
-export function researchCost(state, id) {
-  const project = RESEARCH_BY_ID[id];
-  return Math.ceil(project.cost * project.growth ** researchLevel(state, id));
+export function doctrineCost(state, id) {
+  const doctrine = DOCTRINE_BY_ID[id];
+  return Math.ceil(doctrine.cost * doctrine.growth ** doctrineLevel(state, id));
 }
 
-export function researchRequirementsMet(state, id) {
-  const project = RESEARCH_BY_ID[id];
-  return (project.requires ?? []).every((required) => researchLevel(state, required) > 0);
+export function isDoctrineMaxed(state, id) {
+  return doctrineLevel(state, id) >= DOCTRINE_BY_ID[id].max;
 }
 
-export function isResearchMaxed(state, id) {
-  return researchLevel(state, id) >= RESEARCH_BY_ID[id].max;
+export function canBuyDoctrine(state, id) {
+  return !isDoctrineMaxed(state, id) && state.prestige.medals >= doctrineCost(state, id);
 }
 
-export function canBuyResearch(state, id) {
-  return researchRequirementsMet(state, id) && !isResearchMaxed(state, id) && state.resources.intel >= researchCost(state, id);
-}
-
-export function buyResearch(state, id, events = []) {
-  if (!canBuyResearch(state, id)) return false;
-  state.resources.intel -= researchCost(state, id);
-  state.research[id] = researchLevel(state, id) + 1;
+export function buyDoctrine(state, id, events = []) {
+  if (!canBuyDoctrine(state, id)) return false;
+  state.prestige.medals -= doctrineCost(state, id);
+  state.doctrine[id] = doctrineLevel(state, id) + 1;
   refreshAllyStats(state);
-  const project = RESEARCH_BY_ID[id];
-  if (project.unlocksModel) {
-    const current = MODEL_BY_ID[state.production];
-    const unlocked = MODEL_BY_ID[project.unlocksModel];
-    if (TANK_MODELS.indexOf(unlocked) > TANK_MODELS.indexOf(current)) state.production = unlocked.id;
-  }
-  events.push({ type: "research", id });
+  events.push({ type: "doctrine", id });
   return true;
 }
 
@@ -276,10 +421,9 @@ export function setProduction(state, modelId) {
   return true;
 }
 
-export function setAutomation(state, key, enabled) {
-  const requiredResearch = key === "upgrades" ? "requisition" : "bureau";
-  if (enabled && researchLevel(state, requiredResearch) === 0) return false;
-  state.automation[key] = enabled;
+export function setAutoUpgrade(state, enabled) {
+  if (enabled && doctrineLevel(state, "requisition") === 0) return false;
+  state.automation.upgrades = enabled;
   return true;
 }
 
@@ -409,16 +553,15 @@ function deployFromDepot(state, events) {
   }
 }
 
-function spawnEnemy(state, kindId) {
-  const wave = state.battle.wave;
-  const stats = enemyStats(kindId, wave);
+function spawnEnemy(state, kindId, x, z, extra = {}) {
+  const stats = enemyStats(kindId, state.battle.sector);
   const id = state.nextUnitId++;
   state.units.push({
     id,
     side: "enemy",
     kind: kindId,
-    x: BATTLE.spawnX,
-    z: ENEMY_KINDS[kindId].boss ? 0 : laneZ(state, id),
+    x,
+    z,
     hp: stats.hp,
     maxHp: stats.hp,
     armor: stats.armor,
@@ -427,87 +570,102 @@ function spawnEnemy(state, kindId) {
     range: stats.range,
     speed: stats.speed,
     penetration: 1,
-    regenPerSecond: 0,
+    regenPerSecond: ENEMY_KINDS[kindId].structure ? SECTOR.repairPerSecond : 0,
     salvage: stats.salvage,
-    intel: stats.intel,
     cooldown: stats.reload * 0.5,
     targetId: null,
-    moving: true,
+    moving: false,
+    structure: Boolean(ENEMY_KINDS[kindId].structure),
+    dormant: false,
+    reinforcement: false,
+    ...extra,
   });
 }
 
-function startWave(state) {
+/** Builds the sector's position and moves the army up to its start line. */
+function startSector(state, events) {
   const battle = state.battle;
-  battle.queue = waveComposition(battle.wave);
-  battle.waveSize = battle.queue.length;
-  battle.killsThisWave = 0;
-  battle.spawnTimer = 0;
-  battle.elapsed = 0;
-  battle.artilleryTimer = artilleryIntervalSeconds(battle.wave);
+  const plan = sectorPlan(battle.sector);
+  battle.trenches = plan.trenches;
+  for (const entry of plan.emplacements) spawnEnemy(state, entry.kind, entry.x, entry.z);
+  for (const entry of plan.reserve) spawnEnemy(state, entry.kind, entry.x, entry.z, { dormant: true, triggerX: plan.triggerX });
+  spawnEnemy(state, plan.base.kind, plan.base.x, plan.base.z);
+  battle.defensesTotal = plan.emplacements.length + plan.reserve.length + 1;
+  battle.reinforceTimer = SECTOR.reinforceSeconds;
+  battle.artilleryTimer = artilleryIntervalSeconds(battle.sector);
+  for (const unit of state.units) {
+    if (unit.side === "ally") unit.x = Math.min(unit.x, BATTLE.startX + unit.holdBack);
+  }
   battle.active = true;
+  events.push({ type: "sectorStart", sector: battle.sector });
 }
 
-function runWaves(state, dt, events) {
+function captureSector(state, events) {
+  const battle = state.battle;
+  const captured = battle.sector;
+  const bonus = captureBonus(state, captured);
+  state.resources.salvage += bonus;
+  state.stats.salvageEarned += bonus;
+  clearEnemies(state);
+  battle.trenches = [];
+  battle.active = false;
+  battle.pause = BATTLE.capturePauseSeconds;
+  advanceTo(state, captured + 1, true);
+  events.push({ type: "sectorCaptured", sector: captured, bonus });
+}
+
+/** While the base stands it keeps feeding armor into the fight, so a stalled assault keeps bleeding tanks. */
+function runReinforcements(state, dt) {
+  const battle = state.battle;
+  battle.reinforceTimer -= dt;
+  if (battle.reinforceTimer > 0) return;
+  battle.reinforceTimer = SECTOR.reinforceSeconds;
+  const alive = state.units.filter((unit) => unit.reinforcement).length;
+  if (alive >= SECTOR.maxReinforcements) return;
+  const random = seededRandom(state.nextUnitId * 31 + battle.sector);
+  const pool = ARMOR_POOL.filter((entry) => battle.sector >= entry.fromSector);
+  spawnEnemy(state, pickWeighted(random, pool), BATTLE.spawnX, (random() * 2 - 1) * (BATTLE.laneHalfWidth - 1), { reinforcement: true });
+}
+
+function runSector(state, dt, events) {
   const battle = state.battle;
   if (!battle.active) {
     battle.pause -= dt;
-    if (battle.pause <= 0) startWave(state);
+    if (battle.pause <= 0) startSector(state, events);
     return;
   }
-  battle.elapsed += dt;
-  if (battle.elapsed > BATTLE.waveTimeLimitSeconds) {
-    retreat(state, events, "stalled");
+  // The base is the only win condition, so a running sector without one (for example a save written
+  // by an older build) would never end. Treat it as taken.
+  if (!state.units.some((unit) => unit.side === "enemy" && ENEMY_KINDS[unit.kind].base)) {
+    captureSector(state, events);
     return;
   }
-  battle.spawnTimer -= dt;
-  while (battle.queue.length > 0 && battle.spawnTimer <= 0) {
-    spawnEnemy(state, battle.queue.shift());
-    battle.spawnTimer += BATTLE.spawnIntervalSeconds;
-  }
-  const enemiesLeft = state.units.some((unit) => unit.side === "enemy");
-  if (battle.queue.length > 0 || enemiesLeft) return;
-
-  const clearedWave = battle.wave;
-  const bonus = enemyStats("lightTank", clearedWave).salvage * ENEMY_SCALING.clearBonusKills * salvageMultiplier(state);
-  state.resources.salvage += bonus;
-  state.stats.salvageEarned += bonus;
-  if (battle.autoAdvance) battle.wave += 1;
-  battle.maxWave = Math.max(battle.maxWave, battle.wave);
-  battle.active = false;
-  battle.pause = BATTLE.clearPauseSeconds;
-  events.push({ type: "waveClear", wave: clearedWave, bonus });
-}
-
-function retreat(state, events, reason) {
-  const battle = state.battle;
-  state.units = state.units.filter((unit) => unit.side !== "enemy");
-  battle.queue = [];
-  battle.active = false;
-  battle.pause = BATTLE.retreatPauseSeconds;
-  const lostWave = battle.wave;
-  battle.wave = Math.max(1, battle.wave - 1);
-  events.push({ type: "retreat", reason, wave: lostWave });
+  runReinforcements(state, dt);
 }
 
 function killUnit(state, unit, events) {
   if (unit.side === "enemy") {
     const salvage = unit.salvage * salvageMultiplier(state);
-    const intel = unit.intel * intelMultiplier(state);
     state.resources.salvage += salvage;
-    state.resources.intel += intel;
     state.stats.salvageEarned += salvage;
-    state.stats.intelEarned += intel;
     state.stats.kills += 1;
-    state.battle.killsThisWave += 1;
-    events.push({ type: "kill", id: unit.id, side: "enemy", kind: unit.kind, x: unit.x, z: unit.z, salvage, intel, boss: Boolean(ENEMY_KINDS[unit.kind].boss) });
+    const base = Boolean(ENEMY_KINDS[unit.kind].base);
+    events.push({ type: "kill", id: unit.id, side: "enemy", kind: unit.kind, x: unit.x, z: unit.z, salvage, structure: unit.structure, boss: base });
+    if (base) captureSector(state, events);
     return;
   }
   state.stats.tanksLost += 1;
   const model = MODEL_BY_ID[unit.kind];
   const steelCost = model.parts.hull * 3 + model.parts.turret * 2 + model.parts.engine * 2;
-  const recovered = steelCost * 0.2 * researchLevel(state, "recovery");
+  const recovered = steelCost * 0.2 * doctrineLevel(state, "recovery");
   state.resources.steel = Math.min(storageCap(state, "steel"), state.resources.steel + recovered);
   events.push({ type: "kill", id: unit.id, side: "ally", kind: unit.kind, x: unit.x, z: unit.z });
+}
+
+/** Allies caught in a trench take extra damage from every source. */
+function damageTaken(state, unit, amount) {
+  if (unit.side === "ally" && trenchAt(state, unit.x)) return amount * SECTOR.trenchDamageTaken;
+  return amount;
 }
 
 function frontUnit(units, side) {
@@ -520,7 +678,34 @@ function frontUnit(units, side) {
   return best;
 }
 
+function wakeReserves(state) {
+  let frontX = -Infinity;
+  for (const unit of state.units) if (unit.side === "ally") frontX = Math.max(frontX, unit.x);
+  for (const unit of state.units) {
+    if (unit.dormant && frontX >= unit.triggerX) unit.dormant = false;
+  }
+}
+
+function moveAlly(state, unit, target, dt) {
+  if (target === null) {
+    unit.moving = false;
+    return;
+  }
+  // Each tank keeps a slightly different standoff so the line spreads out instead of stacking.
+  const stopX = target.x - unit.range * (0.55 + 0.35 * (unit.holdBack / BATTLE.rallyDepth));
+  unit.moving = unit.x < stopX;
+  if (!unit.moving) return;
+  const speed = trenchAt(state, unit.x) ? unit.speed * SECTOR.trenchSpeedFactor : unit.speed;
+  unit.x = Math.min(stopX, unit.x + speed * dt);
+}
+
+function moveEnemy(unit, dt) {
+  unit.moving = !unit.structure && !unit.dormant && unit.x > BATTLE.counterattackLimitX;
+  if (unit.moving) unit.x = Math.max(BATTLE.counterattackLimitX, unit.x - unit.speed * dt);
+}
+
 function runCombat(state, dt, events) {
+  wakeReserves(state);
   for (const unit of state.units) {
     if (unit.hp <= 0) continue;
     const enemySide = unit.side === "ally" ? "enemy" : "ally";
@@ -530,33 +715,24 @@ function runCombat(state, dt, events) {
     unit.cooldown = Math.max(0, unit.cooldown - dt);
     unit.hp = Math.min(unit.maxHp, unit.hp + unit.maxHp * unit.regenPerSecond * dt);
 
-    if (target !== null && distance <= unit.range) {
+    if (target !== null && distance <= unit.range && !unit.dormant) {
       unit.moving = false;
       unit.targetId = target.id;
       if (unit.cooldown <= 0) {
         unit.cooldown = unit.reload;
         const armor = target.armor * unit.penetration;
-        target.hp -= effectiveDamage(unit.damage, armor);
+        target.hp -= damageTaken(state, target, effectiveDamage(unit.damage, armor));
         events.push({ type: "shot", from: unit.id, to: target.id, side: unit.side });
         if (target.hp <= 0) killUnit(state, target, events);
+        if (!state.battle.active) break;
       }
       continue;
     }
     unit.targetId = null;
-    if (unit.side === "ally") {
-      // Hold at the rally line, but close in on enemies that stopped to fire from beyond our range.
-      const engaging = target !== null && !target.moving;
-      const rallyX = BATTLE.rallyX - unit.holdBack;
-      const stopX = engaging ? target.x - unit.range * (0.9 - unit.holdBack / (BATTLE.rallyDepth * 4)) : Math.min(rallyX, target === null ? rallyX : target.x - unit.range);
-      unit.moving = unit.x < stopX;
-      if (unit.moving) unit.x = Math.min(stopX, unit.x + unit.speed * dt);
-    } else {
-      unit.moving = true;
-      unit.x -= unit.speed * dt;
-    }
+    if (unit.side === "ally") moveAlly(state, unit, target, dt);
+    else moveEnemy(unit, dt);
   }
   state.units = state.units.filter((unit) => unit.hp > 0);
-  if (state.units.some((unit) => unit.side === "enemy" && unit.x <= BATTLE.breachX)) retreat(state, events, "breach");
 }
 
 function cheapestStationUpgrade(state) {
@@ -573,38 +749,18 @@ function cheapestStationUpgrade(state) {
   return bestId;
 }
 
-function cheapestResearch(state) {
-  let bestId = null;
-  let bestCost = Infinity;
-  for (const project of RESEARCH) {
-    if (!researchRequirementsMet(state, project.id) || isResearchMaxed(state, project.id)) continue;
-    const cost = researchCost(state, project.id);
-    if (cost < bestCost) {
-      bestCost = cost;
-      bestId = project.id;
-    }
-  }
-  return bestId;
-}
-
 function runAutomation(state, dt, events) {
   const automation = state.automation;
-  if (!automation.upgrades && !automation.research) return;
+  if (!automation.upgrades) return;
   automation.timer -= dt;
   if (automation.timer > 0) return;
   automation.timer = AUTOMATION.intervalSeconds;
-  if (automation.upgrades) {
-    const stationId = cheapestStationUpgrade(state);
-    if (stationId !== null && upgradeStation(state, stationId)) events.push({ type: "autoUpgrade", station: stationId });
-  }
-  if (automation.research) {
-    const projectId = cheapestResearch(state);
-    if (projectId !== null) buyResearch(state, projectId, events);
-  }
+  const stationId = cheapestStationUpgrade(state);
+  if (stationId !== null && upgradeStation(state, stationId)) events.push({ type: "autoUpgrade", station: stationId });
 }
 
-export function artilleryIntervalSeconds(wave) {
-  return Math.max(ARTILLERY.minIntervalSeconds, ARTILLERY.baseIntervalSeconds - ARTILLERY.intervalDropPerWave * (wave - 1));
+export function artilleryIntervalSeconds(sector) {
+  return Math.max(ARTILLERY.minIntervalSeconds, ARTILLERY.baseIntervalSeconds - ARTILLERY.intervalDropPerSector * (sector - 1));
 }
 
 /**
@@ -616,7 +772,7 @@ function runArtillery(state, dt, events) {
   if (!battle.active) return;
   battle.artilleryTimer -= dt;
   if (battle.artilleryTimer > 0) return;
-  battle.artilleryTimer += artilleryIntervalSeconds(battle.wave);
+  battle.artilleryTimer += artilleryIntervalSeconds(battle.sector);
   const exposed = state.units.filter((unit) => unit.side === "ally" && unit.x >= ARTILLERY.minX);
   if (exposed.length === 0) return;
   const random = seededRandom(state.nextUnitId * 977 + Math.floor(state.time * 10));
@@ -624,10 +780,10 @@ function runArtillery(state, dt, events) {
   const x = aimed.x + (random() * 2 - 1) * ARTILLERY.scatter;
   const z = aimed.z + (random() * 2 - 1) * ARTILLERY.scatter;
   events.push({ type: "artillery", x, z });
-  const share = ARTILLERY.damageShare * (1 - 0.08 * researchLevel(state, "camouflage"));
+  const share = ARTILLERY.damageShare * (1 - 0.08 * doctrineLevel(state, "camouflage"));
   for (const unit of exposed) {
     if (Math.hypot(unit.x - x, unit.z - z) > ARTILLERY.blastRadius) continue;
-    unit.hp -= unit.maxHp * share;
+    unit.hp -= damageTaken(state, unit, unit.maxHp * share);
     if (unit.hp <= 0) killUnit(state, unit, events);
   }
   state.units = state.units.filter((unit) => unit.hp > 0);
@@ -638,7 +794,7 @@ export function tick(state, dt, events = []) {
   for (const stationId of CRAFTER_IDS) runCrafter(state, stationId, dt, events);
   runAssembly(state, dt, events);
   deployFromDepot(state, events);
-  runWaves(state, dt, events);
+  runSector(state, dt, events);
   runArtillery(state, dt, events);
   runCombat(state, dt, events);
   runAutomation(state, dt, events);

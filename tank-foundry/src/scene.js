@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { BATTLE } from "./data.js";
+import { BATTLE, SECTOR } from "./data.js";
 import { Effects } from "./effects.js";
 import { ASSEMBLY_PLATFORM, Factory, FLOOR_Y, RAIL_Z } from "./factory.js";
 import { formatShort } from "./format.js";
@@ -13,6 +13,17 @@ const WRECK_SECONDS = 9;
 const TRACER_SPEED = 110;
 const GROUND_OFFSET_X = 40;
 const GATE_OPEN_DISTANCE = 6;
+const OFFENSIVE_CHARGE_SPEED = 14;
+/** Width and height above ground of each enemy's health bar, sized to its model. */
+const HEALTH_BARS = {
+  landship: [9, 4.8],
+  hq: [10, 6.2],
+  bunker: [4.5, 2.6],
+  pillbox: [3, 2],
+  atGun: [2.6, 1.6],
+};
+const DEFAULT_HEALTH_BAR = [2.6, 2.4];
+const OFFENSIVE_BARRAGE_SHELLS = 24;
 
 // Parking bays on both sides of the hall-to-gate road, nose toward the road. The back rank sits
 // behind the gaps of the front rank so every bay can drive out without passing through another.
@@ -88,13 +99,16 @@ function routeToGate(position) {
 
 const CAMERA_VIEWS = {
   factory: { target: new THREE.Vector3(-37, 0, 1), offset: new THREE.Vector3(0, 46, 50) },
-  front: { target: new THREE.Vector3(58, 0, 0), offset: new THREE.Vector3(0, 32, 40) },
-  overview: { target: new THREE.Vector3(20, 0, 2), offset: new THREE.Vector3(0, 100, 92) },
+  front: { target: new THREE.Vector3(72, 0, 0), offset: new THREE.Vector3(0, 40, 48) },
+  overview: { target: new THREE.Vector3(26, 0, 2), offset: new THREE.Vector3(0, 108, 98) },
 };
 
 const MATERIALS = {
   wood: paintMaterial(0x7a5a3a),
   sandbag: paintMaterial(0xb3a173),
+  trench: paintMaterial(0x4a3b28),
+  trenchFloor: paintMaterial(0x2e251a),
+  wire: new THREE.LineBasicMaterial({ color: 0x3a3632 }),
   trunk: paintMaterial(0x5b4430),
   leaves: paintMaterial(0x47652f),
   leavesDark: paintMaterial(0x3a5527),
@@ -132,6 +146,9 @@ export class World {
     this.cameraTween = null;
 
     this.units = new Map();
+    this.chargers = [];
+    this.snapAllies = false;
+    this.barrage = [];
     this.wrecks = [];
     this.floaters = [];
     /** One entry per tank in state.depot: { modelId, object, slotIndex, route }. Overflow entries have no object. */
@@ -233,20 +250,10 @@ export class World {
       if (Math.abs(z - RAIL_Z) > 3) plantTree(x, z, scale);
     }
 
-    const sandbagGeometry = new THREE.CapsuleGeometry(0.28, 0.6, 2, 6).rotateZ(Math.PI / 2);
-    const bags = [];
-    for (const z0 of [-11, -5.5, 5.5, 11]) {
-      for (let index = 0; index < 8; index += 1) bags.push([BATTLE.rallyX + 6 + (index % 2) * 0.3, 0.3 + Math.floor(index / 4) * 0.5, z0 - 1.5 + (index % 4) * 0.95]);
-    }
-    const sandbags = new THREE.InstancedMesh(sandbagGeometry, MATERIALS.sandbag, bags.length);
-    const matrix = new THREE.Matrix4();
-    const rotation = new THREE.Matrix4().makeRotationY(Math.PI / 2);
-    bags.forEach(([x, y, z], index) => {
-      matrix.makeTranslation(x, y, z).multiply(rotation);
-      sandbags.setMatrixAt(index, matrix);
-    });
-    sandbags.castShadow = true;
-    this.scene.add(sandbags);
+    this.sandbagGeometry = new THREE.CapsuleGeometry(0.28, 0.6, 2, 6).rotateX(Math.PI / 2);
+    this.trenchGroup = new THREE.Group();
+    this.scene.add(this.trenchGroup);
+    this.trenchKey = "";
 
     for (let index = 0; index < 14; index += 1) {
       const hedgehog = new THREE.Group();
@@ -272,13 +279,47 @@ export class World {
       ruin.rotation.y = random() * 0.5;
       this.scene.add(ruin);
     }
+  }
 
-    const signal = new THREE.Group();
-    block(signal, 0.3, 6, 0.3, MATERIALS.wood, 0, 0, 0);
-    const flag = block(signal, 2, 1.2, 0.05, paintMaterial(0xc23b2b), 1.15, 4.6, 0);
-    signal.position.set(BATTLE.rallyX + 8, 0, -9);
-    this.signalFlag = flag;
-    this.scene.add(signal);
+  /** Rebuilds the trench lines whenever the sector's layout changes, including on load. */
+  syncTrenches(trenches) {
+    const key = trenches.map((trench) => `${trench.x.toFixed(2)}:${trench.width}`).join("|");
+    if (key === this.trenchKey) return;
+    this.trenchKey = key;
+    for (const child of [...this.trenchGroup.children]) this.trenchGroup.remove(child);
+    const span = (BATTLE.laneHalfWidth + 4) * 2;
+    for (const trench of trenches) {
+      const ditch = mesh(SHARED.box, MATERIALS.trench, trench.x, 0.03, 0);
+      ditch.scale.set(trench.width, 0.06, span);
+      ditch.castShadow = false;
+      this.trenchGroup.add(ditch);
+      const floor = mesh(SHARED.box, MATERIALS.trenchFloor, trench.x, 0.05, 0);
+      floor.scale.set(trench.width * 0.55, 0.04, span - 0.6);
+      floor.castShadow = false;
+      this.trenchGroup.add(floor);
+      const bagCount = Math.floor(span / 0.95);
+      const bags = new THREE.InstancedMesh(this.sandbagGeometry, MATERIALS.sandbag, bagCount * 2);
+      const matrix = new THREE.Matrix4();
+      for (let index = 0; index < bagCount; index += 1) {
+        const z = -span / 2 + 0.5 + index * 0.95;
+        matrix.makeTranslation(trench.x + trench.width / 2 + 0.3, 0.3 + (index % 2) * 0.12, z);
+        bags.setMatrixAt(index * 2, matrix);
+        matrix.makeTranslation(trench.x - trench.width / 2 - 0.3, 0.25, z + 0.4);
+        bags.setMatrixAt(index * 2 + 1, matrix);
+      }
+      bags.castShadow = true;
+      this.trenchGroup.add(bags);
+      const wireX = trench.x - trench.width / 2 - 2.2;
+      const wirePoints = [];
+      for (let z = -span / 2; z < span / 2; z += 1.4) {
+        const post = mesh(SHARED.box, MATERIALS.wood, wireX, 0.5, z);
+        post.scale.set(0.12, 1.0, 0.12);
+        this.trenchGroup.add(post);
+        wirePoints.push(new THREE.Vector3(wireX, 0.85, z), new THREE.Vector3(wireX, 0.3, z + 1.4));
+        wirePoints.push(new THREE.Vector3(wireX, 0.3, z), new THREE.Vector3(wireX, 0.85, z + 1.4));
+      }
+      this.trenchGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(wirePoints), MATERIALS.wire));
+    }
   }
 
   setView(name, immediate = false) {
@@ -399,6 +440,8 @@ export class World {
       else if (event.type === "built") this.onTankBuilt(event.model);
       else if (event.type === "deploy") this.onTankDeployed(event);
       else if (event.type === "artillery") this.artilleryShell(event.x, event.z);
+      else if (event.type === "offensive") this.showOffensive(event);
+      else if (event.type === "sectorStart") this.snapAllies = true;
     }
   }
 
@@ -415,12 +458,46 @@ export class World {
     shooter.recoil = 1;
   }
 
+  /** Committed tanks charge off the far edge of the field under a rolling barrage. */
+  showOffensive(event) {
+    for (const id of event.committed) {
+      const view = this.units.get(id);
+      if (!view) continue;
+      this.units.delete(id);
+      if (view.bar) view.object.remove(view.bar);
+      view.object.rotation.y = 0;
+      this.chargers.push({ object: view.object, speed: OFFENSIVE_CHARGE_SPEED * (0.8 + Math.random() * 0.4) });
+    }
+    for (let index = 0; index < OFFENSIVE_BARRAGE_SHELLS; index += 1) {
+      this.barrage.push({ delay: index * 0.12 + Math.random() * 0.1, x: SECTOR.firstLineX - 5 + Math.random() * (SECTOR.baseX - SECTOR.firstLineX + 5), z: (Math.random() * 2 - 1) * (BATTLE.laneHalfWidth + 2) });
+    }
+    this.floater(new THREE.Vector3(SECTOR.firstLineX + 10, 6, 0), `Offensive! +${formatShort(event.salvage)} salvage`, "floater-reward");
+  }
+
+  updateOffensive(dt) {
+    const keepChargers = [];
+    for (const charger of this.chargers) {
+      charger.object.position.x += charger.speed * dt;
+      for (const wheel of charger.object.userData.wheels) wheel.rotation.z -= dt * charger.speed * 1.6;
+      if (charger.object.position.x < BATTLE.spawnX + 6) keepChargers.push(charger);
+      else this.scene.remove(charger.object);
+    }
+    this.chargers = keepChargers;
+    const keepShells = [];
+    for (const shell of this.barrage) {
+      shell.delay -= dt;
+      if (shell.delay > 0) keepShells.push(shell);
+      else this.effects.explosion(new THREE.Vector3(shell.x, 0, shell.z), 1.4);
+    }
+    this.barrage = keepShells;
+  }
+
   showKill(event) {
     const view = this.units.get(event.id);
     const position = new THREE.Vector3(event.x, 0, event.z);
-    this.effects.explosion(position, event.boss ? 3 : 1.2);
+    this.effects.explosion(position, event.boss ? 3.5 : event.structure ? 2 : 1.2);
     if (event.side === "enemy") {
-      const text = `+${formatShort(event.salvage)} salvage  +${formatShort(event.intel)} intel`;
+      const text = `+${formatShort(event.salvage)} salvage`;
       this.floater(position.clone().setY(4), text, "floater-reward");
     }
     if (!view) return;
@@ -480,11 +557,11 @@ export class World {
       object.position.set(unit.x, 0, unit.z);
       object.rotation.y = baseHeading;
     }
-    const boss = unit.kind === "landship";
+    const [width, barHeight] = HEALTH_BARS[unit.kind] ?? DEFAULT_HEALTH_BAR;
+    const boss = unit.kind === "landship" || unit.kind === "hq";
     const bar = new THREE.Group();
     const back = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x1b1b1b, depthTest: false }));
     const front = new THREE.Sprite(new THREE.SpriteMaterial({ color: unit.side === "ally" ? 0x8bd450 : 0xe0573a, depthTest: false }));
-    const width = boss ? 9 : 2.6;
     back.scale.set(width + 0.2, 0.42, 1);
     front.scale.set(width, 0.28, 1);
     // Sprite centers are in screen space, so anchoring the fill by its center keeps it aligned with the
@@ -493,7 +570,7 @@ export class World {
     back.renderOrder = 10;
     front.renderOrder = 11;
     bar.add(back, front);
-    bar.position.y = boss ? 4.8 : 2.4;
+    bar.position.y = barHeight;
     bar.visible = false;
     const barHolder = new THREE.Group();
     barHolder.scale.setScalar(1 / MODEL_SCALE);
@@ -515,6 +592,10 @@ export class World {
         this.units.set(unit.id, view);
       }
       const object = view.object;
+      if (this.snapAllies && unit.side === "ally" && !view.rollout) {
+        // The army moved up to the next sector's start line; jump there instead of sliding back across the field.
+        object.position.set(unit.x, 0, unit.z);
+      }
       if (view.rollout) {
         this.driveRollout(view, unit, dt);
       } else {
@@ -550,6 +631,7 @@ export class World {
       view.barFront.scale.x = view.barWidth * shown;
       view.barFront.center.x = 0.5 / shown;
     }
+    this.snapAllies = false;
     for (const [id, view] of this.units) {
       if (alive.has(id)) continue;
       this.scene.remove(view.object);
@@ -624,11 +706,10 @@ export class World {
       if (!visible) continue;
       station.label.style.transform = `translate(-50%, -100%) translate(${((projected.x + 1) / 2) * width}px, ${((1 - projected.y) / 2) * height}px)`;
       const label = labels[id];
-      const text = `${label.title}|${label.status}|${label.detail}|${label.bottleneck}`;
+      const text = `${label.title}|${label.status}|${label.detail}`;
       if (text !== station.labelText) {
         station.labelText = text;
         station.label.dataset.status = label.status;
-        station.label.classList.toggle("bottleneck", label.bottleneck);
         station.label.innerHTML = `<strong>${label.title}</strong><span>${label.detail}</span>`;
       }
     }
@@ -665,10 +746,11 @@ export class World {
 
   update(state, dt, labels) {
     this.time += dt;
-    this.signalFlag.rotation.y = Math.sin(this.time * 2.2) * 0.25;
+    this.syncTrenches(state.battle.trenches);
     this.factory.update(state, dt);
     this.syncUnits(state, dt);
     this.updateWrecks(dt);
+    this.updateOffensive(dt);
     this.effects.update(dt);
     this.updateDepot(state, dt);
     this.factory.setGateOpen(this.tankNearGate(), dt);

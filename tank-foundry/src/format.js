@@ -11,3 +11,8 @@ export function formatShort(value) {
   if (scaled >= 1000) return value.toExponential(2);
   return `${scaled < 100 ? scaled.toFixed(1) : Math.round(scaled)}${units[unit]}`;
 }
+
+/** For counts that are always whole, such as medals: no stray ".0" below ten. */
+export function formatWhole(value) {
+  return value < 1000 ? String(Math.floor(value)) : formatShort(value);
+}

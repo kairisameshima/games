@@ -38,13 +38,8 @@ button, select, input { font: inherit; color: inherit; }
 .station-label[data-status="starved"] span, .station-label[data-status="underpowered"] span { color: var(--warn); }
 .station-label[data-status="blocked"] span { color: var(--info); }
 .station-label[data-status="starved"], .station-label[data-status="underpowered"] { border-color: #7a5410; }
-.station-label.bottleneck { border-color: var(--warn); animation: bottleneck-pulse 1.2s ease-in-out infinite; }
-.station-label.bottleneck::after {
-  content: "BOTTLENECK"; position: absolute; top: -9px; left: 50%; transform: translateX(-50%);
-  padding: 0 6px; border-radius: 999px; background: var(--warn); color: #23261d; font-size: 10px; font-weight: 700; letter-spacing: 1px;
-}
-@keyframes bottleneck-pulse { 50% { box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 0 5px rgba(240, 177, 58, 0.45); } }
-@media (prefers-reduced-motion: reduce) { .station-label.bottleneck { animation: none; } }
+@keyframes attention-pulse { 50% { box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 0 5px rgba(240, 177, 58, 0.45); } }
+@media (prefers-reduced-motion: reduce) { .regroup-card.stalled { animation: none; } }
 
 .floater {
   position: absolute; left: 0; top: 0; font-weight: 700; font-size: 15px; white-space: nowrap;
@@ -68,7 +63,7 @@ button, select, input { font: inherit; color: inherit; }
 .resource-value { font-size: 22px; font-weight: 700; line-height: 1; }
 .resource-rate { font-size: 13px; color: var(--muted); }
 .resource.salvage .resource-value { color: #ffd27a; }
-.resource.intel .resource-value { color: #9fd3ff; }
+.resource.medals .resource-value { color: #9fd3ff; }
 .resource.power.warn { border-color: #8a5a10; }
 .resource.power.warn .resource-value { color: var(--warn); }
 .hud-actions { display: flex; align-items: center; gap: 10px; }
@@ -106,12 +101,6 @@ button.danger { background: #7a2a1e; }
   background: var(--card); border: 2px solid var(--card-edge); border-radius: 8px; padding: 8px 10px;
 }
 .station-card { display: flex; flex-direction: column; gap: 5px; cursor: pointer; }
-.station-card.bottleneck { border-color: var(--warn); }
-.bottleneck-banner {
-  margin: 8px 10px 0; padding: 6px 10px; border-radius: 6px; border: 2px solid #7a5410; background: rgba(240, 177, 58, 0.16);
-  color: #ffd98a; font-weight: 700; font-size: 15px; text-align: left; cursor: pointer;
-}
-.bottleneck-banner[data-kind="front"] { border-color: #2d5a7a; background: rgba(74, 184, 255, 0.14); color: #b8e2ff; cursor: default; }
 .station-card.selected { border-color: #ffd35a; box-shadow: 0 0 0 2px rgba(255, 211, 90, 0.25); }
 .station-card header, .model-card header { display: flex; align-items: baseline; gap: 8px; }
 .station-card h3, .model-card h3 { font-family: var(--heading); font-weight: 400; font-size: 16px; letter-spacing: 0.4px; }
@@ -160,6 +149,24 @@ button.danger { background: #7a2a1e; }
 }
 .wave-title { display: flex; align-items: center; gap: 10px; font-family: var(--heading); font-size: 18px; color: var(--khaki); }
 .boss-badge { font-family: var(--body); font-weight: 700; font-size: 14px; background: var(--bad); color: #fff; padding: 0 8px; border-radius: 999px; }
+.assault-actions { display: flex; gap: 6px; }
+.assault-actions .offensive-button { flex: 1; }
+.offensive-button {
+  cursor: pointer; border-radius: 6px; border: 2px solid var(--panel-edge); padding: 5px 10px; font-weight: 700;
+  background: #8a2f22; box-shadow: 0 3px 0 #4a160f; touch-action: manipulation;
+}
+.offensive-button:hover:not(:disabled) { background: #a63a2a; }
+.offensive-button:disabled { background: #4a4b42; color: #8f8c7d; box-shadow: none; cursor: default; }
+.regroup-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 8px; border: 2px solid #2d5a7a;
+  background: linear-gradient(rgba(74, 184, 255, 0.14), rgba(74, 184, 255, 0.05));
+}
+.regroup-card header { display: flex; align-items: baseline; justify-content: space-between; }
+.regroup-card h3 { font-family: var(--heading); font-weight: 400; font-size: 17px; color: #b8e2ff; }
+.regroup-medals { font-weight: 700; color: #9fd3ff; }
+.regroup-text { font-size: 14px; color: var(--muted); line-height: 1.2; }
+.regroup-card.stalled { border-color: var(--warn); animation: attention-pulse 1.2s ease-in-out infinite; }
+.regroup-card.stalled .regroup-text { color: #ffd98a; }
 .wave-meter .meter-fill { background: linear-gradient(90deg, #8a2f22, #d0543a); }
 .wave-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
 

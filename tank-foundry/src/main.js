@@ -2,7 +2,7 @@ import "./style.css";
 import { SAVE_KEY, SIM_STEP_SECONDS } from "./data.js";
 import { deserializeState, SaveFormatError, serializeState, simulateAway } from "./save.js";
 import { World } from "./scene.js";
-import { buyResearch, createInitialState, setAutomation, setProduction, tick, upgradeStation } from "./sim.js";
+import { buyBlueprint, buyDoctrine, createInitialState, fallBack, launchOffensive, prestige, setAutoUpgrade, setProduction, tick, upgradeStation } from "./sim.js";
 import { UI } from "./ui.js";
 
 const AUTOSAVE_SECONDS = 10;
@@ -45,11 +45,11 @@ function save() {
 
 function refresh() {
   const now = state.time;
-  earnings.push({ time: now, salvage: state.stats.salvageEarned, intel: state.stats.intelEarned });
+  earnings.push({ time: now, salvage: state.stats.salvageEarned });
   while (earnings.length > 2 && now - earnings[0].time > RATE_WINDOW_SECONDS) earnings.shift();
   const first = earnings[0];
   const span = Math.max(1, now - first.time);
-  const rates = { salvage: ((state.stats.salvageEarned - first.salvage) / span) * 60, intel: ((state.stats.intelEarned - first.intel) / span) * 60 };
+  const rates = { salvage: ((state.stats.salvageEarned - first.salvage) / span) * 60 };
   ui.update(state, rates);
 }
 
@@ -57,19 +57,33 @@ const ui = new UI(app, {
   upgrade(stationId) {
     if (upgradeStation(state, stationId)) refresh();
   },
-  research(projectId) {
-    if (buyResearch(state, projectId, pendingEvents)) refresh();
+  buyDoctrine(doctrineId) {
+    if (buyDoctrine(state, doctrineId, pendingEvents)) refresh();
+  },
+  buyBlueprint(modelId) {
+    if (buyBlueprint(state, modelId, pendingEvents)) refresh();
   },
   produce(modelId) {
     if (setProduction(state, modelId)) refresh();
   },
-  toggleAutomation(key, enabled) {
-    setAutomation(state, key, enabled);
+  toggleAutoUpgrade(enabled) {
+    setAutoUpgrade(state, enabled);
     refresh();
   },
-  toggleAdvance(enabled) {
-    state.battle.autoAdvance = enabled;
-    refresh();
+  launchOffensive() {
+    if (launchOffensive(state, pendingEvents)) refresh();
+  },
+  // A regroup replaces the whole run, so the page restarts from the saved next run instead of
+  // tearing down every scene object in place.
+  prestige() {
+    const next = prestige(state);
+    if (!next) return;
+    resetting = true;
+    localStorage.setItem(SAVE_KEY, serializeState(next));
+    window.location.reload();
+  },
+  fallBack() {
+    if (fallBack(state, pendingEvents)) refresh();
   },
   setView(name) {
     world.setView(name);

@@ -1,28 +1,34 @@
-import { BATTLE, ENEMY_KINDS, PART_LABELS, PARTS, RESEARCH, RESEARCH_GROUPS, STATIONS, TANK_MODELS } from "./data.js";
-import { formatShort } from "./format.js";
+import { DOCTRINE_GROUPS, DOCTRINES, ENEMY_KINDS, PART_LABELS, PARTS, PRESTIGE, STATIONS, TANK_MODELS } from "./data.js";
+import { formatShort, formatWhole } from "./format.js";
 import {
   alliesAtFront,
-  canBuyResearch,
-  deployCap,
+  BLUEPRINT_BY_MODEL,
+  canBuyBlueprint,
+  canBuyDoctrine,
+  canLaunchOffensive,
+  canPrestige,
   depotCap,
-  findBottleneck,
-  isBossWave,
+  doctrineCost,
+  doctrineLevel,
+  frontStrength,
+  isDoctrineMaxed,
   isModelUnlocked,
-  isResearchMaxed,
+  medalsForSector,
   MODEL_BY_ID,
+  offensiveCost,
+  offensiveTarget,
   powerDemand,
   powerFactor,
   powerSupply,
-  researchCost,
-  researchLevel,
-  researchRequirementsMet,
-  RESEARCH_BY_ID,
+  previousModel,
+  secondsSinceProgress,
+  canFallBack,
   stationRate,
   stationUpgradeCost,
   storageCap,
   tankComplexity,
   tankStats,
-  waveComposition,
+  sectorPlan,
 } from "./sim.js";
 
 const STATUS_TEXT = {
@@ -32,8 +38,6 @@ const STATUS_TEXT = {
   underpowered: "Low power",
   idle: "Idle",
 };
-
-const MODEL_UNLOCK = Object.fromEntries(RESEARCH.filter((project) => project.unlocksModel).map((project) => [project.unlocksModel, project]));
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -57,6 +61,10 @@ function formatSeconds(seconds) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${Math.round(seconds % 60)}s`;
 }
 
+function medalText(count) {
+  return `${formatWhole(count)} ${Math.floor(count) === 1 ? "medal" : "medals"}`;
+}
+
 function recipeText(model) {
   return PARTS.map((part) => `${model.parts[part]} ${PART_LABELS[part].toLowerCase().replace(/s$/, model.parts[part] === 1 ? "" : "s")}`).join(", ");
 }
@@ -66,7 +74,8 @@ export class UI {
     this.root = root;
     this.handlers = handlers;
     this.stationCards = {};
-    this.researchItems = {};
+    this.doctrineItems = {};
+    this.stallNotified = false;
     this.modelCards = {};
     this.labels = {};
     this.selectedStation = null;
@@ -83,12 +92,12 @@ export class UI {
   buildHud() {
     const hud = this.root.querySelector("#hud");
     hud.innerHTML = `
-      <div class="brand"><span class="brand-mark">TANK FOUNDRY</span><span class="brand-tag">build · research · advance</span></div>
+      <div class="brand"><span class="brand-mark">TANK FOUNDRY</span><span class="brand-tag">build · advance · regroup</span></div>
       <div class="resources">
         <div class="resource salvage" title="Salvage: recovered from destroyed enemies. Pays for factory upgrades."><span class="resource-label">Salvage</span><span class="resource-value" data-field="salvage"></span><span class="resource-rate" data-field="salvageRate"></span></div>
-        <div class="resource intel" title="Intel: captured from enemy wrecks. Pays for research."><span class="resource-label">Intel</span><span class="resource-value" data-field="intel"></span><span class="resource-rate" data-field="intelRate"></span></div>
+        <div class="resource medals" title="Medals: earned by regrouping. Pay for permanent doctrine."><span class="resource-label">Medals</span><span class="resource-value" data-field="medals"></span></div>
         <div class="resource steel" title="Steel: smelted by the steel mill and used by the part shops."><span class="resource-label">Steel</span><span class="resource-value" data-field="steel"></span></div>
-        <div class="resource front" title="Tanks at the front / allowed by Logistics"><span class="resource-label">Front</span><span class="resource-value" data-field="front"></span></div>
+        <div class="resource front" title="Tanks at the front. The army grows as long as the factory outbuilds losses."><span class="resource-label">Front</span><span class="resource-value" data-field="front"></span></div>
         <div class="resource power" title="Power supply / demand"><span class="resource-label">Power</span><span class="resource-value" data-field="power"></span></div>
       </div>
       <div class="hud-actions"><span class="save-status" data-field="saveStatus">Saved</span><button type="button" class="ghost" data-action="help">How to play</button></div>`;
@@ -98,14 +107,10 @@ export class UI {
 
   buildFactoryPanel() {
     const panel = this.root.querySelector("#factory-panel");
-    panel.innerHTML = `<div class="panel-head"><h2>Factory</h2><label class="auto-toggle" data-auto="upgrades"><input type="checkbox"> Auto-upgrade</label></div><button type="button" class="bottleneck-banner"></button><div class="panel-body"></div>`;
+    panel.innerHTML = `<div class="panel-head"><h2>Factory</h2><label class="auto-toggle" data-auto="upgrades"><input type="checkbox"> Auto-upgrade</label></div><div class="panel-body"></div>`;
     const body = panel.querySelector(".panel-body");
     this.autoUpgrade = panel.querySelector('[data-auto="upgrades"]');
-    this.autoUpgrade.querySelector("input").addEventListener("change", (event) => this.handlers.toggleAutomation("upgrades", event.target.checked));
-    this.bottleneck = { button: panel.querySelector(".bottleneck-banner"), stationId: null };
-    this.bottleneck.button.addEventListener("click", () => {
-      if (this.bottleneck.stationId) this.handlers.selectStation(this.bottleneck.stationId);
-    });
+    this.autoUpgrade.querySelector("input").addEventListener("change", (event) => this.handlers.toggleAutoUpgrade(event.target.checked));
     for (const station of STATIONS) {
       const card = element("section", "station-card");
       card.dataset.station = station.id;
@@ -143,42 +148,53 @@ export class UI {
     const panel = this.root.querySelector("#command-panel");
     panel.innerHTML = `
       <div class="panel-head tabs">
-        <button type="button" data-tab="research" class="active">Research</button>
+        <button type="button" data-tab="doctrine" class="active">Doctrine</button>
         <button type="button" data-tab="armory">Armory</button>
         <button type="button" data-tab="records">Records</button>
       </div>
-      <div class="panel-body tab-body" data-body="research"><label class="auto-toggle" data-auto="research"><input type="checkbox"> Auto-research cheapest project</label></div>
+      <div class="panel-body tab-body" data-body="doctrine"></div>
       <div class="panel-body tab-body" data-body="armory" hidden></div>
       <div class="panel-body tab-body" data-body="records" hidden></div>`;
     for (const tab of panel.querySelectorAll("[data-tab]")) {
       tab.addEventListener("click", () => this.showTab(tab.dataset.tab));
     }
     this.commandPanel = panel;
-    this.autoResearch = panel.querySelector('[data-auto="research"]');
-    this.autoResearch.querySelector("input").addEventListener("change", (event) => this.handlers.toggleAutomation("research", event.target.checked));
 
-    const researchBody = panel.querySelector('[data-body="research"]');
-    for (const group of RESEARCH_GROUPS) {
-      if (group.id === "armory") continue;
+    const doctrineBody = panel.querySelector('[data-body="doctrine"]');
+    const regroup = element("section", "regroup-card");
+    regroup.innerHTML = `
+      <header><h3>Regroup</h3><span class="regroup-medals"></span></header>
+      <p class="regroup-text"></p>
+      <button type="button" class="buy"></button>`;
+    this.regroup = { card: regroup, medals: regroup.querySelector(".regroup-medals"), text: regroup.querySelector(".regroup-text"), button: regroup.querySelector(".buy") };
+    this.regroup.button.addEventListener("click", () => {
+      const medals = medalsForSector(this.state.battle.maxSector);
+      if (window.confirm(`Regroup for ${medalText(medals)}? Stations, blueprints, salvage and the front reset to sector 1. Doctrine and medals stay.`)) this.handlers.prestige();
+    });
+    doctrineBody.append(regroup);
+    doctrineBody.append(element("p", "panel-note", "Doctrine is permanent. It survives every regroup and makes each run reach further."));
+    for (const group of DOCTRINE_GROUPS) {
       const section = element("section", "research-group");
       section.append(element("h3", "", group.name));
-      for (const project of RESEARCH.filter((entry) => entry.group === group.id)) section.append(this.buildResearchItem(project));
-      researchBody.append(section);
+      for (const doctrine of DOCTRINES.filter((entry) => entry.group === group.id)) section.append(this.buildDoctrineItem(doctrine));
+      doctrineBody.append(section);
     }
 
     const armoryBody = panel.querySelector('[data-body="armory"]');
-    armoryBody.append(element("p", "panel-note", "Each blueprint is a new production model. Better tanks cost more parts and assembly time."));
+    armoryBody.append(element("p", "panel-note", "Blueprints cost salvage and reset when you regroup. Better tanks cost more parts and assembly time."));
     for (const model of TANK_MODELS) {
       const card = element("section", "model-card");
+      const blueprint = BLUEPRINT_BY_MODEL[model.id];
       card.innerHTML = `
         <header><h3>${model.name}</h3><span class="model-meta">${model.year} · ${model.role}</span></header>
+        ${blueprint ? `<p class="model-recipe">${blueprint.desc}</p>` : ""}
         <dl class="model-stats"></dl>
         <p class="model-recipe">Needs ${recipeText(model)} · ${model.buildSeconds}s to assemble</p>
         <button type="button" class="buy"></button>`;
       const refs = { card, stats: card.querySelector(".model-stats"), button: card.querySelector(".buy"), statsText: "" };
       refs.button.addEventListener("click", () => {
         if (isModelUnlocked(this.state, model.id)) this.handlers.produce(model.id);
-        else this.handlers.research(MODEL_UNLOCK[model.id].id);
+        else this.handlers.buyBlueprint(model.id);
       });
       this.modelCards[model.id] = refs;
       armoryBody.append(card);
@@ -188,35 +204,41 @@ export class UI {
     records.innerHTML = `<dl class="records"></dl><button type="button" class="danger" data-action="reset">Reset all progress</button>`;
     this.recordsList = records.querySelector(".records");
     records.querySelector('[data-action="reset"]').addEventListener("click", () => {
-      if (window.confirm("Erase the factory and start from wave 1?")) this.handlers.reset();
+      if (window.confirm("Erase everything, including medals and doctrine?")) this.handlers.reset();
     });
   }
 
-  buildResearchItem(project) {
+  buildDoctrineItem(doctrine) {
     const item = element("article", "research-item");
-    item.innerHTML = `<div class="research-text"><h4>${project.name} <span class="research-level"></span></h4><p>${project.desc}</p><p class="research-lock"></p></div><button type="button" class="buy"></button>`;
-    const refs = { item, level: item.querySelector(".research-level"), lock: item.querySelector(".research-lock"), button: item.querySelector(".buy") };
-    refs.button.addEventListener("click", () => this.handlers.research(project.id));
-    this.researchItems[project.id] = refs;
+    item.innerHTML = `<div class="research-text"><h4>${doctrine.name} <span class="research-level"></span></h4><p>${doctrine.desc}</p></div><button type="button" class="buy"></button>`;
+    const refs = { item, level: item.querySelector(".research-level"), button: item.querySelector(".buy") };
+    refs.button.addEventListener("click", () => this.handlers.buyDoctrine(doctrine.id));
+    this.doctrineItems[doctrine.id] = refs;
     return item;
   }
 
   buildWaveBar() {
     const bar = this.root.querySelector("#wave-bar");
     bar.innerHTML = `
-      <div class="wave-title"><span data-field="wave"></span><span class="boss-badge" hidden>Boss wave</span></div>
+      <div class="wave-title"><span data-field="sector"></span><span class="boss-badge" data-field="landship" hidden>Landship</span></div>
       <div class="meter wave-meter"><div class="meter-fill"></div><span class="meter-text"></span></div>
-      <div class="wave-foot"><span data-field="enemies"></span><label class="auto-toggle"><input type="checkbox" data-field="advance"> Auto-advance</label></div>`;
-    this.wave = {
-      title: bar.querySelector('[data-field="wave"]'),
-      boss: bar.querySelector(".boss-badge"),
+      <div class="wave-foot"><span data-field="defenses"></span></div>
+      <div class="assault-actions">
+        <button type="button" class="offensive-button" data-field="offensive"></button>
+        <button type="button" class="ghost" data-field="fallBack">Fall back</button>
+      </div>`;
+    this.sector = {
+      title: bar.querySelector('[data-field="sector"]'),
+      landship: bar.querySelector('[data-field="landship"]'),
       fill: bar.querySelector(".meter-fill"),
       text: bar.querySelector(".meter-text"),
-      enemies: bar.querySelector('[data-field="enemies"]'),
-      advance: bar.querySelector('[data-field="advance"]'),
-      enemiesKey: "",
+      defenses: bar.querySelector('[data-field="defenses"]'),
+      offensive: bar.querySelector('[data-field="offensive"]'),
+      fallBack: bar.querySelector('[data-field="fallBack"]'),
+      defensesKey: "",
     };
-    this.wave.advance.addEventListener("change", (event) => this.handlers.toggleAdvance(event.target.checked));
+    this.sector.offensive.addEventListener("click", () => this.handlers.launchOffensive());
+    this.sector.fallBack.addEventListener("click", () => this.handlers.fallBack());
   }
 
   buildViewSwitch() {
@@ -231,7 +253,7 @@ export class UI {
 
   buildMobileTabs() {
     const nav = this.root.querySelector("#mobile-tabs");
-    for (const [panel, label] of [["factory-panel", "Factory"], ["command-panel", "Research"], ["", "Map"]]) {
+    for (const [panel, label] of [["factory-panel", "Factory"], ["command-panel", "Doctrine"], ["", "Map"]]) {
       const button = element("button", "", label);
       button.type = "button";
       button.dataset.panel = panel;
@@ -280,9 +302,9 @@ export class UI {
       const missing = PARTS.filter((part) => state.parts[part] < MODEL_BY_ID[state.production].parts[part]).map((part) => PART_LABELS[part].toLowerCase());
       const complexity = tankComplexity(state);
       let hint = `One ${model.name} every ${formatShort(model.buildSeconds / Math.max(rate, 0.0001))}s`;
-      if (complexity > 1.001) hint += ` · complexity ×${formatShort(complexity)} from gun and armor research`;
+      if (complexity > 1.001) hint += ` · complexity ×${formatShort(complexity)} from gun and armor doctrine`;
       if (runtime.status === "starved") hint = `Waiting for ${missing.join(", ")}.`;
-      if (runtime.status === "blocked") hint = "Depot full. The front is at its Logistics limit.";
+      if (runtime.status === "blocked") hint = "Depot full. The front is at its tank limit.";
       return {
         status: runtime.status,
         detail: runtime.building ? `Building ${model.name}` : `Next: ${MODEL_BY_ID[state.production].name}`,
@@ -309,24 +331,11 @@ export class UI {
     };
   }
 
-  bottleneckText(state, bottleneck) {
-    if (bottleneck.kind === "power") return `Bottleneck: Power Station · plant at ${Math.round(powerFactor(state) * 100)}%`;
-    if (bottleneck.kind === "front") return "Front is full · research Logistics to field more tanks";
-    const name = STATIONS.find((station) => station.id === bottleneck.stationId).name;
-    return `Bottleneck: ${name} · ${formatShort(bottleneck.tanksPerSecond * 60)} tanks/min`;
-  }
-
   updateStations(state) {
-    const bottleneck = findBottleneck(state);
-    this.bottleneck.stationId = bottleneck.stationId;
-    setText(this.bottleneck.button, this.bottleneckText(state, bottleneck));
-    this.bottleneck.button.dataset.kind = bottleneck.kind;
     for (const station of STATIONS) {
       const refs = this.stationCards[station.id];
       const view = this.stationView(state, station);
       const cost = stationUpgradeCost(state, station.id);
-      const limiting = bottleneck.stationId === station.id;
-      refs.card.classList.toggle("bottleneck", limiting);
       setText(refs.level, `Lv ${state.stations[station.id].level}`);
       setText(refs.status, STATUS_TEXT[view.status]);
       refs.status.dataset.status = view.status;
@@ -337,7 +346,7 @@ export class UI {
       setText(refs.button, `Upgrade · ${formatShort(cost)} salvage`);
       setDisabled(refs.button, state.resources.salvage < cost);
       if (refs.select) this.updateProductionSelect(state, refs);
-      this.labels[station.id] = { title: `${station.name} · Lv ${state.stations[station.id].level}`, status: view.status, detail: view.label, bottleneck: limiting };
+      this.labels[station.id] = { title: `${station.name} · Lv ${state.stations[station.id].level}`, status: view.status, detail: view.label };
     }
   }
 
@@ -351,29 +360,49 @@ export class UI {
     if (refs.select.value !== state.production) refs.select.value = state.production;
   }
 
-  researchEffect(state, project) {
-    const level = researchLevel(state, project.id);
-    return project.max === 1 ? (level > 0 ? "Done" : "") : `Lv ${level}${project.max < 999 ? `/${project.max}` : ""}`;
+  doctrineLevelText(state, doctrine) {
+    const level = doctrineLevel(state, doctrine.id);
+    return doctrine.max === 1 ? (level > 0 ? "Done" : "") : `Lv ${level}${doctrine.max < 999 ? `/${doctrine.max}` : ""}`;
   }
 
-  updateResearch(state) {
-    for (const project of RESEARCH) {
-      if (project.unlocksModel) continue;
-      const refs = this.researchItems[project.id];
-      const requirementsMet = researchRequirementsMet(state, project.id);
-      const maxed = isResearchMaxed(state, project.id);
-      const cost = researchCost(state, project.id);
-      setText(refs.level, this.researchEffect(state, project));
-      setText(refs.lock, requirementsMet ? "" : `Requires ${project.requires.map((id) => RESEARCH_BY_ID[id].name).join(", ")}`);
-      setText(refs.button, maxed ? "Complete" : `${formatShort(cost)} intel`);
-      setDisabled(refs.button, maxed || !canBuyResearch(state, project.id));
+  updateDoctrine(state) {
+    for (const doctrine of DOCTRINES) {
+      const refs = this.doctrineItems[doctrine.id];
+      const maxed = isDoctrineMaxed(state, doctrine.id);
+      const affordable = canBuyDoctrine(state, doctrine.id);
+      setText(refs.level, this.doctrineLevelText(state, doctrine));
+      setText(refs.button, maxed ? "Complete" : `${medalText(doctrineCost(state, doctrine.id))}`);
+      setDisabled(refs.button, !affordable);
       refs.item.classList.toggle("maxed", maxed);
-      refs.item.classList.toggle("affordable", !maxed && canBuyResearch(state, project.id));
+      refs.item.classList.toggle("affordable", affordable);
     }
-    this.autoResearch.hidden = researchLevel(state, "bureau") === 0;
-    this.autoResearch.querySelector("input").checked = state.automation.research;
-    this.autoUpgrade.hidden = researchLevel(state, "requisition") === 0;
+    this.autoUpgrade.hidden = doctrineLevel(state, "requisition") === 0;
     this.autoUpgrade.querySelector("input").checked = state.automation.upgrades;
+    this.updateRegroup(state);
+  }
+
+  isStalled(state) {
+    return canPrestige(state) && secondsSinceProgress(state) > PRESTIGE.stallSeconds;
+  }
+
+  updateRegroup(state) {
+    const medals = medalsForSector(state.battle.maxSector);
+    const stalled = this.isStalled(state);
+    setText(this.regroup.medals, `${medalText(state.prestige.medals)}`);
+    let text = `Reach sector ${PRESTIGE.minSector} to earn medals.`;
+    if (canPrestige(state)) {
+      text = `Best sector this run: ${state.battle.maxSector}. Regrouping now pays ${medalText(medals)}; each sector further pays ${Math.round((PRESTIGE.medalGrowth - 1) * 100)}% more.`;
+    }
+    if (stalled) text = `The front hasn't moved for ${formatSeconds(secondsSinceProgress(state))}. The factory has hit its limit. Regroup for ${medalText(medals)} and come back stronger.`;
+    setText(this.regroup.text, text);
+    setText(this.regroup.button, canPrestige(state) ? `Regroup · +${medalText(medals)}` : "Regroup");
+    setDisabled(this.regroup.button, !canPrestige(state));
+    this.regroup.card.classList.toggle("stalled", stalled);
+    if (stalled && !this.stallNotified) {
+      this.stallNotified = true;
+      this.toast(`The assault on sector ${state.battle.sector} has stalled. Regroup for ${medalText(medals)}, or fall back.`, "info");
+    }
+    if (!stalled) this.stallNotified = false;
   }
 
   updateArmory(state) {
@@ -401,51 +430,64 @@ export class UI {
         setDisabled(refs.button, state.production === model.id);
         continue;
       }
-      const project = MODEL_UNLOCK[model.id];
-      const available = researchRequirementsMet(state, project.id);
-      setText(refs.button, available ? `Research blueprints · ${formatShort(project.cost)} intel` : `Requires ${RESEARCH_BY_ID[project.requires[0]].name}`);
-      setDisabled(refs.button, !canBuyResearch(state, project.id));
+      const previous = previousModel(model.id);
+      const available = isModelUnlocked(state, previous.id);
+      setText(refs.button, available ? `Buy blueprints · ${formatShort(BLUEPRINT_BY_MODEL[model.id].cost)} salvage` : `Requires ${previous.name}`);
+      setDisabled(refs.button, !canBuyBlueprint(state, model.id));
     }
   }
 
-  updateWave(state) {
+  updateSector(state) {
     const battle = state.battle;
-    setText(this.wave.title, `Wave ${battle.wave} · best ${battle.maxWave}`);
-    this.wave.boss.hidden = !isBossWave(battle.wave);
-    const enemiesLeft = state.units.filter((unit) => unit.side === "enemy").length + battle.queue.length;
-    const progress = battle.active && battle.waveSize > 0 ? 1 - enemiesLeft / battle.waveSize : battle.active ? 0 : 1;
-    this.wave.fill.style.width = `${(progress * 100).toFixed(1)}%`;
-    const timeLeft = Math.max(0, BATTLE.waveTimeLimitSeconds - battle.elapsed);
-    setText(this.wave.text, battle.active ? `${enemiesLeft} enemies left · ${Math.ceil(timeLeft)}s before the attack stalls` : "Next wave forming up…");
-    const counts = {};
-    for (const kind of waveComposition(battle.wave)) counts[kind] = (counts[kind] ?? 0) + 1;
-    const enemiesKey = `${battle.wave}`;
-    if (this.wave.enemiesKey !== enemiesKey) {
-      this.wave.enemiesKey = enemiesKey;
-      setText(this.wave.enemies, Object.entries(counts).map(([kind, count]) => `${count}× ${ENEMY_KINDS[kind].name}`).join(" · "));
+    setText(this.sector.title, `Sector ${battle.sector} · best ${battle.maxSector}`);
+    const plan = sectorPlan(battle.sector);
+    this.sector.landship.hidden = !plan.reserve.some((entry) => entry.kind === "landship");
+    const standing = state.units.filter((unit) => unit.side === "enemy" && !unit.reinforcement).length;
+    const progress = battle.active && battle.defensesTotal > 0 ? 1 - standing / battle.defensesTotal : battle.active ? 0 : 1;
+    this.sector.fill.style.width = `${(progress * 100).toFixed(1)}%`;
+    const base = state.units.find((unit) => unit.side === "enemy" && ENEMY_KINDS[unit.kind].base);
+    let text = "Advancing to the next sector…";
+    if (battle.active) text = `${standing} defenses standing · base ${base ? Math.ceil((base.hp / base.maxHp) * 100) : 0}%`;
+    setText(this.sector.text, text);
+    const defensesKey = `${battle.sector}`;
+    if (this.sector.defensesKey !== defensesKey) {
+      this.sector.defensesKey = defensesKey;
+      const counts = {};
+      for (const entry of [...plan.emplacements, ...plan.reserve]) counts[entry.kind] = (counts[entry.kind] ?? 0) + 1;
+      const parts = Object.entries(counts).map(([kind, count]) => `${count}× ${ENEMY_KINDS[kind].name}`);
+      if (plan.trenches.length > 0) parts.unshift(`${plan.trenches.length} trench line${plan.trenches.length > 1 ? "s" : ""}`);
+      setText(this.sector.defenses, parts.join(" · "));
     }
-    this.wave.advance.checked = battle.autoAdvance;
+    const target = offensiveTarget(state);
+    if (target <= battle.sector) {
+      setText(this.sector.offensive, `Offensive · retakes sectors short of your best (${state.prestige.bestSector})`);
+    } else {
+      setText(this.sector.offensive, `Offensive to sector ${target} · commits ${formatWhole(offensiveCost(state))} of ${formatWhole(frontStrength(state))} strength`);
+    }
+    setDisabled(this.sector.offensive, !canLaunchOffensive(state));
+    setDisabled(this.sector.fallBack, !canFallBack(state));
   }
 
   updateHud(state, rates) {
     setText(this.hud.salvage, formatShort(state.resources.salvage));
-    setText(this.hud.intel, formatShort(state.resources.intel));
+    setText(this.hud.medals, formatWhole(state.prestige.medals));
     setText(this.hud.steel, `${formatShort(Math.floor(state.resources.steel))}/${formatShort(storageCap(state, "steel"))}`);
-    setText(this.hud.front, `${alliesAtFront(state)}/${deployCap(state)}`);
+    setText(this.hud.front, `${alliesAtFront(state)} tanks`);
     setText(this.hud.power, `${formatShort(powerDemand(state))}/${formatShort(powerSupply(state))} MW`);
     this.hud.power.parentElement.classList.toggle("warn", powerFactor(state) < 1);
     setText(this.hud.salvageRate, `+${formatShort(rates.salvage)}/min`);
-    setText(this.hud.intelRate, `+${formatShort(rates.intel)}/min`);
   }
 
   updateRecords(state) {
     const rows = [
-      ["Best wave", state.battle.maxWave],
+      ["Best sector this run", state.battle.maxSector],
+      ["Best sector ever", state.prestige.bestSector],
+      ["Regroups", state.prestige.count],
+      ["Offensives", formatShort(state.stats.offensives)],
       ["Tanks built", formatShort(state.stats.tanksBuilt)],
       ["Tanks lost", formatShort(state.stats.tanksLost)],
-      ["Enemies destroyed", formatShort(state.stats.kills)],
+      ["Defenses and tanks destroyed", formatShort(state.stats.kills)],
       ["Salvage earned", formatShort(state.stats.salvageEarned)],
-      ["Intel earned", formatShort(state.stats.intelEarned)],
       ["Time commanding", formatSeconds(state.time)],
     ];
     const html = rows.map(([name, value]) => `<div><dt>${name}</dt><dd>${value}</dd></div>`).join("");
@@ -459,9 +501,9 @@ export class UI {
     this.state = state;
     this.updateHud(state, rates);
     this.updateStations(state);
-    this.updateResearch(state);
+    this.updateDoctrine(state);
     this.updateArmory(state);
-    this.updateWave(state);
+    this.updateSector(state);
     this.updateRecords(state);
   }
 
@@ -480,16 +522,14 @@ export class UI {
 
   handleEvents(events) {
     for (const event of events) {
-      if (event.type === "waveClear" && (isBossWave(event.wave) || event.wave % 5 === 0)) {
-        this.toast(`Wave ${event.wave} cleared · +${formatShort(event.bonus)} salvage`, "good");
-      } else if (event.type === "retreat") {
-        const where = Math.max(1, event.wave - 1);
-        this.toast(event.reason === "breach" ? `Line breached at wave ${event.wave}. Falling back to wave ${where}.` : `Attack on wave ${event.wave} stalled. Regrouping at wave ${where}.`, "bad");
-      } else if (event.type === "research") {
-        const project = RESEARCH_BY_ID[event.id];
-        if (project.unlocksModel) this.toast(`${MODEL_BY_ID[project.unlocksModel].name} enters production`, "good");
-      } else if (event.type === "kill" && event.boss) {
-        this.toast("Landship destroyed!", "good");
+      if (event.type === "sectorCaptured") {
+        this.toast(`Sector ${event.sector} captured · +${formatShort(event.bonus)} salvage`, "good");
+      } else if (event.type === "fallBack") {
+        this.toast(`Falling back to sector ${event.sector}`, "bad");
+      } else if (event.type === "blueprint") {
+        this.toast(`${MODEL_BY_ID[event.model].name} enters production`, "good");
+      } else if (event.type === "offensive") {
+        this.toast(`Offensive breaks through to sector ${event.toSector} · +${formatShort(event.salvage)} salvage`, "good");
       }
     }
   }
@@ -505,13 +545,16 @@ export class UI {
   showHelp() {
     this.showModal(
       "Tank Foundry",
-      `<p>Your factory builds tanks that roll out to the front on their own. The enemy attacks in endless waves, and every wave is tougher than the last.</p>
+      `<p>Your factory builds tanks that roll out on their own to assault an endless chain of fortified positions. Every sector is deeper and tougher than the last.</p>
       <ol>
         <li><strong>Steel Mill → part shops → Assembly Hall.</strong> Steel becomes hulls, turrets and engines. The hall bolts them into tanks.</li>
         <li><strong>Find the bottleneck.</strong> Every station shows if it is running, starved for input, or blocked by a full shelf. Upgrade the one holding the line back.</li>
         <li><strong>Watch the power.</strong> Each machine level draws power. Short on power, the whole plant slows down.</li>
-        <li><strong>Salvage</strong> from kills pays for upgrades. <strong>Intel</strong> pays for research: stronger guns and armor, more tanks at the front, and blueprints for new models from the Stuart up to the Maus.</li>
-        <li>If the enemy breaks through or the attack stalls, the front falls back one wave and keeps farming it. Bosses come every ${BATTLE.bossEvery} waves.</li>
+        <li><strong>Salvage</strong> from kills pays for station upgrades and blueprints for new models, from the Stuart up to the Maus.</li>
+        <li><strong>The army is your output.</strong> Every tank built joins the assault. Each sector has trench lines that slow and expose your tanks, pillboxes, AT guns and bunkers, armor held in reserve, and a fortified base. Destroy the base to capture the sector.</li>
+        <li><strong>No retreat, only attrition.</strong> Damaged defenses repair themselves and the base keeps sending armor. If the factory can't keep up, the assault stalls. Fall back a sector any time.</li>
+        <li><strong>Regroup</strong> when the factory can't push further. Stations, blueprints and sectors reset, and you earn <strong>medals</strong> for your best sector. Medals buy permanent <strong>doctrine</strong>: better guns, armor and machines for every future run.</li>
+        <li><strong>Offensives</strong> commit tanks to skip sectors you've beaten before, so new runs catch up fast.</li>
       </ol>
       <p class="muted">Drag to pan, scroll or pinch to zoom, right-drag to rotate. Click a building to inspect it. The factory keeps running while you are away.</p>`,
       "To the factory",
@@ -526,8 +569,8 @@ export class UI {
         <div><dt>Tanks built</dt><dd>${formatShort(summary.built)}</dd></div>
         <div><dt>Enemies destroyed</dt><dd>${formatShort(summary.kills)}</dd></div>
         <div><dt>Salvage</dt><dd>+${formatShort(summary.salvage)}</dd></div>
-        <div><dt>Intel</dt><dd>+${formatShort(summary.intel)}</dd></div>
-        <div><dt>New best waves</dt><dd>+${summary.wavesGained}</dd></div>
+        <div><dt>Tanks lost</dt><dd>${formatShort(summary.lost)}</dd></div>
+        <div><dt>New best sectors</dt><dd>+${summary.sectorsGained}</dd></div>
       </dl>`,
     );
   }

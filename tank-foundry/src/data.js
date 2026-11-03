@@ -2,26 +2,56 @@ export const SIM_STEP_SECONDS = 0.05;
 export const OFFLINE_STEP_SECONDS = 0.5;
 export const OFFLINE_LIMIT_SECONDS = 8 * 60 * 60;
 export const SAVE_KEY = "tank-foundry-save-v1";
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 3;
 
 export const BATTLE = {
   gateX: 0,
-  rallyX: 46,
+  /** After a capture the army regroups at the start of the next sector, spread over this depth. */
+  startX: 6,
   rallyDepth: 10,
-  spawnX: 104,
-  breachX: 1,
+  spawnX: 106,
   laneHalfWidth: 7,
-  spawnIntervalSeconds: 1.1,
-  clearPauseSeconds: 2,
-  retreatPauseSeconds: 3.5,
-  waveTimeLimitSeconds: 90,
-  bossEvery: 10,
+  capturePauseSeconds: 3,
+  /** Counterattacking armor never pushes past this point, so there is no breach: only attrition. */
+  counterattackLimitX: 14,
+};
+
+/**
+ * Each sector is a fortified position generated from its number: defensive lines with trenches and
+ * emplacements, armor held in reserve, and a fortified base whose fall captures the sector.
+ */
+export const SECTOR = {
+  firstLineX: 44,
+  lineSpacing: 15,
+  baseX: 98,
+  maxLines: 3,
+  sectorsPerExtraLine: 3,
+  /** Reserve armor wakes when the assault gets this close to the first line. */
+  reserveTriggerOffset: 10,
+  trenchFromSector: 2,
+  trenchWidth: 3.2,
+  trenchOffset: 5,
+  trenchSpeedFactor: 0.35,
+  trenchDamageTaken: 1.6,
+  emplacementsBase: 2,
+  sectorsPerExtraEmplacement: 4,
+  maxEmplacementsPerLine: 5,
+  reserveBase: 2,
+  sectorsPerExtraReserve: 2,
+  maxReserve: 10,
+  landshipEvery: 5,
+  /** Damaged defenses repair themselves, so a factory too weak to finish them stalls instead of failing. */
+  repairPerSecond: 0.004,
+  reinforceSeconds: 14,
+  maxReinforcements: 4,
+  captureBonusShare: 0.5,
+  growth: { hp: 1.3, damage: 1.2, armor: 1.1, salvage: 1.32 },
 };
 
 export const ARTILLERY = {
   baseIntervalSeconds: 4,
   minIntervalSeconds: 1.2,
-  intervalDropPerWave: 0.03,
+  intervalDropPerSector: 0.1,
   damageShare: 0.3,
   blastRadius: 3,
   scatter: 2.5,
@@ -30,10 +60,9 @@ export const ARTILLERY = {
 
 export const START = {
   salvage: 30,
-  intel: 0,
   steel: 10,
-  deployCap: 6,
-  deployPerLogistics: 2,
+  /** Hard limit for rendering. The army is meant to settle below it, where production matches losses. */
+  maxFrontTanks: 60,
   depotCap: 3,
   powerPerLevel: 10,
   complexityPerUpgrade: 1.05,
@@ -242,69 +271,87 @@ export const TANK_MODELS = [
   },
 ];
 
+/** Stats at sector 1. Structures never move; `range` and `damage` define how far and how hard they reach. */
 export const ENEMY_KINDS = {
-  armoredCar: { name: "Armored Car", hp: 24, armor: 0, damage: 3, reload: 1.2, range: 11, speed: 4.4, salvage: 3, intel: 0.7 },
-  lightTank: { name: "Light Tank", hp: 46, armor: 2, damage: 5, reload: 1.4, range: 12, speed: 3.8, salvage: 5, intel: 1 },
-  mediumTank: { name: "Medium Tank", hp: 95, armor: 5, damage: 9, reload: 1.6, range: 14, speed: 3.4, salvage: 9, intel: 1.8 },
-  tankDestroyer: { name: "Assault Gun", hp: 80, armor: 7, damage: 17, reload: 2.4, range: 18, speed: 3.0, salvage: 11, intel: 2.2 },
-  heavyTank: { name: "Heavy Tank", hp: 230, armor: 12, damage: 19, reload: 2.2, range: 16, speed: 2.6, salvage: 20, intel: 4 },
-  landship: { name: "Landship", hp: 700, armor: 6, damage: 22, reload: 2.5, range: 18, speed: 1.5, salvage: 120, intel: 30, boss: true },
+  armoredCar: { name: "Armored Car", hp: 24, armor: 0, damage: 3, reload: 1.2, range: 11, speed: 4.4, salvage: 3 },
+  lightTank: { name: "Light Tank", hp: 46, armor: 2, damage: 5, reload: 1.4, range: 12, speed: 3.8, salvage: 5 },
+  mediumTank: { name: "Medium Tank", hp: 95, armor: 5, damage: 9, reload: 1.6, range: 14, speed: 3.4, salvage: 9 },
+  tankDestroyer: { name: "Assault Gun", hp: 80, armor: 7, damage: 17, reload: 2.4, range: 18, speed: 3.0, salvage: 11 },
+  heavyTank: { name: "Heavy Tank", hp: 230, armor: 12, damage: 19, reload: 2.2, range: 16, speed: 2.6, salvage: 20 },
+  landship: { name: "Landship", hp: 700, armor: 6, damage: 22, reload: 2.5, range: 18, speed: 1.5, salvage: 120 },
+  pillbox: { name: "Pillbox", hp: 80, armor: 3, damage: 3, reload: 0.8, range: 13, speed: 0, salvage: 8, structure: true },
+  atGun: { name: "AT Gun", hp: 45, armor: 1, damage: 12, reload: 2.6, range: 18, speed: 0, salvage: 8, structure: true },
+  bunker: { name: "Bunker", hp: 220, armor: 7, damage: 9, reload: 2.0, range: 16, speed: 0, salvage: 18, structure: true },
+  hq: { name: "Fortified Base", hp: 420, armor: 5, damage: 9, reload: 2.2, range: 15, speed: 0, salvage: 60, structure: true, base: true },
 };
 
-/** Waves this early or later add the kind to the pool, weighted by `weight`. */
-export const ENEMY_POOL = [
-  { kind: "armoredCar", fromWave: 1, weight: 4 },
-  { kind: "lightTank", fromWave: 2, weight: 4 },
-  { kind: "mediumTank", fromWave: 5, weight: 3 },
-  { kind: "tankDestroyer", fromWave: 8, weight: 2 },
-  { kind: "heavyTank", fromWave: 14, weight: 2 },
+/** Emplacement kinds available from a sector onward, weighted by `weight`. */
+export const EMPLACEMENT_POOL = [
+  { kind: "pillbox", fromSector: 1, weight: 4 },
+  { kind: "atGun", fromSector: 2, weight: 3 },
+  { kind: "bunker", fromSector: 3, weight: 3 },
 ];
 
-export const ENEMY_SCALING = {
-  hpGrowth: 1.15,
-  damageGrowth: 1.12,
-  armorGrowth: 1.07,
-  salvageGrowth: 1.16,
-  intelGrowth: 1.11,
-  baseCount: 3,
-  wavesPerExtraEnemy: 2,
-  maxCount: 14,
-  clearBonusKills: 3,
-};
+/** Armor held in reserve and sent as reinforcements, available from a sector onward. */
+export const ARMOR_POOL = [
+  { kind: "armoredCar", fromSector: 1, weight: 4 },
+  { kind: "lightTank", fromSector: 1, weight: 4 },
+  { kind: "mediumTank", fromSector: 3, weight: 3 },
+  { kind: "tankDestroyer", fromSector: 4, weight: 2 },
+  { kind: "heavyTank", fromSector: 6, weight: 2 },
+];
 
-export const RESEARCH_GROUPS = [
+export const DOCTRINE_GROUPS = [
   { id: "military", name: "Military" },
   { id: "industry", name: "Industry" },
-  { id: "armory", name: "Armory" },
 ];
 
-export const RESEARCH = [
-  { id: "gun", group: "military", name: "Gun Caliber", desc: "+15% tank damage per level. Tanks take 5% longer to build.", cost: 4, growth: 1.42, max: 999 },
-  { id: "plating", group: "military", name: "Armor Plating", desc: "+15% tank HP and +8% armor per level. Tanks take 5% longer to build.", cost: 4, growth: 1.42, max: 999 },
-  { id: "penetrator", group: "military", name: "AP Shells", desc: "Ignore 7% of enemy armor per level.", cost: 12, growth: 1.6, max: 12 },
-  { id: "optics", group: "military", name: "Gun Optics", desc: "+5% range per level.", cost: 10, growth: 1.7, max: 10 },
-  { id: "engines", group: "military", name: "Engine Tuning", desc: "+10% tank speed per level.", cost: 8, growth: 1.7, max: 10 },
-  { id: "repair", group: "military", name: "Field Repair", desc: "Tanks regenerate 0.5% HP per second per level.", cost: 18, growth: 1.75, max: 10 },
-  { id: "camouflage", group: "military", name: "Camouflage Nets", desc: "-8% artillery damage per level.", cost: 15, growth: 1.8, max: 8 },
-  { id: "logistics", group: "military", name: "Logistics", desc: "+2 tanks allowed at the front per level.", cost: 10, growth: 1.65, max: 12 },
-  { id: "bessemer", group: "industry", name: "Bessemer Process", desc: "+25% steel mill output per level.", cost: 5, growth: 1.5, max: 999 },
-  { id: "tooling", group: "industry", name: "Machine Tooling", desc: "+25% hull, turret and engine output per level.", cost: 6, growth: 1.5, max: 999 },
-  { id: "jigs", group: "industry", name: "Assembly Jigs", desc: "+25% assembly speed per level.", cost: 8, growth: 1.55, max: 999 },
-  { id: "grid", group: "industry", name: "Power Grid", desc: "+30% power output per level.", cost: 5, growth: 1.5, max: 999 },
-  { id: "warehouses", group: "industry", name: "Warehouses", desc: "+50% storage and +1 depot slot per level.", cost: 6, growth: 1.65, max: 20 },
-  { id: "scavenging", group: "industry", name: "Scavenging", desc: "+20% salvage from kills per level.", cost: 8, growth: 1.5, max: 999 },
-  { id: "intelligence", group: "industry", name: "Field Intelligence", desc: "+15% intel from kills per level.", cost: 12, growth: 1.55, max: 999 },
-  { id: "recovery", group: "industry", name: "Recovery Crews", desc: "Each lost tank returns 20% of its steel per level.", cost: 20, growth: 2, max: 5 },
-  { id: "requisition", group: "industry", name: "Automated Requisition", desc: "Unlocks auto-upgrading of factory stations.", cost: 60, growth: 1, max: 1 },
-  { id: "bureau", group: "industry", name: "Research Bureau", desc: "Unlocks auto-research of the cheapest project.", cost: 350, growth: 1, max: 1, requires: ["requisition"] },
-  { id: "t34", group: "armory", name: "T-34/76 blueprints", desc: "Sloped armor and a 76 mm gun.", cost: 25, growth: 1, max: 1, unlocksModel: "t34" },
-  { id: "sherman", group: "armory", name: "M4 Sherman blueprints", desc: "A reliable 75 mm medium tank.", cost: 140, growth: 1, max: 1, requires: ["t34"], unlocksModel: "sherman" },
-  { id: "panther", group: "armory", name: "Panther blueprints", desc: "Long 75 mm gun with a fast, flat shot.", cost: 800, growth: 1, max: 1, requires: ["sherman"], unlocksModel: "panther" },
-  { id: "tiger", group: "armory", name: "Tiger I blueprints", desc: "Thick armor and the 88 mm gun.", cost: 4500, growth: 1, max: 1, requires: ["panther"], unlocksModel: "tiger" },
-  { id: "is2", group: "armory", name: "IS-2 blueprints", desc: "A 122 mm gun that cracks heavy armor.", cost: 25000, growth: 1, max: 1, requires: ["tiger"], unlocksModel: "is2" },
-  { id: "kingtiger", group: "armory", name: "King Tiger blueprints", desc: "Long 88 mm gun behind sloped heavy armor.", cost: 150000, growth: 1, max: 1, requires: ["is2"], unlocksModel: "kingtiger" },
-  { id: "maus", group: "armory", name: "Maus blueprints", desc: "188 tonnes of steel and a 128 mm gun.", cost: 1000000, growth: 1, max: 1, requires: ["kingtiger"], unlocksModel: "maus" },
+/** Permanent upgrades bought with medals. They survive every regroup. */
+export const DOCTRINES = [
+  { id: "gun", group: "military", name: "Gun Caliber", desc: "+15% tank damage per level. Tanks take 5% longer to build.", cost: 1, growth: 1.35, max: 999 },
+  { id: "plating", group: "military", name: "Armor Plating", desc: "+15% tank HP and +8% armor per level. Tanks take 5% longer to build.", cost: 1, growth: 1.35, max: 999 },
+  { id: "penetrator", group: "military", name: "AP Shells", desc: "Ignore 7% of enemy armor per level.", cost: 3, growth: 1.6, max: 12 },
+  { id: "optics", group: "military", name: "Gun Optics", desc: "+5% range per level.", cost: 2, growth: 1.7, max: 10 },
+  { id: "engines", group: "military", name: "Engine Tuning", desc: "+10% tank speed per level.", cost: 2, growth: 1.7, max: 10 },
+  { id: "repair", group: "military", name: "Field Repair", desc: "Tanks regenerate 0.5% HP per second per level.", cost: 4, growth: 1.75, max: 10 },
+  { id: "camouflage", group: "military", name: "Camouflage Nets", desc: "-8% artillery damage per level.", cost: 3, growth: 1.8, max: 8 },
+  { id: "bessemer", group: "industry", name: "Bessemer Process", desc: "+25% steel mill output per level.", cost: 1, growth: 1.45, max: 999 },
+  { id: "tooling", group: "industry", name: "Machine Tooling", desc: "+25% hull, turret and engine output per level.", cost: 1, growth: 1.45, max: 999 },
+  { id: "jigs", group: "industry", name: "Assembly Jigs", desc: "+25% assembly speed per level.", cost: 2, growth: 1.5, max: 999 },
+  { id: "grid", group: "industry", name: "Power Grid", desc: "+30% power output per level.", cost: 1, growth: 1.45, max: 999 },
+  { id: "warehouses", group: "industry", name: "Warehouses", desc: "+50% storage and +1 depot slot per level.", cost: 2, growth: 1.65, max: 20 },
+  { id: "scavenging", group: "industry", name: "Scavenging", desc: "+20% salvage from kills per level.", cost: 2, growth: 1.5, max: 999 },
+  { id: "recovery", group: "industry", name: "Recovery Crews", desc: "Each lost tank returns 20% of its steel per level.", cost: 5, growth: 2, max: 5 },
+  { id: "requisition", group: "industry", name: "Automated Requisition", desc: "Unlocks auto-upgrading of factory stations.", cost: 8, growth: 1, max: 1 },
 ];
+
+/** Tank designs bought with salvage. They reset with the factory on every regroup. */
+export const BLUEPRINTS = [
+  { model: "t34", desc: "Sloped armor and a 76 mm gun.", cost: 250 },
+  { model: "sherman", desc: "A reliable 75 mm medium tank.", cost: 2500 },
+  { model: "panther", desc: "Long 75 mm gun with a fast, flat shot.", cost: 25000 },
+  { model: "tiger", desc: "Thick armor and the 88 mm gun.", cost: 250000 },
+  { model: "is2", desc: "A 122 mm gun that cracks heavy armor.", cost: 2.5e6 },
+  { model: "kingtiger", desc: "Long 88 mm gun behind sloped heavy armor.", cost: 2.5e7 },
+  { model: "maus", desc: "188 tonnes of steel and a 128 mm gun.", cost: 2.5e8 },
+];
+
+/** Regrouping resets the factory and front for medals that scale with the run's best sector. */
+export const PRESTIGE = {
+  minSector: 3,
+  medalsAtMinSector: 3,
+  medalGrowth: 1.25,
+  stallSeconds: 180,
+};
+
+/** An offensive commits tanks from the front line to retake sectors up to the best ever captured. */
+export const OFFENSIVE = {
+  sectors: 2,
+  /** Offensives stop this many sectors short of the record, so a young factory is not stranded too deep. */
+  recordMargin: 2,
+  baseValue: 6,
+  valuePerSector: 2,
+};
 
 export const AUTOMATION = {
   intervalSeconds: 1,

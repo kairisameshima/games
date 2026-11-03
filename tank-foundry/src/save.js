@@ -26,9 +26,8 @@ export function deserializeState(text) {
   } catch (error) {
     throw new SaveFormatError(`Save is not valid JSON: ${error.message}`);
   }
-  if (payload?.version !== SAVE_VERSION || typeof payload.state !== "object") {
-    throw new SaveFormatError(`Unsupported save version ${payload?.version}`);
-  }
+  if (typeof payload?.state !== "object" || payload.state === null) throw new SaveFormatError("Save has no state");
+  if (payload.version !== SAVE_VERSION) throw new SaveFormatError(`Unsupported save version ${payload.version}`);
   const state = mergeDefaults(createInitialState(payload.savedAt), payload.state);
   state.savedAt = payload.savedAt;
   return state;
@@ -39,11 +38,10 @@ export function simulateAway(state, seconds) {
   const simulated = Math.min(seconds, OFFLINE_LIMIT_SECONDS);
   const before = {
     salvage: state.stats.salvageEarned,
-    intel: state.stats.intelEarned,
     kills: state.stats.kills,
     built: state.stats.tanksBuilt,
     lost: state.stats.tanksLost,
-    maxWave: state.battle.maxWave,
+    maxSector: state.battle.maxSector,
   };
   const events = [];
   for (let elapsed = 0; elapsed < simulated; elapsed += OFFLINE_STEP_SECONDS) {
@@ -53,10 +51,10 @@ export function simulateAway(state, seconds) {
   return {
     seconds: simulated,
     salvage: state.stats.salvageEarned - before.salvage,
-    intel: state.stats.intelEarned - before.intel,
+    
     kills: state.stats.kills - before.kills,
     built: state.stats.tanksBuilt - before.built,
     lost: state.stats.tanksLost - before.lost,
-    wavesGained: state.battle.maxWave - before.maxWave,
+    sectorsGained: state.battle.maxSector - before.maxSector,
   };
 }

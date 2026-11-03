@@ -392,6 +392,94 @@ function landship(parts) {
   band(parts, 3.02, 1.2, 0.35);
 }
 
+const CONCRETE = paintMaterial(0x9b978b);
+const CONCRETE_DARK = paintMaterial(0x6f6c63);
+const SLIT = paintMaterial(0x141414);
+const EARTH = paintMaterial(0x6b5a3c);
+const SANDBAG = paintMaterial(0xb3a173);
+const FLAG_RED = paintMaterial(0xb23a2a);
+
+function sandbagRing(parts, radius, count, y = 0) {
+  for (let index = 0; index < count; index += 1) {
+    const angle = (index / count) * Math.PI * 2;
+    const bag = mesh(new THREE.CapsuleGeometry(0.28, 0.6, 2, 6).rotateZ(Math.PI / 2), SANDBAG, Math.cos(angle) * radius, y + 0.3, Math.sin(angle) * radius);
+    bag.rotation.y = -angle + Math.PI / 2;
+    parts.lower.add(bag);
+  }
+}
+
+/** Round concrete machine-gun post. Its cap turns to track targets. */
+function pillbox(parts) {
+  sandbagRing(parts, 2.3, 14);
+  const body = cylinderAlong("y", 1.55, 1.75, 1.5, 10, CONCRETE);
+  body.position.y = 0.75;
+  parts.lower.add(body);
+  parts.turret.position.y = 1.5;
+  const cap = cylinderAlong("y", 1.2, 1.6, 0.55, 10, CONCRETE_DARK);
+  cap.position.y = 0.27;
+  parts.turret.add(cap);
+  box(parts.turret, 0.5, 0.22, 1.2, SLIT, 1.45, -0.35, 0);
+  gun(parts, { x: 1.5, y: -0.25, length: 1.1, radius: 0.06 });
+}
+
+/** Towed anti-tank gun behind a shield, legs splayed. The whole gun traverses. */
+function atGun(parts) {
+  for (const side of [-1, 1]) {
+    const leg = mesh(new THREE.BoxGeometry(2.6, 0.18, 0.18), CONCRETE_DARK, -1.2, 0.3, side * 0.55);
+    leg.rotation.y = side * 0.35;
+    parts.lower.add(leg);
+    const wheel = cylinderAlong("z", 0.5, 0.5, 0.2, 12, paintMaterial(0x2a2a2a));
+    wheel.position.set(0, 0.5, side * 0.9);
+    parts.lower.add(wheel);
+  }
+  parts.lower.add(mesh(new THREE.BoxGeometry(1.4, 0.4, 2.6), EARTH, 0.6, 0.2, 0));
+  parts.turret.position.y = 0.9;
+  box(parts.turret, 0.12, 1.1, 1.8, parts.paint, 0.4, -0.3, 0);
+  box(parts.turret, 0.9, 0.4, 0.6, parts.accent, -0.1, -0.2, 0);
+  gun(parts, { x: 0.4, y: 0.05, length: 2.6, radius: 0.07, brake: true });
+}
+
+/** Earth-banked concrete casemate with a fixed gun firing through a slit. */
+function bunker(parts) {
+  const berm = mesh(new THREE.CylinderGeometry(3.2, 4.2, 1.6, 8), EARTH, 0, 0.8, 0);
+  berm.scale.set(1.15, 1, 0.9);
+  parts.lower.add(berm);
+  profile(parts.lower, [[-2.4, 1.2], [2.2, 1.2], [2.6, 1.8], [1.8, 2.9], [-2.4, 2.9]], 3.6, CONCRETE);
+  box(parts.lower, 4.9, 0.25, 3.9, CONCRETE_DARK, -0.1, 2.9, 0);
+  box(parts.lower, 0.3, 0.32, 2.2, SLIT, 2.35, 1.95, 0);
+  parts.turret.position.y = 2.1;
+  parts.turret.userData.fixed = true;
+  gun(parts, { x: 2.3, y: 0, length: 1.8, radius: 0.12 });
+}
+
+/** The sector objective: a walled concrete keep with corner towers, a roof gun and the enemy flag. */
+function fortifiedBase(parts) {
+  const wall = mesh(new THREE.CylinderGeometry(6.2, 6.6, 1.6, 8), EARTH, 0, 0.8, 0);
+  parts.lower.add(wall);
+  box(parts.lower, 7.6, 3.6, 7.6, CONCRETE, 0, 1.2, 0);
+  box(parts.lower, 8.0, 0.4, 8.0, CONCRETE_DARK, 0, 4.8, 0);
+  for (const [x, z] of [[-3.8, -3.8], [3.8, -3.8], [-3.8, 3.8], [3.8, 3.8]]) {
+    const tower = cylinderAlong("y", 1.1, 1.3, 5.6, 8, CONCRETE);
+    tower.position.set(x, 2.8 + 1.2, z);
+    parts.lower.add(tower);
+    const top = cylinderAlong("y", 1.4, 1.2, 0.5, 8, CONCRETE_DARK);
+    top.position.set(x, 7.0, z);
+    parts.lower.add(top);
+    box(parts.lower, 0.5, 0.3, 1.0, SLIT, x + Math.sign(x) * 0.95, 5.2, z);
+  }
+  for (const z of [-2.2, 0, 2.2]) box(parts.lower, 0.2, 0.5, 1.2, SLIT, 3.82, 3.0, z);
+  const pole = cylinderAlong("y", 0.08, 0.08, 4.5, 6, CONCRETE_DARK);
+  pole.position.set(-2.5, 5.2 + 2.25, 0);
+  parts.lower.add(pole);
+  const flag = mesh(new THREE.BoxGeometry(2.0, 1.2, 0.06), FLAG_RED, -1.45, 9.0, 0);
+  flag.name = "flag";
+  parts.lower.add(flag);
+  parts.turret.position.set(0.8, 5.2, 0);
+  const dome = mesh(new THREE.SphereGeometry(1.6, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), CONCRETE_DARK);
+  parts.turret.add(dome);
+  gun(parts, { x: 1.2, y: 0.6, length: 4.2, radius: 0.2, brake: true });
+}
+
 const BUILDERS = {
   stuart,
   t34,
@@ -407,6 +495,10 @@ const BUILDERS = {
   tankDestroyer,
   heavyTank,
   landship,
+  pillbox,
+  atGun,
+  bunker,
+  hq: fortifiedBase,
 };
 
 const templateCache = new Map();

@@ -8,8 +8,8 @@ Ordered by player value per unit of work. Each item names the gap it closes and 
 
 | Code | Item | Why | Done when |
 |---|---|---|---|
-| N1 | Late-game plateau | A simulated player stalls around wave 85 with the Maus and a front capped at 30 tanks, and nothing new arrives after ~2.5 hours. | Prestige (L1) or new scaling keeps progress measurable past wave 100. |
-| N2 | Done: Bottleneck hints | Players must read five station cards to find the slow one. | The slowest station's label pulses, and the Factory panel header names it. |
+| N1 | Done: Late-game plateau | A simulated player stalls around wave 85 with the Maus and a front capped at 30 tanks, and nothing new arrives after ~2.5 hours. | Prestige (L1) or new scaling keeps progress measurable past wave 100. |
+| N2 | Dropped: Bottleneck hints | Players must read five station cards to find the slow one. | The slowest station's label pulses, and the Factory panel header names it. |
 | N3 | Bulk upgrades | Late-game upgrades cost one click each, and auto-upgrade only buys the cheapest. | Buy ×1 / ×10 / max toggle on station and research buttons. |
 | N4 | Readable combat | Enemy tanks are all grey, and losses are hard to follow. | Enemy classes get distinct silhouettes and markings. The wave bar shows kills and losses for the current wave. |
 | N5 | Done: Source page redirect | `/games/tank-foundry/` loads the raw source page, which can't run on Pages. | It redirects to `play/`. |
@@ -36,7 +36,7 @@ Ordered by player value per unit of work. Each item names the gap it closes and 
 
 | Code | Item | Why |
 |---|---|---|
-| L1 | Prestige: "New offensive" | Reset the factory and waves for medals that grant permanent multipliers and unlock new starting blueprints. This is the standard fix for N1. |
+| L1 | Done: Prestige (regroup and doctrine) | Reset the factory and waves for medals that grant permanent multipliers and unlock new starting blueprints. This is the standard fix for N1. |
 | L2 | Achievements and stats | Records exist but nothing rewards milestones. Add first boss, 1,000 tanks and no-loss wave achievements, each with a small bonus. |
 | L3 | Factions | Swap the Allied roster for a German or Soviet tech tree with different stat curves and visuals. The models already exist. |
 | L4 | Challenge runs | Seeded modifiers such as no power upgrades or Stuart-only, with a local leaderboard. |
