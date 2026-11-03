@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, hullSurfaceHeight, toX } from '../hull';
 import { part } from '../kit';
+import { addM2, m2Feedway, m2Point } from '../m2';
 import { BOMB_BAY, BULKHEADS, FLOORS, RADIO_ROOM } from './layout';
 import { ammunitionFeed, box, extinguisher, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult, type CrewStation } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
@@ -96,10 +97,12 @@ export function buildRadioRoom(context: CompartmentContext): CompartmentResult {
   // Radio-room gun on its mount in the roof hatch, stowed pointing aft; its ammunition box below.
   const hatchD = 9.5;
   const roof = hullSectionAt(hatchD).top;
-  const breech = v(hatchD - 0.3, roof - 0.35, 0);
-  rod(parent, breech, v(hatchD + 0.5, roof + 0.25, 0), 0.03, materials.gunBlack);
-  rod(parent, v(hatchD - 0.1, roof - 0.02, 0), v(hatchD - 0.1, roof - 0.3, 0), 0.02, materials.aluminium);
-  ammunitionFeed(parent, materials, v(hatchD - 0.2, floor + 0.15, 0.55), [0.3, 0.28, 0.16], 0, [v(hatchD - 0.2, floor + 0.29, 0.5), v(hatchD - 0.35, roof - 0.6, 0.25), breech.clone().add(new THREE.Vector3(0, -0.02, 0.03))]);
+  const mount = v(hatchD - 0.1, roof - 0.12, 0);
+  const elevation = new THREE.Vector3(-0.8, 0.6, 0);
+  addM2(parent, mount, elevation, 'flexible');
+  rod(parent, v(hatchD - 0.1, roof - 0.02, 0), mount.clone().add(new THREE.Vector3(0, -0.05, 0)), 0.02, materials.aluminium);
+  const feedway = m2Point(mount, elevation, m2Feedway(1));
+  ammunitionFeed(parent, materials, v(hatchD - 0.2, floor + 0.15, 0.55), [0.3, 0.28, 0.16], 0, [v(hatchD - 0.2, floor + 0.29, 0.5), feedway.clone().add(new THREE.Vector3(0, -0.3, 0.15)), feedway]);
 
   // Oxygen bottles under the starboard wall, a regulator for the operator, extinguisher on the forward bulkhead.
   for (let bottle = 0; bottle < 2; bottle++) {

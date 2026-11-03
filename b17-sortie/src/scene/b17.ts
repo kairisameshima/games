@@ -8,6 +8,7 @@ import {
 import { mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
+import { addM2 } from './m2';
 import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
 import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
@@ -21,8 +22,10 @@ const AIRFOIL_POINTS_PER_SIDE = 28;
 const TAN_DIHEDRAL = Math.tan(THREE.MathUtils.degToRad(WING.dihedralDegrees));
 const BLADE_COUNT = 3;
 const TIP_STRIPE_LENGTH = 0.15;
-const GUN_BARREL_RADIUS = 0.022;
-const GUN_JACKET_RADIUS = 0.04;
+/** Centre-to-centre spacing of the twin guns in the Sperry top and ball turrets. */
+const TOP_TURRET_GUN_SPACING = 0.4;
+// Ball guns run along the turret's sides, outboard of the gunner's legs (Pilot's Manual figures 70 and 74).
+const BALL_TURRET_GUN_SPACING = 0.62;
 
 // Wing planform and section.
 
@@ -665,20 +668,9 @@ function buildChinTurret(materials: AircraftMaterials): THREE.Group {
   const gunDirection = new THREE.Vector3(1, -Math.tan(THREE.MathUtils.degToRad(CHIN_GUN_REST_DEPRESSION_DEGREES)), 0);
   for (const side of [-1, 1]) {
     part(turret, roundedBox(0.05, CHIN_GUN_SLOT.top - CHIN_GUN_SLOT.bottom, CHIN_GUN_SLOT.width, 0.015), materials.gunBlack, faceX - 0.01, slotMiddle, side * slotZ);
-    addGun(turret, materials, new THREE.Vector3(faceX - 0.08, CHIN_GUN_SLOT.top - 0.1, side * slotZ), gunDirection, 1.1);
+    addM2(turret, new THREE.Vector3(faceX - 0.08, CHIN_GUN_SLOT.top - 0.1, side * slotZ), gunDirection, 'turret');
   }
   return turret;
-}
-
-function addGun(parent: THREE.Object3D, materials: AircraftMaterials, origin: THREE.Vector3, direction: THREE.Vector3, length: number): void {
-  const gun = new THREE.Group();
-  gun.position.copy(origin);
-  gun.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
-  const jacketLength = length * 0.55;
-  part(gun, new THREE.CylinderGeometry(GUN_JACKET_RADIUS, GUN_JACKET_RADIUS, jacketLength, 10), materials.gunBlack, 0, jacketLength / 2, 0);
-  part(gun, new THREE.CylinderGeometry(GUN_BARREL_RADIUS, GUN_BARREL_RADIUS, length, 8), materials.gunBlack, 0, length / 2, 0);
-  part(gun, new THREE.CylinderGeometry(0.03, 0.026, 0.09, 8), materials.gunBlack, 0, length, 0);
-  parent.add(gun);
 }
 
 /** Basis whose z axis is the surface normal and whose x axis runs along `along`, for decal projectors. */
@@ -907,7 +899,8 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.oliveDrab, -0.4, 0.1, 0);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.position.set(0.18, 0.24, 0);
-  for (const offset of [-0.14, 0.14]) addGun(topTurretPitch, materials, new THREE.Vector3(0, 0, offset), FORWARD, 1.2);
+  // The receivers run back either side of the engineer's head.
+  for (const offset of [-TOP_TURRET_GUN_SPACING / 2, TOP_TURRET_GUN_SPACING / 2]) addM2(topTurretPitch, new THREE.Vector3(0, 0, offset), FORWARD, 'turret');
   topTurretYaw.add(topTurretPitch);
   root.add(topTurretYaw);
 
@@ -918,8 +911,8 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   ballYaw.position.set(toX(ballSpec.d), ballSpec.h, 0);
   const ballPitch = new THREE.Group();
   part(ballPitch, new THREE.SphereGeometry(ballSpec.radius, 32, 20), materials.neutralGray, 0, 0, 0);
-  part(ballPitch, new THREE.SphereGeometry(ballSpec.radius + 0.006, 24, 8, -0.42, 0.84, Math.PI / 2 - 0.42, 0.84), materials.windowPane, 0, 0, 0, { rotation: [0, Math.PI / 2, 0], castShadow: false });
-  for (const offset of [-0.2, 0.2]) addGun(ballPitch, materials, new THREE.Vector3(0.2, -0.05, offset), FORWARD, 1.25);
+  part(ballPitch, new THREE.SphereGeometry(ballSpec.radius + 0.006, 24, 8, -0.42, 0.84, Math.PI / 2 - 0.42, 0.84), materials.windowPane, 0, 0, 0, { rotation: [0, Math.PI, 0], castShadow: false });
+  for (const offset of [-BALL_TURRET_GUN_SPACING / 2, BALL_TURRET_GUN_SPACING / 2]) addM2(ballPitch, new THREE.Vector3(0.2, -0.05, offset), FORWARD, 'turret');
   ballYaw.add(ballPitch);
   root.add(ballYaw);
 
@@ -928,16 +921,6 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   const chinTurret = buildChinTurret(materials);
   root.add(chinTurret);
 
-  // Hand-held guns: cheeks, waists and the twin tail guns.
-  addGun(airframe, materials, new THREE.Vector3(toX(1.1), 0.05, hullSectionAt(1.1).halfWidth - 0.02), new THREE.Vector3(1, -0.05, 0.32), 1.0);
-  addGun(airframe, materials, new THREE.Vector3(toX(1.45), 0.05, -hullSectionAt(1.45).halfWidth + 0.02), new THREE.Vector3(1, -0.05, -0.32), 1.0);
-  const starboardWaist = (STATIONS.waistWindowStarboard.start + STATIONS.waistWindowStarboard.end) / 2;
-  const portWaist = (STATIONS.waistWindowPort.start + STATIONS.waistWindowPort.end) / 2;
-  addGun(airframe, materials, new THREE.Vector3(toX(starboardWaist), 0.12, hullSectionAt(starboardWaist).halfWidth - 0.04), new THREE.Vector3(-0.35, -0.1, 1), 1.1);
-  addGun(airframe, materials, new THREE.Vector3(toX(portWaist), 0.12, -hullSectionAt(portWaist).halfWidth + 0.04), new THREE.Vector3(-0.35, -0.1, -1), 1.1);
-  for (const offset of [-0.11, 0.11]) {
-    addGun(airframe, materials, new THREE.Vector3(toX(FUSELAGE_LENGTH - 0.1), -0.06, offset), FORWARD.clone().negate(), 1.0);
-  }
   const tailWindows = STATIONS.tailTurretWindows;
   // The tail gunner's windows sit in the housing, which forms the roof of his compartment.
   addSideWindows(airframe, tailHousing, materials.windowPane, cutouts, tailWindows.start, tailWindows.end, tailWindows.top, tailWindows.bottom, [1, -1]);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, toX } from '../hull';
 import { part } from '../kit';
+import { addM2, m2Feedway, m2Point } from '../m2';
 import { BULKHEADS, FLOORS, NOSE } from './layout';
 import { ammunitionFeed, box, extinguisher, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
@@ -34,20 +35,22 @@ function addBombsight(context: CompartmentContext): { leftKnob: THREE.Vector3; r
   return { ...knobs, eyepiece };
 }
 
-/** Cheek gun receiver and spade grips inside the window, with its ammunition box and feed chute. */
+/** Cheek gun on its socket mount in the window, its ammunition box on the floor and the feed chute up to the receiver. */
 function addCheekGun(context: CompartmentContext, d: number, side: 1 | -1): void {
-  const { parent, materials } = context;
-  const wall = hullHalfWidthAtHeight(d, 0.05) * side;
-  const mount = v(d, 0.05, wall - side * 0.02);
+  const { parent: compartment, materials } = context;
+  // The barrel is outside the skin, so the gun stays when the cutaway hides the starboard wall's equipment.
+  const parent = new THREE.Group();
+  parent.userData.staysInCutaway = true;
+  compartment.add(parent);
+  const mount = v(d, 0.05, side * (hullHalfWidthAtHeight(d, 0.05) - 0.02));
   // The gun points forward and out; its receiver runs back inside the nose.
-  const inward = new THREE.Vector3(-1, 0.05, -side * 0.32).normalize();
-  const grips = mount.clone().addScaledVector(inward, 0.55);
-  rod(parent, mount, grips, 0.035, materials.gunBlack);
-  box(parent, mount.clone().addScaledVector(inward, 0.3), [0.12, 0.09, 0.07], materials.gunBlack, Math.atan2(side * 0.32, 1));
-  for (const offset of [-0.05, 0.05]) rod(parent, grips.clone().add(new THREE.Vector3(0, -0.06, offset)), grips.clone().add(new THREE.Vector3(0, 0.03, offset)), 0.013, materials.rubber);
+  const direction = new THREE.Vector3(1, -0.05, side * 0.32);
+  addM2(parent, mount, direction, 'flexible');
   // Boxes against the wall are inset from the skin at their bottom edge, where the nose is narrowest.
   const ammunition = v(d + 0.15, FLOORS.nose.y + 0.14, side * (hullHalfWidthAtHeight(d, FLOORS.nose.y) - 0.1));
-  ammunitionFeed(parent, materials, ammunition, [0.3, 0.28, 0.16], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.14, 0)), mount.clone().addScaledVector(inward, 0.25).add(new THREE.Vector3(0, -0.15, 0)), mount.clone().addScaledVector(inward, 0.28).add(new THREE.Vector3(0, -0.04, 0))]);
+  const nearSide = m2Point(mount, direction, new THREE.Vector3(0, 0, 1)).sub(mount).dot(ammunition.clone().sub(mount)) > 0 ? 1 : -1;
+  const feedway = m2Point(mount, direction, m2Feedway(nearSide));
+  ammunitionFeed(compartment, materials, ammunition, [0.3, 0.28, 0.16], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.14, 0)), feedway.clone().add(new THREE.Vector3(0, -0.15, 0)), feedway]);
 }
 
 function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector3; chart: THREE.Vector3 } {
@@ -93,7 +96,8 @@ export function buildNose(context: CompartmentContext): CompartmentResult {
   rod(parent, v(chin.d + 0.25, 0.25, hullHalfWidthAtHeight(chin.d + 0.25, 0.25) - 0.03), v(chin.d, chin.y + 0.08, chin.z), 0.02, materials.aluminium);
   box(parent, v(chin.d, chin.y, chin.z), [0.12, 0.14, 0.2], materials.crinkle, 0, 0.02);
   for (const offset of [-0.13, 0.13]) rod(parent, v(chin.d, chin.y, chin.z + offset * 0.6), v(chin.d, chin.y, chin.z + offset), 0.016, materials.rubber);
-  regulator(parent, materials, v(1.35, 0.1, hullHalfWidthAtHeight(1.35, 0.1) - 0.04), Math.PI / 2);
+  // Below the starboard cheek gun's receiver, so his hose does not run through it.
+  regulator(parent, materials, v(1.35, -0.25, hullHalfWidthAtHeight(1.35, -0.25) - 0.04), -Math.PI / 2);
 
   addCheekGun(context, NOSE.cheekGuns.starboardD, 1);
   addCheekGun(context, NOSE.cheekGuns.portD, -1);
@@ -125,7 +129,7 @@ export function buildNose(context: CompartmentContext): CompartmentResult {
       },
     }),
     outfit: { upper: 'b3', lower: 'a3', flakVest: true, flakApron: false, flakHelmet: true, lifeVest: true, harness: true, goggles: 'up', oxygenMask: true },
-    regulator: v(1.35, 0.02, hullHalfWidthAtHeight(1.35, 0.02) - 0.08),
+    regulator: v(1.35, -0.33, hullHalfWidthAtHeight(1.35, -0.33) - 0.08),
     faceSeed: 1,
   };
 

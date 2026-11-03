@@ -3,64 +3,57 @@ import { STATIONS } from '../b17-dimensions';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part } from '../kit';
+import { addM2, M2_BACKPLATE, M2_GRIPS, m2Feedway, m2Point } from '../m2';
 import { BULKHEADS, TAIL, WAIST } from './layout';
 import { ammunitionFeed, box, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, plantedFoot, pose, verticalGrip } from './poses';
 import { tailFloorHeight, waistFloorHeight } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
-/** Waist guns hang on K-6 mounts in the windows; the receiver runs this far inboard of the mount to the spade grips. */
-const WAIST_RECEIVER_LENGTH = 0.42;
-const SPADE_GRIP_SPREAD = 0.055;
-
-/** Waist gun inside the window: receiver, spade grips, the post of its mount, and its ammunition box and chute. */
+const AFT = new THREE.Vector3(-1, 0, 0);
+/** Waist gun on its K-6 mount in the window: the gun, the mount post, and its ammunition box and feed chute. */
 function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { grips: [THREE.Vector3, THREE.Vector3]; yaw: number } {
   const { parent: compartment, materials } = context;
   // The gun stays visible in a cutaway even on the starboard side: the gunner is holding it.
   const parent = new THREE.Group();
-  parent.userData.heldByCrew = true;
+  parent.userData.staysInCutaway = true;
   compartment.add(parent);
   const mount = v(d, WAIST.gunY, side * (hullSectionAt(d).halfWidth - 0.04));
-  const outward = new THREE.Vector3(-0.35, -0.1, side).normalize();
-  const backplate = mount.clone().addScaledVector(outward, -WAIST_RECEIVER_LENGTH);
-  rod(parent, mount, backplate, 0.04, materials.gunBlack);
-  box(parent, mount.clone().addScaledVector(outward, -0.25), [0.16, 0.1, 0.08], materials.gunBlack, Math.atan2(-outward.z, outward.x));
-  part(parent, new THREE.TorusGeometry(0.05, 0.004, 6, 24), materials.gunBlack, mount.x, mount.y + 0.09, mount.z).rotation.y = Math.atan2(-outward.z, outward.x) + Math.PI / 2;
+  // The forward (starboard) gun swings aft and the aft (port) gun forward, so the two gunners, who stand back to back
+  // near the centreline with the grips 0.6 m inboard of the mounts, are not in each other's way.
+  const outward = new THREE.Vector3(side > 0 ? -0.35 : 0.35, -0.1, side).normalize();
+  addM2(parent, mount, outward, 'flexible');
   // Mount post down to the window sill, then the yoke up to the trunnions.
   const sill = mount.clone().add(new THREE.Vector3(0, -0.36, 0)).addScaledVector(outward, 0.04);
-  rod(parent, sill, mount.clone().add(new THREE.Vector3(0, -0.05, 0)), 0.022, materials.aluminium);
-  // Spade grips: two vertical handles either side of the backplate, across the gun.
-  const across = new THREE.Vector3().crossVectors(outward, new THREE.Vector3(0, 1, 0)).normalize();
-  const grips: [THREE.Vector3, THREE.Vector3] = [
-    backplate.clone().addScaledVector(across, -SPADE_GRIP_SPREAD).addScaledVector(outward, -0.04),
-    backplate.clone().addScaledVector(across, SPADE_GRIP_SPREAD).addScaledVector(outward, -0.04),
-  ];
-  for (const grip of grips) rod(parent, grip.clone().add(new THREE.Vector3(0, -0.06, 0)), grip.clone().add(new THREE.Vector3(0, 0.06, 0)), 0.016, materials.rubber, 10);
-  // Ammunition box on the floor against the wall aft of the window, the chute feeding the gun's left side.
+  rod(parent, sill, mount.clone().add(new THREE.Vector3(0, -0.1, 0)), 0.022, materials.aluminium);
+  for (const offset of [-0.065, 0.065]) {
+    const trunnion = m2Point(mount, outward, new THREE.Vector3(-0.05, -0.03, offset));
+    rod(parent, mount.clone().add(new THREE.Vector3(0, -0.1, 0)), trunnion, 0.01, materials.aluminium, 8);
+  }
+  // Ammunition box on the floor against the wall aft of the window; the belt enters the receiver on its aft side.
   const floor = waistFloorHeight(d + 0.7);
   const ammunition = v(d + 0.7, floor + 0.2, side * (hullHalfWidthAtHeight(d + 0.7, floor) - 0.12));
+  const aftSide = m2Point(mount, outward, new THREE.Vector3(0, 0, 1)).sub(mount).dot(ammunition.clone().sub(mount)) > 0 ? 1 : -1;
+  const feedway = m2Point(mount, outward, m2Feedway(aftSide));
   ammunitionFeed(compartment, materials, ammunition, [0.34, 0.4, 0.2], 0, [
     ammunition.clone().add(new THREE.Vector3(0, 0.2, 0)),
-    ammunition.clone().lerp(mount, 0.5).add(new THREE.Vector3(0, 0.25, 0)),
-    mount.clone().addScaledVector(outward, -0.22).add(new THREE.Vector3(0.06, 0.05, 0)),
+    ammunition.clone().lerp(feedway, 0.5).add(new THREE.Vector3(0, 0.2, 0)),
+    feedway,
   ]);
   // The gunner faces the window: his yaw turns him to look out along the gun.
-  const yaw = Math.atan2(-outward.z, outward.x);
-  return { grips: side > 0 ? [grips[1], grips[0]] : [grips[0], grips[1]], yaw };
+  return { grips: [m2Point(mount, outward, M2_GRIPS.left), m2Point(mount, outward, M2_GRIPS.right)], yaw: Math.atan2(-outward.z, outward.x) };
 }
 
 function waistGunner(role: string, gun: { grips: [THREE.Vector3, THREE.Vector3]; yaw: number }, d: number, side: 1 | -1, faceSeed: number): CrewMember {
   const floor = waistFloorHeight(d);
   const forward = new THREE.Vector3(Math.cos(gun.yaw), 0, -Math.sin(gun.yaw));
   const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
-  const gripCentre = gun.grips[0].clone().add(gun.grips[1]).multiplyScalar(0.5);
+  const [leftGrip, rightGrip] = gun.grips;
+  const gripCentre = leftGrip.clone().add(rightGrip).multiplyScalar(0.5);
   // Stand a forearm's reach behind the grips, feet apart and staggered for the kick of the gun.
   const pelvis = gripCentre.clone().addScaledVector(forward, -0.42);
   pelvis.y = floor + 0.93;
   const foot = (along: number, lateral: number) => pelvis.clone().addScaledVector(forward, along).addScaledVector(right, lateral).setY(floor + 0.075);
-  // Grips in the gunner's frame: whichever handle is on his left takes his left hand.
-  const leftFirst = gun.grips[0].clone().sub(pelvis).dot(right) < gun.grips[1].clone().sub(pelvis).dot(right);
-  const [leftGrip, rightGrip] = leftFirst ? gun.grips : [gun.grips[1], gun.grips[0]];
   return {
     role,
     pose: pose({
@@ -95,11 +88,12 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
 
   // The ball turret's own interior: shell lining, ammunition boxes either side of the gunner, the sight.
   part(ballTurretPitch, new THREE.SphereGeometry(ball.radius - 0.012, 32, 20), materials.turretLining, 0, 0, 0, { castShadow: false });
-  for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.16, 0.3, 0.1), materials.ammunitionBox, -0.05, -0.05, side * 0.4);
+  // Ammunition boxes against the sides, outboard of the guns.
+  for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.16, 0.28, 0.07), materials.ammunitionBox, -0.05, -0.05, side * 0.43);
   // Sperry K-4 sight hangs in front of his face; the grips flank it, ahead of his shoulders.
   part(ballTurretPitch, new THREE.BoxGeometry(0.1, 0.1, 0.09), materials.crinkle, 0.08, 0.26, 0);
   part(ballTurretPitch, new THREE.BoxGeometry(0.004, 0.06, 0.06), materials.glass, 0.025, 0.3, 0);
-  const ballGrips = [new THREE.Vector3(0.18, 0.2, -0.17), new THREE.Vector3(0.18, 0.2, 0.17)] as const;
+  const ballGrips = [new THREE.Vector3(0.1, 0.2, -0.1), new THREE.Vector3(0.1, 0.2, 0.1)] as const;
   for (const grip of ballGrips) rod(ballTurretPitch, grip.clone().add(new THREE.Vector3(0, -0.05, 0)), grip.clone().add(new THREE.Vector3(0, 0.05, 0)), 0.015, materials.rubber, 10);
 
   const starboardGun = addWaistGun(context, WAIST.starboardGunD, 1);
@@ -131,14 +125,22 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   box(parent, v(TAIL.armourD, armourFloor + 0.32, 0), [0.02, 0.5, Math.min(0.6, (hullHalfWidthAtHeight(TAIL.armourD, armourFloor + 0.32) - 0.03) * 2)], materials.armour, 0, 0.005);
   const gripY = tailFloor + 0.62;
   const tailGrips = [v(TAIL.gripD, gripY, -0.12), v(TAIL.gripD, gripY, 0.12)] as const;
-  for (const z of [-0.11, 0.11]) rod(parent, v(TAIL.gripD + 0.05, gripY + 0.02, z), v(22.5, -0.06, z), 0.035, materials.gunBlack);
+  // Twin guns in the Cheyenne mount, receivers inside the housing; links run from his grips back to each backplate.
+  const tailGuns = TAIL.gunSpacing.map((z) => v(TAIL.gunMuzzleD - 0.92, TAIL.gunY, z));
+  tailGuns.forEach((origin, index) => {
+    addM2(parent, origin, AFT, 'turret');
+    rod(parent, tailGrips[index].clone().add(new THREE.Vector3(-0.03, 0.04, 0)), m2Point(origin, AFT, M2_BACKPLATE), 0.012, materials.gunBlack, 8);
+  });
   rod(parent, tailGrips[0].clone().add(new THREE.Vector3(-0.03, 0, 0)), tailGrips[1].clone().add(new THREE.Vector3(-0.03, 0, 0)), 0.015, materials.gunBlack);
   for (const grip of tailGrips) rod(parent, grip.clone().add(new THREE.Vector3(0, -0.06, 0)), grip.clone().add(new THREE.Vector3(0, 0.06, 0)), 0.016, materials.rubber, 10);
   box(parent, v(TAIL.gripD + 0.06, gripY + 0.24, 0), [0.1, 0.1, 0.08], materials.crinkle, 0, 0.012);
   part(parent, new THREE.BoxGeometry(0.004, 0.07, 0.07), materials.glass, toX(TAIL.gripD + 0.02), gripY + 0.32, 0);
   for (const side of [-1, 1]) {
     const ammunition = v(20.35, tailFloorHeight(20.35) + 0.18, side * (hullHalfWidthAtHeight(20.56, tailFloorHeight(20.35) + 0.03) - 0.08));
-    ammunitionFeed(parent, materials, ammunition, [0.42, 0.3, 0.13], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.15, 0)), v(21.3, gripY + 0.2, side * 0.2), v(TAIL.gripD + 0.25, gripY + 0.05, side * 0.11)]);
+    // Each gun feeds from its outboard side.
+    const gun = tailGuns[side < 0 ? 0 : 1];
+    const feedway = m2Point(gun, AFT, m2Feedway(side < 0 ? 1 : -1));
+    ammunitionFeed(parent, materials, ammunition, [0.42, 0.3, 0.13], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.15, 0)), v(21.3, gripY + 0.2, side * 0.2), feedway.clone().add(new THREE.Vector3(0.15, 0.05, 0)), feedway]);
   }
   regulator(parent, materials, v(TAIL.gunnerD - 0.4, tailFloor + 0.45, hullHalfWidthAtHeight(TAIL.gunnerD - 0.4, tailFloor + 0.45) - 0.04), -Math.PI / 2);
 
@@ -167,22 +169,23 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
     faceSeed: 9,
   };
 
-  // Ball turret gunner, folded in the ball: back against the rear, knees up either side of the sight, feet in stirrups.
+  // Ball turret gunner, folded in the ball: back against the rear armour, knees drawn up between the guns, feet in the
+  // heel rests either side of the sighting window.
   const ballGunner: CrewMember = {
     role: 'Ball turret gunner',
     pose: pose({
-      pelvis: new THREE.Vector3(-0.22, -0.3, 0),
+      pelvis: new THREE.Vector3(-0.25, -0.27, 0),
       yaw: FACING.forward,
       pelvisTilt: 0.35,
-      spineBend: 0.6,
-      headPitch: 0.3,
+      spineBend: 0.75,
+      headPitch: 0.55,
       hands: {
-        left: verticalGrip(ballGrips[0], 'left', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 1.2 }),
-        right: verticalGrip(ballGrips[1], 'right', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 1.2 }),
+        left: verticalGrip(ballGrips[0], 'left', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.25 }),
+        right: verticalGrip(ballGrips[1], 'right', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.25 }),
       },
       feet: {
-        left: { ankle: new THREE.Vector3(0.26, -0.1, -0.2), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, -0.5) },
-        right: { ankle: new THREE.Vector3(0.26, -0.1, 0.2), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, 0.5) },
+        left: { ankle: new THREE.Vector3(0.33, 0, -0.13), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, -0.15) },
+        right: { ankle: new THREE.Vector3(0.33, 0, 0.13), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, 0.15) },
       },
     }),
     outfit: { upper: 'heatedSuit', lower: 'heatedSuit', flakVest: false, flakApron: false, flakHelmet: false, lifeVest: false, harness: true, goggles: 'down', oxygenMask: true },

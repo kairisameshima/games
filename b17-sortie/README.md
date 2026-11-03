@@ -12,7 +12,8 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Propellers | Three twisted Hamilton Standard blades with yellow tips, plus a motion-blur disc |
 | Paint | Olive Drab 41 over Neutral Gray 43 with panel lines, rivets, fade, de-icer boots and exhaust soot |
 | Markings | Projected decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial |
-| Turrets | Sperry top and ball turrets, Bendix chin turret, Cheyenne tail guns, cheek and waist guns |
+| Turrets | Sperry top and ball turrets, Bendix chin turret, Cheyenne tail guns, cheek, waist and radio-hatch guns |
+| Guns | Thirteen Browning AN/M2 .50s at true size (1.44 m, TM 9-225): receiver with feed cover, feedways and slide handle, perforated cooling jacket, flash hider; hand-held guns add spade grips, butterfly trigger and ring-and-bead sight |
 | Interior | Every compartment from the Norden sight to the tail guns, laid out from the Standard Aircraft Characteristics inboard profile and the Pilot's Manual figures: Z-section frames and stringers, quilted insulation, plywood floors, bulkheads 4–7, instrument panel, pedestal, top-turret basket, racks and catwalk, radio sets, waist guns on K-6 mounts, ball turret, tail station, oxygen system |
 | Crew | Ten men posed with IK onto the real controls (wheels, grips, Norden knobs, throttles, Morse key). Each is a signed-distance sculpture meshed in a worker: anatomy under B-3/A-3 sheepskin, A-2 or F-3 heated suit, A-6 boots, A-11 helmet, A-14 mask and hose to his regulator, B-8 goggles, M4 helmet, M1 vest, M3 apron, B-4 life vest, harness |
 | Bomb bay | Twelve 500 lb bombs in two vertical racks either side of the catwalk, released bottom tier first through a real opening |
@@ -51,7 +52,7 @@ npm run build      # typecheck + production build into dist/
 ## Layout
 
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
-- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/window-cutouts.ts` opens the windows, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
+- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/window-cutouts.ts` opens the windows, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
 - `src/scene/effects.ts` runs flak bursts, contrail ribbons and falling bombs.
 - `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.

@@ -103,4 +103,8 @@ export const TAIL = {
   gripD: 21.6,
   /** Armour plate in front of him, below the sighting window. */
   armourD: 21.48,
+  /** Cheyenne mount: the muzzles stand 0.82 m beyond the tail cone, the receivers just inside it. */
+  gunMuzzleD: 23.48,
+  gunY: -0.06,
+  gunSpacing: [-0.11, 0.11],
 } as const;

@@ -121,7 +121,7 @@ function sortStarboardWall(equipment: THREE.Group, airframe: THREE.Object3D): TH
   for (const child of [...equipment.children]) {
     bounds.setFromObject(child).getCenter(centre);
     const d = toX(centre.x);
-    const onWall = !child.userData.heldByCrew && centre.z > STARBOARD_WALL_MIN_Z && centre.z > hullHalfWidthAtHeight(d, centre.y) - STARBOARD_WALL_DEPTH;
+    const onWall = !child.userData.staysInCutaway && centre.z > STARBOARD_WALL_MIN_Z && centre.z > hullHalfWidthAtHeight(d, centre.y) - STARBOARD_WALL_DEPTH;
     (onWall ? wall : airframe).add(child);
   }
   return wall;
