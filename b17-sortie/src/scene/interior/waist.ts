@@ -87,7 +87,8 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   for (const side of [-1, 1]) rod(parent, v(ball.d, hullSectionAt(ball.d).top - 0.1, 0), v(ball.d + side * 0.45, ballFloor + 0.04, 0), 0.025, materials.aluminium);
 
   // The ball turret's own interior: shell lining, ammunition boxes either side of the gunner, the sight.
-  part(ballTurretPitch, new THREE.SphereGeometry(ball.radius - 0.012, 32, 20), materials.turretLining, 0, 0, 0, { castShadow: false });
+  // Lining stops at the front glazing, so the gunner can be seen through it.
+  part(ballTurretPitch, new THREE.SphereGeometry(ball.radius - 0.012, 32, 20, 0, Math.PI * 2, ball.glazingHalfAngle, Math.PI - ball.glazingHalfAngle).rotateZ(-Math.PI / 2), materials.turretLining, 0, 0, 0, { castShadow: false });
   // Ammunition boxes against the sides, outboard of the guns.
   for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.16, 0.28, 0.07), materials.ammunitionBox, -0.05, -0.05, side * 0.43);
   // Sperry K-4 sight hangs in front of his face; the grips flank it, ahead of his shoulders.
