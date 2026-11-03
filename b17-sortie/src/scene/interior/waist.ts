@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { STATIONS } from '../b17-dimensions';
-import { ballShellGeometry } from '../ball-turret';
+import { BALL, ballGunOrigin, ballShellGeometry, ballTurretCentre, ballWindowMaskMaterial } from '../ball-turret';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
-import { part } from '../kit';
+import { part, roundedBox } from '../kit';
 import { addM2, M2_BACKPLATE, M2_GRIPS, m2Feedway, m2Point } from '../m2';
 import { BULKHEADS, TAIL, WAIST } from './layout';
 import { ammunitionFeed, box, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
@@ -11,6 +11,8 @@ import { FACING, plantedFoot, pose, verticalGrip } from './poses';
 import { tailFloorHeight, waistFloorHeight } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
+const BALL_FORWARD = new THREE.Vector3(1, 0, 0);
+const BALL_RING_MOUNTS = 20;
 const AFT = new THREE.Vector3(-1, 0, 0);
 /** Waist gun on its K-6 mount in the window: the gun, the mount post, and its ammunition box and feed chute. */
 function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { grips: [THREE.Vector3, THREE.Vector3]; yaw: number } {
@@ -77,26 +79,78 @@ function waistGunner(role: string, gun: { grips: [THREE.Vector3, THREE.Vector3];
   };
 }
 
+/** 5 ft 4 in: ball turret gunners were chosen from the shortest men in a crew. */
+const BALL_GUNNER_STATURE = 0.93;
+/** Heel rests either side of the sighting window, high in the front of the ball (pitch frame, metres). */
+const BALL_HEEL_REST = new THREE.Vector3(0.38, 0.06, 0.12);
+
+/**
+ * Inside the ball, in its pitch frame: lining, the armour seat, the two ammunition boxes in front of the gunner with
+ * chutes to the outboard side of each gun, the K-4 computing sight in his line of sight, the hand control and limit
+ * unit above his face, the hydraulic power unit, heel rests and the foot range pedal. Outside the ball: the fixed
+ * azimuth ring gear on its Lord shock mounts, and the A-2A support column down from the roof. Returns the hand grips.
+ */
+function addBallTurretInterior(context: CompartmentContext): [THREE.Vector3, THREE.Vector3] {
+  const { parent, materials, ballTurretPitch: pitch } = context;
+  const centre = ballTurretCentre();
+  const ringProfile = [
+    new THREE.Vector2(BALL.ringGear.innerRadius, BALL.ringGear.bottom), new THREE.Vector2(BALL.ringGear.outerRadius, BALL.ringGear.bottom),
+    new THREE.Vector2(BALL.ringGear.outerRadius, BALL.ringGear.top), new THREE.Vector2(BALL.ringGear.innerRadius, BALL.ringGear.top),
+  ];
+  part(parent, new THREE.LatheGeometry([...ringProfile, ringProfile[0]], 96), materials.aluminium, centre.x, centre.y, centre.z);
+  for (let mount = 0; mount < BALL_RING_MOUNTS; mount++) {
+    const angle = (mount / BALL_RING_MOUNTS) * Math.PI * 2;
+    const radius = BALL.ringGear.outerRadius + 0.012;
+    part(parent, new THREE.CylinderGeometry(0.018, 0.02, 0.04, 12), materials.rubber, centre.x + Math.cos(angle) * radius, centre.y + BALL.ringGear.top + 0.02, Math.sin(angle) * radius);
+  }
+  rod(parent, v(STATIONS.ballTurret.d, hullSectionAt(STATIONS.ballTurret.d).top - 0.04, 0), centre.clone().add(new THREE.Vector3(0, BALL.collectorTop, 0)), 0.045, materials.aluminium);
+
+  part(pitch, ballShellGeometry(BALL.radius - 0.012), ballWindowMaskMaterial(materials.turretLining), 0, 0, 0, { castShadow: false });
+  // Armour-plate seat pan and the pad on the door behind his back.
+  const seat = part(pitch, roundedBox(0.26, 0.025, 0.3, 0.01), materials.armour, -0.12, -0.47, 0);
+  seat.rotation.z = 0.35;
+  const backPad = part(pitch, roundedBox(0.04, 0.3, 0.28, 0.015), materials.seatCushion, -0.46, -0.16, 0);
+  backPad.rotation.z = -0.6;
+  // Ammunition boxes: forward for the right gun (445 rounds), rear for the left (571), filling the top of the ball.
+  for (const [x, length] of [[0.235, 0.13], [0.09, 0.15]] as const) {
+    part(pitch, roundedBox(length, 0.22, 0.46, 0.012), materials.ammunitionBox, x, 0.26, 0);
+  }
+  for (const side of [-1, 1] as const) {
+    const origin = ballGunOrigin(side);
+    const feedway = m2Point(origin, BALL_FORWARD, m2Feedway(side));
+    const chute = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0.16, 0.16, side * 0.23), new THREE.Vector3(0.0, 0.1, side * 0.37), feedway.clone().add(new THREE.Vector3(0, 0.04, 0)), feedway,
+    ]);
+    part(pitch, new THREE.TubeGeometry(chute, 24, 0.022, 4, false), materials.aluminium, 0, 0, 0);
+  }
+  // K-4 computing sight hanging under the boxes, its reflector glass on the line from his eye to the window.
+  part(pitch, roundedBox(0.17, 0.13, 0.12, 0.01), materials.crinkle, -0.1, 0.09, 0);
+  const reflector = part(pitch, new THREE.PlaneGeometry(0.09, 0.07), materials.glass, -0.17, -0.0, 0);
+  reflector.rotation.set(0, -Math.PI / 2, 0.6);
+  // Hand control and limit unit above his face, its two grips hanging from it, firing switches on top.
+  part(pitch, roundedBox(0.12, 0.08, 0.18, 0.012), materials.crinkle, -0.27, 0.27, 0);
+  const grips: [THREE.Vector3, THREE.Vector3] = [new THREE.Vector3(-0.27, 0.17, -0.11), new THREE.Vector3(-0.27, 0.17, 0.11)];
+  for (const grip of grips) {
+    rod(pitch, grip.clone().add(new THREE.Vector3(0, 0.08, 0)), grip.clone().add(new THREE.Vector3(0, -0.055, 0)), 0.016, materials.rubber, 10);
+    part(pitch, new THREE.CylinderGeometry(0.008, 0.008, 0.012, 10), materials.extinguisher, grip.x + 0.012, grip.y + 0.06, grip.z);
+  }
+  // Hydraulic power unit against the left end bell, above the gun.
+  part(pitch, roundedBox(0.18, 0.13, 0.12, 0.012), materials.crinkle, -0.08, 0.28, -0.3);
+  // Heel rests and, under the left foot, the foot range control pedal.
+  for (const side of [-1, 1] as const) {
+    const rest = part(pitch, roundedBox(0.03, 0.1, 0.09, 0.008), materials.aluminium, BALL_HEEL_REST.x + 0.07, BALL_HEEL_REST.y - 0.03, side * BALL_HEEL_REST.z);
+    rest.rotation.z = 0.2;
+  }
+  part(pitch, roundedBox(0.04, 0.03, 0.08, 0.006), materials.rubber, BALL_HEEL_REST.x + 0.02, BALL_HEEL_REST.y - 0.1, -BALL_HEEL_REST.z);
+  // A-12 oxygen regulator under the seat.
+  part(pitch, roundedBox(0.1, 0.06, 0.1, 0.01), materials.oxygen, -0.14, -0.49, 0.1);
+  return grips;
+}
+
 export function buildWaistAndTail(context: CompartmentContext): CompartmentResult {
   const { parent, materials, ballTurretPitch } = context;
 
-  // Ball turret support column from the roof down to the azimuth ring in the floor.
-  const ball = STATIONS.ballTurret;
-  const ballFloor = waistFloorHeight(ball.d);
-  rod(parent, v(ball.d, hullSectionAt(ball.d).top - 0.04, 0), v(ball.d, ballFloor, 0), 0.06, materials.aluminium);
-  part(parent, new THREE.TorusGeometry(0.4, 0.035, 8, 40), materials.aluminium, toX(ball.d), ballFloor + 0.03, 0).rotation.x = Math.PI / 2;
-  for (const side of [-1, 1]) rod(parent, v(ball.d, hullSectionAt(ball.d).top - 0.1, 0), v(ball.d + side * 0.45, ballFloor + 0.04, 0), 0.025, materials.aluminium);
-
-  // The ball turret's own interior: shell lining, ammunition boxes either side of the gunner, the sight.
-  // Lining stops at the front window and the glazed sides, so the gunner can be seen through them.
-  part(ballTurretPitch, ballShellGeometry(ball.radius - 0.012), materials.turretLining, 0, 0, 0, { castShadow: false });
-  // Ammunition boxes along the sides above the guns, inboard of the glazed side wheels.
-  for (const side of [-1, 1]) part(ballTurretPitch, new THREE.BoxGeometry(0.26, 0.12, 0.08), materials.ammunitionBox, -0.12, 0.17, side * 0.31);
-  // Sperry K-4 sight hangs in front of his face; the grips flank it, ahead of his shoulders.
-  part(ballTurretPitch, new THREE.BoxGeometry(0.1, 0.1, 0.09), materials.crinkle, 0.08, 0.26, 0);
-  part(ballTurretPitch, new THREE.BoxGeometry(0.004, 0.06, 0.06), materials.glass, 0.025, 0.3, 0);
-  const ballGrips = [new THREE.Vector3(0.1, 0.2, -0.1), new THREE.Vector3(0.1, 0.2, 0.1)] as const;
-  for (const grip of ballGrips) rod(ballTurretPitch, grip.clone().add(new THREE.Vector3(0, -0.05, 0)), grip.clone().add(new THREE.Vector3(0, 0.05, 0)), 0.015, materials.rubber, 10);
+  const ballGrips = addBallTurretInterior(context);
 
   const starboardGun = addWaistGun(context, WAIST.starboardGunD, 1);
   const portGun = addWaistGun(context, WAIST.portGunD, -1);
@@ -171,28 +225,33 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
     faceSeed: 9,
   };
 
-  // Ball turret gunner, folded in the ball: back against the rear armour, knees drawn up between the guns, feet in the
-  // heel rests either side of the sighting window.
+  // Ball turret gunner as figure 39 of AN 11-45G-1 draws him: seat at the bottom of the ball, back against the door,
+  // head at the rear with his eye on the sight's line through the window, knees drawn up between the guns, feet high in
+  // the heel rests, hands up on the hand control above his face. Ball gunners were picked for short stature.
+  const atStature = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).divideScalar(BALL_GUNNER_STATURE);
+  const ballFoot = (side: 1 | -1) => ({
+    ankle: atStature(BALL_HEEL_REST.x, BALL_HEEL_REST.y, side * BALL_HEEL_REST.z),
+    toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, side * 0.3),
+  });
   const ballGunner: CrewMember = {
     role: 'Ball turret gunner',
     pose: pose({
-      pelvis: new THREE.Vector3(-0.25, -0.27, 0),
+      pelvis: atStature(-0.1, -0.39, 0),
       yaw: FACING.forward,
-      pelvisTilt: 0.35,
-      spineBend: 0.75,
-      headPitch: 0.55,
+      pelvisTilt: 1.15,
+      spineBend: 0.8,
+      headPitch: 1.3,
       hands: {
-        left: verticalGrip(ballGrips[0], 'left', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.25 }),
-        right: verticalGrip(ballGrips[1], 'right', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.25 }),
+        left: verticalGrip(ballGrips[0].clone().divideScalar(BALL_GUNNER_STATURE), 'left', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.1 }),
+        right: verticalGrip(ballGrips[1].clone().divideScalar(BALL_GUNNER_STATURE), 'right', FACING.forward, { curl: 0.9, inward: 0.2, elbowOut: 0.1 }),
       },
-      feet: {
-        left: { ankle: new THREE.Vector3(0.33, 0, -0.13), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, -0.15) },
-        right: { ankle: new THREE.Vector3(0.33, 0, 0.13), toes: new THREE.Vector3(0.3, -1, 0), sole: new THREE.Vector3(1, 0.2, 0).normalize(), kneePole: new THREE.Vector3(0.3, 1, 0.15) },
-      },
+      feet: { left: ballFoot(-1), right: ballFoot(1) },
     }),
     outfit: { upper: 'heatedSuit', lower: 'heatedSuit', flakVest: false, flakApron: false, flakHelmet: false, lifeVest: false, harness: true, goggles: 'down', oxygenMask: true },
-    regulator: new THREE.Vector3(-0.15, -0.35, 0.3),
+    // The A-12 regulator is on a bracket under the seat.
+    regulator: atStature(-0.14, -0.47, 0.08),
     faceSeed: 8,
+    stature: BALL_GUNNER_STATURE,
   };
 
   return {

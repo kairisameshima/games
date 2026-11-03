@@ -8,7 +8,7 @@ import {
 import { mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
-import { addBallTurretShell, addBallTurretYoke } from './ball-turret';
+import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
 import { addM2 } from './m2';
 import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
@@ -25,8 +25,6 @@ const BLADE_COUNT = 3;
 const TIP_STRIPE_LENGTH = 0.15;
 /** Centre-to-centre spacing of the twin guns in the Sperry top and ball turrets. */
 const TOP_TURRET_GUN_SPACING = 0.4;
-// Ball guns run along the turret's sides, outboard of the gunner's legs (Pilot's Manual figures 70 and 74).
-const BALL_TURRET_GUN_SPACING = 0.62;
 
 // Wing planform and section.
 
@@ -853,6 +851,11 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   const radioMid = (radioHatch.start + radioHatch.end) / 2;
   addWindow(airframe, hull, materials.windowPane, cutouts, new THREE.Vector3(toX(radioMid), hullSectionAt(radioMid).top, 0), UP, FORWARD, radioHatch.end - radioHatch.start, 0.62, 0.4);
 
+  // The ball turret's 46 1/2 in hole in the belly.
+  const ballCentre = ballTurretCentre();
+  const ballOpening = new THREE.Vector3(ballCentre.x, ballCentre.y + BALL.centreBelowSkin, 0);
+  cutouts.add(ballOpening, decalOrientation(UP.clone().negate(), FORWARD), new THREE.Vector3(BALL.openingRadius * 2, BALL.openingRadius * 2, 0.3), 'round');
+
   // National insignia, codes and the 91st BG tail marking.
   const insignia = STATIONS.fuselageInsignia;
   for (const side of [1, -1] as const) {
@@ -905,15 +908,13 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   topTurretYaw.add(topTurretPitch);
   root.add(topTurretYaw);
 
-  // Ball turret hanging from its yoke under the radio room.
-  const ballSpec = STATIONS.ballTurret;
-  part(airframe, new THREE.CylinderGeometry(0.16, 0.2, 0.5, 16), materials.gunmetal, toX(ballSpec.d), ballSpec.h + ballSpec.radius + 0.1, 0);
+  // Sperry ball turret, hanging from its trunnion ring support in the hole in the belly behind the radio room.
   const ballYaw = new THREE.Group();
-  ballYaw.position.set(toX(ballSpec.d), ballSpec.h, 0);
+  ballYaw.position.copy(ballTurretCentre());
+  addBallTurretMount(ballYaw, { structure: materials.neutralGray, steel: materials.gunmetal });
   const ballPitch = new THREE.Group();
-  addBallTurretShell(ballPitch, { shell: materials.neutralGray, frame: materials.neutralGray, glass: materials.canopy, trunnion: materials.gunmetal });
-  addBallTurretYoke(ballYaw, materials.neutralGray);
-  for (const offset of [-BALL_TURRET_GUN_SPACING / 2, BALL_TURRET_GUN_SPACING / 2]) addM2(ballPitch, new THREE.Vector3(0.2, -0.05, offset), FORWARD, 'turret');
+  addBallTurretShell(ballPitch, { shell: materials.neutralGray, glass: materials.canopy, seam: materials.rubber, steel: materials.steel });
+  for (const side of [-1, 1] as const) addM2(ballPitch, ballGunOrigin(side), FORWARD, 'turret');
   ballYaw.add(ballPitch);
   root.add(ballYaw);
 
@@ -981,7 +982,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     crew: interior.crew,
     cutawayMaterials: [
       materials.hull, materials.oliveDrab, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
-      materials.neutralGray, materials.tailHousing, ...interior.clipMaterials,
+      materials.neutralGray, ballWindowMaskMaterial(materials.neutralGray), materials.tailHousing, ...interior.clipMaterials,
     ],
     cutawayHidden: [interior.starboardWall],
     exhaustPorts,

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { FUSELAGE_LENGTH } from '../b17-dimensions';
+import { FUSELAGE_LENGTH, STATIONS } from '../b17-dimensions';
 import { HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
 import { BULKHEADS, FLOORS, TAIL_FLOOR_CLEARANCE, WAIST_FLOOR_CLEARANCE } from './layout';
@@ -14,6 +14,8 @@ const STRINGER_EVERY = 4;
 const STRINGER_DEPTH = 0.024;
 const FLOOR_SEGMENT = 0.5;
 const FLOOR_THICKNESS = 0.035;
+/** The waist floor's well round the ball turret: clear of the trunnion ring support and its brackets. */
+const BALL_WELL_RADIUS = 0.62;
 const TRUSS_TUBE_RADIUS = 0.032;
 
 /** Inward unit normals of a hull ring, in the section plane. */
@@ -89,15 +91,39 @@ export function addSkinAndStructure(parent: THREE.Object3D, materials: InteriorM
 }
 
 /** Plywood floor panels, each as wide as the hull allows at its height. */
-export function addFloor(parent: THREE.Object3D, materials: InteriorMaterials, start: number, end: number, heightAt: (d: number) => number, maxHalfWidth = 2): void {
-  for (let d = start; d < end - 1e-3; d += FLOOR_SEGMENT) {
-    const length = Math.min(FLOOR_SEGMENT, end - d);
+/** A round hole in a floor, centred on the fuselage centreline: the ball turret's well. */
+export interface FloorOpening { d: number; radius: number }
+
+/** Floor strips round the hole are this long fore and aft, short enough that the hole's edge reads as round. */
+const OPENING_STRIP = 0.06;
+
+export function addFloor(
+  parent: THREE.Object3D, materials: InteriorMaterials, start: number, end: number, heightAt: (d: number) => number,
+  maxHalfWidth = 2, opening: FloorOpening | null = null,
+): void {
+  const inOpening = (d: number) => opening !== null && Math.abs(d - opening.d) < opening.radius;
+  for (let d = start; d < end - 1e-3;) {
+    const step = inOpening(d) || inOpening(d + FLOOR_SEGMENT) ? OPENING_STRIP : FLOOR_SEGMENT;
+    const length = Math.min(step, end - d);
     const middle = d + length / 2;
     const y = heightAt(middle);
     const halfWidth = Math.min(hullHalfWidthAtHeight(d, y), hullHalfWidthAtHeight(d + length, y), maxHalfWidth) - 0.03;
+    d += length;
     if (halfWidth < 0.12) continue;
-    const panel = part(parent, roundedBox(length - 0.008, FLOOR_THICKNESS, halfWidth * 2, 0.008), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, 0);
-    panel.castShadow = true;
+    // Where the strip crosses the hole, the floor runs only outboard of it.
+    const nearest = opening ? Math.max(0, Math.abs(middle - opening.d) - length / 2) : 0;
+    const holeHalfWidth = opening && nearest < opening.radius ? Math.sqrt(opening.radius ** 2 - nearest ** 2) : 0;
+    if (holeHalfWidth === 0) {
+      const panel = part(parent, roundedBox(length - 0.008, FLOOR_THICKNESS, halfWidth * 2, 0.008), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, 0);
+      panel.castShadow = true;
+      continue;
+    }
+    const width = halfWidth - holeHalfWidth;
+    if (width < 0.03) continue;
+    for (const side of [-1, 1]) {
+      const panel = part(parent, roundedBox(length - 0.004, FLOOR_THICKNESS, width, 0.006), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, side * (holeHalfWidth + width / 2));
+      panel.castShadow = true;
+    }
   }
 }
 
@@ -110,7 +136,7 @@ export function addFloors(parent: THREE.Object3D, materials: InteriorMaterials):
   addFloor(parent, materials, FLOORS.cockpit.start, FLOORS.cockpit.end, () => FLOORS.cockpit.y);
   addFloor(parent, materials, FLOORS.flightDeck.start, FLOORS.flightDeck.end, () => FLOORS.flightDeck.y);
   addFloor(parent, materials, FLOORS.radioRoom.start, FLOORS.radioRoom.end, () => FLOORS.radioRoom.y);
-  addFloor(parent, materials, BULKHEADS.radioToWaist, BULKHEADS.waistToTail, waistFloorHeight);
+  addFloor(parent, materials, BULKHEADS.radioToWaist, BULKHEADS.waistToTail, waistFloorHeight, 2, { d: STATIONS.ballTurret.d, radius: BALL_WELL_RADIUS });
   addFloor(parent, materials, BULKHEADS.waistToTail, 21.75, tailFloorHeight, 0.32);
   // Cockpit floor bearers either side of the crawlway, closing the space under the floor at its sides.
   for (const side of [-1, 1]) {

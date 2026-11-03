@@ -39,6 +39,11 @@ export interface CrewMember {
   regulator: THREE.Vector3 | null;
   /** Varies face shape between the men. */
   faceSeed: number;
+  /**
+   * Height as a fraction of the 1.75 m figure the skeleton is built for. The pose is authored at full size and the
+   * finished mesh scaled about its host's origin, so a short man's targets are given divided by his stature.
+   */
+  stature?: number;
 }
 
 export type FigureDetail = 'high' | 'low';
@@ -451,6 +456,7 @@ export function figureGeometry(arrays: FigureArrays): THREE.BufferGeometry {
 export function figureMesh(member: CrewMember, detail: FigureDetail, geometry: THREE.BufferGeometry): THREE.Mesh {
   const mesh = new THREE.Mesh(geometry, crewMaterial());
   mesh.name = member.role;
+  mesh.scale.setScalar(member.stature ?? 1);
   mesh.castShadow = detail === 'high';
   mesh.receiveShadow = true;
   return mesh;

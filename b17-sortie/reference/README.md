@@ -8,6 +8,7 @@
 | `photo-b17-bomb-run.jpg` | [B-17 on bomb run](https://commons.wikimedia.org/wiki/File:B-17_on_bomb_run.jpg), USAAF | Public domain |
 | `photo-385bg-b17f-flak.jpg` | [385th BG B-17F 42-30275](https://commons.wikimedia.org/wiki/File:385th_Bombardment_Group_B-17F_Flying_Fortress_42-30275.jpg), USAAF | Public domain |
 | `photo-schweinfurt-formation.jpg` | [B-17F formation over Schweinfurt, 17 August 1943](https://commons.wikimedia.org/wiki/File:B-17F_formation_over_Schweinfurt,_Germany,_August_17,_1943.jpg), USAAF | Public domain |
+| `ball-turret-installation.png` | [AN 11-45G-1, Handbook of Instructions, Lower Ball Turrets Types A-2, A-2A and A-13](http://hangarthirteen.org/wp-content/uploads/2020/08/11-45G-1-Handbook-for-Sperry-Lower-Ball-Turrets-A-2-A-2A-A-13.pdf), figure 47 (installation outline drawing), USAAF | Public domain |
 | `photo-b17-schweinfurt.jpg` | [B-17 Schweinfurt](https://commons.wikimedia.org/wiki/File:B-17_Schweinfurt.jpg), USAAF | Public domain |
 
 ## How the model was measured
@@ -38,6 +39,8 @@ The `*-raw.json` files are the column traces, and `fuselage-stations.json` is th
 - *EAA Flight Training Manual, B-17G "Aluminum Overcast"* (EAA, revised March 2012), weight and balance arms: pilots 167.6 in, top turret 193.6 in, radio room 374.0 in, waist gunners 559 and 621 in, tail wheel 665 in, from a datum 205 in ahead of the wing-root leading edge. These place the seats and gun positions along the fuselage.
 - *Pilot's Manual for Boeing B-17 Flying Fortress* (AAF), figures of the instrument panel (the panel texture follows its layout), pedestal, upper turret, bomb bay, radio room, ball turret, waist and tail positions.
 - *Pilot Training Manual for the B-17 Flying Fortress* (AAF Manual 50-13), [archive.org](https://archive.org/details/50-13): crew duties and stations, oxygen equipment, flight clothing.
+
+The Sperry ball turret follows AN 11-45G-1: a 44 in ball hung 2 in below the skin in a 46 1/2 in hole, so about half of it sits inside the waist; guns 28 in apart and 2 1/4 in below the centreline, muzzles 42 11/32 in ahead of it; the laminated sighting window (15.3 in glass in a 17.4 in armoured frame) 3 in below the centreline; end bells flat-faced at 18 5/16 in, glazed with eight wedge panes round the trunnion hub and a ring of panes round the shoulder; the azimuth ring gear on twenty Lord shock mounts; the trunnion ring support, its brackets and the hanger tubing; the ammunition boxes (445 and 571 rounds) in front of the gunner; and the gunner's posture from figure 39, scaled to 5 ft 4 in because ball gunners were picked short.
 
 Crew outfits follow 1944 Eighth Air Force practice on a bomb run: oxygen masks on above 10,000 ft, M4 flak helmets and M1 vests on, waist and tail gunners in M3 aprons, and the ball turret gunner in an F-3 heated suit alone because nothing bulkier fits the 44 in ball.
 

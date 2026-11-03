@@ -66,7 +66,9 @@ function crewMesh(crew: StationCrew, detail: FigureDetail): THREE.Mesh {
 
 function calloutAnchor(crew: StationCrew): THREE.Vector3 {
   const skeleton = buildSkeleton(crew.member.pose);
-  const anchor = crew.placement === 'above' ? skeleton.head.position.clone().add(new THREE.Vector3(0, CALLOUT_LIFT, 0)) : skeleton.pelvis.position.clone();
+  const joint = crew.placement === 'above' ? skeleton.head.position : skeleton.pelvis.position;
+  const anchor = joint.clone().multiplyScalar(crew.member.stature ?? 1);
+  if (crew.placement === 'above') anchor.y += CALLOUT_LIFT;
   return crew.host ? crew.host.localToWorld(anchor) : anchor;
 }
 
