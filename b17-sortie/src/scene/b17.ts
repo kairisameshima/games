@@ -10,7 +10,7 @@ import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
 import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
-import { HULL_RING_POINTS, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
+import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
@@ -299,11 +299,45 @@ function buildSurfaceGeometry(
   return loftGeometry(rings, spans.map((span) => span / spanLength), capRoot, true);
 }
 
+/** Root vertices land this far outside the skin: hidden by the interior skin from the cabin, and inside the surface's own root from outside. */
+const ROOT_SKIN_OFFSET = 0.005;
+
+/**
+ * Moves every vertex that lies inside the fuselage out onto its skin, so a flying surface's buried root stops at the
+ * hull instead of running through the compartments. `outward` is the direction the surface leaves the hull: sideways
+ * for the wing and tailplane, up for the fin. Normals stay as lofted: the moved vertices are hidden in the joint.
+ */
+function conformRootToHull(geometry: THREE.BufferGeometry, outward: 'side' | 'up'): THREE.BufferGeometry {
+  const position = geometry.getAttribute('position');
+  for (let index = 0; index < position.count; index++) {
+    const d = toX(position.getX(index));
+    if (d <= 0 || d >= FUSELAGE_LENGTH) continue;
+    const y = position.getY(index);
+    const z = position.getZ(index);
+    if (outward === 'up') {
+      // Over the tail gunner the Cheyenne housing is the roof, so the fin stands on it rather than on the hull.
+      const roof = Math.max(hullSurfaceHeight(d, z, true), tailHousingSurfaceHeight(d, z) ?? -Infinity);
+      if (y < roof && insideHull(d, y, z, roof)) position.setY(index, roof + ROOT_SKIN_OFFSET);
+    } else if (insideHull(d, y, z, hullSectionAt(d).top)) {
+      position.setZ(index, Math.sign(z) * (hullHalfWidthAtHeight(d, y) + ROOT_SKIN_OFFSET));
+    }
+  }
+  return geometry;
+}
+
+/** Inside the hull section at `d`, with its top raised to `top` where a fairing roofs it. */
+function insideHull(d: number, y: number, z: number, top: number): boolean {
+  const section = hullSectionAt(d);
+  const middle = (top + section.bottom) / 2;
+  const halfHeight = (top - section.bottom) / 2;
+  return (Math.abs(z) / section.halfWidth) ** HULL_EXPONENT + (Math.abs(y - middle) / halfHeight) ** HULL_EXPONENT < 1;
+}
+
 function buildWingGeometry(): THREE.BufferGeometry {
-  // The wing stops just inside the fuselage side with a closed root rib, leaving the bomb bay and radio room clear
-  // for the bomb racks and crew, and giving the cutaway a clean wing root.
+  // The wing root rib is pressed onto the fuselage side, leaving the bomb bay and radio room clear for the bomb racks
+  // and crew, and giving the cutaway a clean wing root.
   const spans = [0.95, 1.6, 2.4, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, ...WING.tip.map((row) => row[0])];
-  return buildSurfaceGeometry(spans, wingEdges, wingChordHeight, wingThicknessRatio, WING_SEMISPAN, true);
+  return conformRootToHull(buildSurfaceGeometry(spans, wingEdges, wingChordHeight, wingThicknessRatio, WING_SEMISPAN, true), 'side');
 }
 
 function tailplaneEdges(span: number): { leading: number; trailing: number } {
@@ -324,13 +358,13 @@ function tailplaneEdges(span: number): { leading: number; trailing: number } {
 function buildTailplaneGeometry(): THREE.BufferGeometry {
   const spans = [0.15, 0.844, 1.6, 2.6, 3.6, 4.6, ...TAILPLANE.tip.map((row) => row[0])];
   const tipSpan = TAILPLANE.tip[TAILPLANE.tip.length - 1][0];
-  return buildSurfaceGeometry(
+  return conformRootToHull(buildSurfaceGeometry(
     spans,
     tailplaneEdges,
     () => TAILPLANE.chordHeight,
     (span) => THREE.MathUtils.lerp(TAILPLANE.rootThicknessRatio, TAILPLANE.tipThicknessRatio, span / tipSpan),
     tipSpan,
-  );
+  ), 'side');
 }
 
 const FIN_TOP_INDEX = FIN_OUTLINE.reduce((best, point, index) => (point[1] > FIN_OUTLINE[best][1] ? index : best), 0);
@@ -345,7 +379,7 @@ function finEdges(height: number): { leading: number; trailing: number } {
   const trailingHeights = FIN_TRAILING.map((point) => point[1]);
   const [lowLeading, lowLeadingHeight] = FIN_LEADING[0];
   const [lowTrailing, lowTrailingHeight] = FIN_TRAILING[0];
-  // Below the outline the fin is buried in the fuselage, so extend both edges straight down.
+  // Below the outline the fin runs down into the fuselage, so extend both edges; the root is then pressed onto the skin.
   const trailingSlope = (FIN_TRAILING[1][0] - lowTrailing) / (FIN_TRAILING[1][1] - lowTrailingHeight);
   return {
     leading: height < lowLeadingHeight ? lowLeading - 0.3 : monotoneCubic(leadingHeights, FIN_LEADING.map((point) => point[0]), height),
@@ -364,19 +398,43 @@ function buildFinGeometry(): THREE.BufferGeometry {
     return airfoilSection(thickness / chord, 0, 0.4, AIRFOIL_POINTS_PER_SIDE).map((point) =>
       new THREE.Vector3(toX(leading + point.x * chord), height, point.y * chord));
   });
-  return loftGeometry(rings, heights.map((height) => height / FIN_TOP), true, true);
+  return conformRootToHull(loftGeometry(rings, heights.map((height) => height / FIN_TOP), true, true), 'up');
+}
+
+/** Superellipse exponent of the Cheyenne housing's sections: flatter-sided than the hull. */
+const TAIL_HOUSING_EXPONENT = 3.2;
+
+/** The housing's lofted sections: top, bottom and half-width at each station. */
+function tailHousingSections(): NacelleProfile[] {
+  const { start, end, top } = STATIONS.tailTurretHousing;
+  const stations = [start, start + 0.3, start + 0.8, end - 0.6, end - 0.3, end];
+  const tops = [hullSectionAt(start).top - 0.02, top - 0.12, top, top, top - 0.14, hullSectionAt(end).top];
+  return stations.map((d, index) => {
+    const hull = hullSectionAt(d);
+    return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(hull.halfWidth + 0.015, 0.4) };
+  });
+}
+
+/** Height of the housing's upper surface at a station and lateral offset, or null outside the housing. */
+function tailHousingSurfaceHeight(d: number, z: number): number | null {
+  const sections = tailHousingSections();
+  const after = sections.findIndex((section) => section.d >= d);
+  if (after <= 0 || d > sections[sections.length - 1].d) return null;
+  const a = sections[after - 1], b = sections[after];
+  const t = (d - a.d) / (b.d - a.d);
+  const top = THREE.MathUtils.lerp(a.top, b.top, t);
+  const bottom = THREE.MathUtils.lerp(a.bottom, b.bottom, t);
+  const halfWidth = THREE.MathUtils.lerp(a.halfWidth, b.halfWidth, t);
+  const lateral = Math.min(Math.abs(z) / halfWidth, 0.999);
+  return (top + bottom) / 2 + (1 - lateral ** TAIL_HOUSING_EXPONENT) ** (1 / TAIL_HOUSING_EXPONENT) * (top - bottom) / 2;
 }
 
 /** Cheyenne tail-gun housing under the rudder: a raised, slab-sided fairing over the tail cone. */
 function buildTailHousingGeometry(): THREE.BufferGeometry {
-  const { start, end, top } = STATIONS.tailTurretHousing;
-  const stations = [start, start + 0.3, start + 0.8, end - 0.6, end - 0.3, end];
-  const tops = [hullSectionAt(start).top - 0.02, top - 0.12, top, top, top - 0.14, hullSectionAt(end).top];
-  const rings = stations.map((d, index) => {
-    const hull = hullSectionAt(d);
-    return ellipseRing(new THREE.Vector3(toX(d), 0, 0), tops[index], hull.bottom + 0.3, Math.min(hull.halfWidth + 0.015, 0.4), HULL_RING_POINTS, 3.2);
-  });
-  return loftGeometry(rings, stations.map((d) => d / FUSELAGE_LENGTH), true, true);
+  const sections = tailHousingSections();
+  const rings = sections.map((section) =>
+    ellipseRing(new THREE.Vector3(toX(section.d), 0, 0), section.top, section.bottom, section.halfWidth, HULL_RING_POINTS, TAIL_HOUSING_EXPONENT));
+  return loftGeometry(rings, sections.map((section) => section.d / FUSELAGE_LENGTH), true, true);
 }
 
 interface NacelleProfile { d: number; top: number; bottom: number; halfWidth: number }
