@@ -338,7 +338,7 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
   while (ship.bombsDropped < state.bombsReleased) {
     const racked = aircraft.rackedBombs[ship.bombsDropped];
     racked.getWorldPosition(scratchPosition);
-    holder.getWorldQuaternion(scratchQuaternion);
+    racked.getWorldQuaternion(scratchQuaternion);
     bombs.release(scratchPosition, scratchQuaternion, MODEL_SCALE);
     ship.bombsDropped += 1;
   }

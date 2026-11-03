@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
-import { hullHalfWidthAtHeight, hullSectionAt, hullSurfaceHeight, toX } from '../hull';
+import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part } from '../kit';
 import { addM2 } from '../m2';
 import { feedGun, receiverSideToward } from './ammunition';
@@ -10,6 +10,9 @@ import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './p
 import { addBulkhead, addSparTruss } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
+const RACK_UPRIGHT_SPACING = 0.84;
+/** AN-M64 suspension lugs are 14 in apart. */
+const BOMB_LUG_SPACING = 0.356;
 
 export interface BombBayResult extends CompartmentResult {
   /** Racked bombs in release order: bottom tier first, alternating starboard and port. */
@@ -31,20 +34,25 @@ export function buildBombBay(context: CompartmentContext): BombBayResult {
   for (let d = start + 0.2; d < end; d += 0.55) {
     for (const side of [-1, 1]) rod(parent, v(d, bay.catwalkY - 0.2, 0), v(d, hullSectionAt(d).bottom + 0.12, side * 0.28), 0.014, materials.aluminium, 8);
   }
-  // Rope hand-lines along both sides at shoulder height, as crews used to cross the bay.
-  for (const side of [-1, 1]) rod(parent, v(start, 0.25, side * 0.22), v(end, 0.25, side * 0.22), 0.007, materials.chartPaper, 6);
-
-  // Bomb racks: fore and aft stanchions per side with a shackle beam per tier.
+  // Bomb racks: a vertical rack each side of the catwalk, its two uprights on the bay floor frames and up to the roof.
+  // The bombs hang outboard of it on their sides, lugs inboard, each in a B-7 shackle bolted to the rack.
   const topTierY = bay.lowestTierY + (bay.tiers - 1) * bay.tierSpacing;
   for (const side of [-1, 1]) {
-    const z = side * (bay.rackZ + 0.2);
-    // Stanchions stand on the bay floor frames, a few centimetres above the closed doors.
-    for (const d of [middle - 0.42, middle + 0.42]) rod(parent, v(d, hullSurfaceHeight(d, Math.abs(z), false) + 0.06, z), v(d, topTierY + 0.35, z), 0.022, materials.aluminium);
+    const z = side * bay.rackFrameZ;
+    for (const d of [middle - RACK_UPRIGHT_SPACING / 2, middle + RACK_UPRIGHT_SPACING / 2]) {
+      rod(parent, v(d, bay.catwalkY, z), v(d, topTierY + 0.3, z), 0.022, materials.aluminium);
+    }
+    // Rope hand-line along the rack at shoulder height, for crossing the bay.
+    rod(parent, v(start, 0.25, side * (bay.rackFrameZ - 0.03)), v(end, 0.25, side * (bay.rackFrameZ - 0.03)), 0.007, materials.chartPaper, 6);
     for (let tier = 0; tier < bay.tiers; tier++) {
-      const y = bay.lowestTierY + tier * bay.tierSpacing + 0.19;
-      box(parent, v(middle, y, side * (bay.rackZ + 0.1)), [0.9, 0.03, 0.22], materials.aluminium, 0, 0.008);
-      // Shackle hooks over each bomb.
-      for (const along of [-0.18, 0.18]) part(parent, new THREE.TorusGeometry(0.025, 0.006, 6, 12, Math.PI), materials.gunBlack, toX(middle + along), y - 0.02, side * bay.rackZ).rotation.x = Math.PI;
+      const y = bay.lowestTierY + tier * bay.tierSpacing;
+      // Rack rail between the uprights, the shackle on it, and its two hooks through the bomb's lugs.
+      box(parent, v(middle, y, z), [RACK_UPRIGHT_SPACING, 0.04, 0.03], materials.aluminium, 0, 0.006);
+      box(parent, v(middle, y, side * (bay.rackFrameZ + 0.025)), [0.42, 0.07, 0.03], materials.gunBlack, 0, 0.008);
+      for (const along of [-BOMB_LUG_SPACING / 2, BOMB_LUG_SPACING / 2]) {
+        const hook = part(parent, new THREE.TorusGeometry(0.02, 0.005, 6, 12, Math.PI), materials.gunBlack, toX(middle + along), y, side * (bay.rackFrameZ + 0.045));
+        hook.rotation.set(Math.PI / 2, 0, side > 0 ? -Math.PI / 2 : Math.PI / 2);
+      }
     }
   }
   const rackedBombs: THREE.Object3D[] = [];
@@ -52,6 +60,8 @@ export function buildBombBay(context: CompartmentContext): BombBayResult {
     const bomb = createBomb();
     const side = index % 2 === 0 ? 1 : -1;
     bomb.position.set(toX(middle), bay.lowestTierY + (index >> 1) * bay.tierSpacing, side * bay.rackZ);
+    // Lugs (the bomb's +y) turned inboard to the rack.
+    bomb.rotation.x = (-side * Math.PI) / 2;
     root.add(bomb);
     rackedBombs.push(bomb);
   }

@@ -999,26 +999,70 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
 let bombTemplate: THREE.Group | null = null;
 
 /**
- * AN-M64 500 lb general-purpose bomb: olive drab body, yellow nose band, box fins. Model space metres, nose toward +x.
- * Returns a clone of one merged template, so racks and falling bombs share geometry.
+ * AN-M64 500 lb general-purpose bomb (TM 9-1980): 59.2 in long, 14.18 in body, olive drab with a yellow band at nose and
+ * tail for a high-explosive filling, two suspension lugs 14 in apart, an AN-M103 nose fuze with its arming vane, and a
+ * box tail fin. Model space metres, nose toward +x. Returns a clone of one merged template, so racks and falling bombs
+ * share geometry.
  */
 export function createBomb(): THREE.Group {
   bombTemplate ??= mergeStaticMeshes(buildBombParts());
   return bombTemplate.clone();
 }
 
+const BOMB = {
+  radius: 0.18,
+  /** Tail end of the fin box to the nose fuze's tip. */
+  tail: -0.752,
+  nose: 0.752,
+  lugSpacing: 0.356,
+  band: 0.025,
+  /** Box fin: a square tube about the body's width across, its corners on the four fins' tips. */
+  finBox: { front: -0.49, back: -0.752, half: 0.165 },
+  finRoot: -0.39,
+} as const;
+
+/** Body of revolution, (radius, distance along the axis) from the tail plug to the fuze tip. */
+const BOMB_PROFILE: [number, number][] = [
+  [0, -0.6], [0.05, -0.6], [0.075, -0.56], [0.12, -0.4], [0.165, -0.22], [0.18, -0.12],
+  [0.18, 0.36], [0.172, 0.44], [0.15, 0.53], [0.11, 0.61], [0.062, 0.67],
+  // AN-M103 nose fuze: body, then the arming-vane hub.
+  [0.045, 0.68], [0.04, 0.72], [0.022, 0.73], [0.02, 0.75], [0, 0.752],
+];
+
 function buildBombParts(): THREE.Group {
   const materials = aircraftMaterials();
   const bomb = new THREE.Group();
-  const profile = [
-    new THREE.Vector2(0, 0.62), new THREE.Vector2(0.09, 0.58), new THREE.Vector2(0.16, 0.45), new THREE.Vector2(0.18, 0.25),
-    new THREE.Vector2(0.18, -0.2), new THREE.Vector2(0.15, -0.42), new THREE.Vector2(0.07, -0.6), new THREE.Vector2(0, -0.62),
-  ];
-  part(bomb, new THREE.LatheGeometry(profile, 24), materials.bomb, 0, 0, 0, { rotation: [0, 0, -Math.PI / 2] });
-  part(bomb, new THREE.CylinderGeometry(0.182, 0.182, 0.06, 24), materials.bombBand, 0.35, 0, 0, { rotation: [0, 0, Math.PI / 2] });
-  for (let fin = 0; fin < 4; fin++) {
-    part(bomb, roundedBox(0.36, 0.3, 0.015, 0.005), materials.bomb, -0.62, 0, 0, { rotation: [(fin * Math.PI) / 2, 0, 0] });
+  const alongX = (geometry: THREE.BufferGeometry) => geometry.rotateZ(-Math.PI / 2);
+  part(bomb, alongX(new THREE.LatheGeometry(BOMB_PROFILE.map(([radius, along]) => new THREE.Vector2(radius, along)), 32)), materials.bomb, 0, 0, 0);
+  // Yellow identification bands where the nose ogive meets the body, and at the start of the tail cone.
+  for (const x of [0.33, -0.1]) {
+    part(bomb, alongX(new THREE.CylinderGeometry(BOMB.radius + 0.0015, BOMB.radius + 0.0015, BOMB.band, 32, 1, true)), materials.bombBand, x, 0, 0);
   }
-  part(bomb, new THREE.CylinderGeometry(0.17, 0.17, 0.3, 4, 1, true), materials.bomb, -0.62, 0, 0, { rotation: [0, 0, Math.PI / 2] });
+  // Fuze arming vane: two small blades across the nose.
+  for (const angle of [0, Math.PI / 2]) {
+    part(bomb, roundedBox(0.006, 0.1, 0.022, 0.002), materials.gunmetal, 0.725, 0, 0, { rotation: [angle + 0.4, 0, 0] });
+  }
+  // Suspension lugs on top, 14 in apart, for the rack's shackle hooks.
+  for (const x of [-BOMB.lugSpacing / 2, BOMB.lugSpacing / 2]) {
+    part(bomb, new THREE.TorusGeometry(0.018, 0.005, 6, 14, Math.PI), materials.gunmetal, x, BOMB.radius - 0.004, 0);
+  }
+  // Box fin: four fins in an X from the tail cone out to the corners of a square box.
+  const half = BOMB.finBox.half;
+  const tipRadius = half * Math.SQRT2;
+  const finLength = BOMB.finBox.front - BOMB.tail + (BOMB.finRoot - BOMB.finBox.front);
+  for (let fin = 0; fin < 4; fin++) {
+    const angle = Math.PI / 4 + (fin * Math.PI) / 2;
+    const span = tipRadius - 0.06;
+    const mesh = part(bomb, roundedBox(finLength, span, 0.004, 0.0015), materials.bomb, (BOMB.finRoot + BOMB.tail) / 2, 0, 0);
+    mesh.rotation.x = angle;
+    mesh.translateY(0.06 + span / 2);
+  }
+  const boxLength = BOMB.finBox.front - BOMB.finBox.back;
+  for (let side = 0; side < 4; side++) {
+    const angle = (side * Math.PI) / 2;
+    const mesh = part(bomb, roundedBox(boxLength, half * 2, 0.004, 0.0015), materials.bomb, (BOMB.finBox.front + BOMB.finBox.back) / 2, 0, 0);
+    mesh.rotation.x = angle;
+    mesh.translateZ(half);
+  }
   return bomb;
 }

@@ -283,8 +283,11 @@ const BOMB_DRAG = 0.55;
 
 interface FallingBomb { object: THREE.Object3D; velocity: THREE.Vector3; age: number }
 
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
 export class BombTrain {
   readonly root = new THREE.Group();
+  private readonly pitchAxis = new THREE.Vector3();
   private readonly falling: FallingBomb[] = [];
 
   constructor(private readonly createBomb: () => THREE.Object3D, private readonly floorClearance: number) {}
@@ -306,7 +309,9 @@ export class BombTrain {
       // Drag slows the bomb against the bomber, so the stick trails aft as it falls.
       bomb.velocity.x -= BOMB_DRAG * deltaSec;
       bomb.object.position.addScaledVector(bomb.velocity, deltaSec);
-      bomb.object.rotateZ(-0.35 * deltaSec);
+      // Nose drops as it falls: pitch about the horizontal axis across the bomb, whatever its roll on the rack was.
+      const axis = this.pitchAxis.set(1, 0, 0).applyQuaternion(bomb.object.quaternion).cross(WORLD_UP).negate().normalize();
+      bomb.object.rotateOnWorldAxis(axis, 0.35 * deltaSec);
       if (bomb.object.position.y < this.floorClearance) {
         this.root.remove(bomb.object);
         this.falling.splice(index, 1);

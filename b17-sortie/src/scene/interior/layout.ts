@@ -73,7 +73,8 @@ export const FLIGHT_DECK = {
 export const BOMB_BAY = {
   catwalkY: -0.86,
   catwalkHalfWidth: 0.11,
-  /** Bombs stack in two vertical racks, one each side of the catwalk. */
+  /** Bombs stack in two vertical racks, one each side of the catwalk: rack at `rackFrameZ`, bomb axes at `rackZ`. */
+  rackFrameZ: 0.11,
   rackZ: 0.31,
   lowestTierY: -1.0,
   tierSpacing: 0.39,
