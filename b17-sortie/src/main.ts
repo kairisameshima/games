@@ -12,6 +12,7 @@ import { PALETTE } from './scene/palette';
 import { buildDisplayStand, buildStudioSet, driftClouds, type DisplayStand } from './scene/set';
 import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
+import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ViewMode } from './ui/ui';
 
 /** World units per metre: the 22.66 m fuselage becomes a 7.3-unit model. */
@@ -284,6 +285,7 @@ function setCutawayOpen(open: boolean): void {
 }
 
 const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onCutawayChange: setCutawayOpen });
+const fpsMeter = new FpsMeter(ui.meterSlot);
 ui.setCutaway(false);
 applyView('lab');
 
@@ -434,7 +436,9 @@ timer.connect(document);
 function frame(timestamp: number): void {
   requestAnimationFrame(frame);
   timer.update(timestamp);
-  const realDelta = Math.min(timer.getDelta(), MAX_FRAME_SEC);
+  const frameDelta = timer.getDelta();
+  fpsMeter.record(frameDelta);
+  const realDelta = Math.min(frameDelta, MAX_FRAME_SEC);
   const deltaSec = playing ? realDelta : 0;
   const elapsed = timer.getElapsed();
 

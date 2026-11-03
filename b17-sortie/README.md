@@ -52,6 +52,8 @@ npm run build      # typecheck + production build into dist/
 | C | cutaway of the lead ship |
 | Drag, scroll | orbit and zoom |
 
+Under the controls, a frame-rate readout (average of the last half second, and the worst frame of the last four seconds) sits over a frame-time chart with guides at the 60 and 30 fps budgets.
+
 ## Layout
 
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.

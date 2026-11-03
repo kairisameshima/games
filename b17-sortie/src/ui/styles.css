@@ -105,3 +105,9 @@ body.is-studio .vignette { opacity: 0.18; }
 body.is-studio .callout::after { background: #1d2230; box-shadow: none; }
 body.is-studio .callout i { background: #1d2230a0; }
 body.is-studio .callout span { background: #fffaf2e0; color: #1d2230; border-color: #1d223030; }
+
+.meter-slot { grid-column: 1 / -1; margin-top: 6px; padding-top: 8px; border-top: 1px solid #ffffff12; --fps-line: #7fe3ff; --fps-guide: #ffffff2e; }
+.fps-readout { font-family: var(--mono); font-size: 11px; color: var(--mute); margin-bottom: 4px; white-space: nowrap; }
+.fps-chart { display: block; }
+body.is-studio .meter-slot { border-color: #00000014; --fps-line: #1d6f8a; --fps-guide: #0000002a; }
+body.is-studio .fps-readout { color: #5d6476; }

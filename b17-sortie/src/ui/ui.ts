@@ -31,6 +31,8 @@ export class Ui {
   private readonly cutawayButtons: { exterior: HTMLButtonElement; cutaway: HTMLButtonElement };
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
+  /** Bottom row of the controls panel, for the frame-rate meter. */
+  readonly meterSlot: HTMLElement;
   private shownPhase = -1;
 
   constructor(root: HTMLElement, callbacks: UiCallbacks) {
@@ -101,7 +103,8 @@ export class Ui {
       exterior: makeToggleButton(cutawayToggle, 'Exterior', () => callbacks.onCutawayChange(false)),
       cutaway: makeToggleButton(cutawayToggle, 'Cutaway', () => callbacks.onCutawayChange(true)),
     };
-    hints.append(viewToggle, cutawayToggle);
+    this.meterSlot = element('div', 'meter-slot');
+    hints.append(viewToggle, cutawayToggle, this.meterSlot);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading);
