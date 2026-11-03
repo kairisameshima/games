@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, hullSurfaceHeight, toX } from '../hull';
 import { part } from '../kit';
-import { addM2, m2Feedway, m2Point } from '../m2';
+import { addM2 } from '../m2';
+import { feedGun, receiverSideToward } from './ammunition';
 import { BOMB_BAY, BULKHEADS, FLOORS, RADIO_ROOM } from './layout';
-import { ammunitionFeed, box, extinguisher, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult, type CrewStation } from './parts';
+import { box, extinguisher, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult, type CrewStation } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
 import { addBulkhead, addSparTruss } from './structure';
 
@@ -101,8 +102,12 @@ export function buildRadioRoom(context: CompartmentContext): CompartmentResult {
   const elevation = new THREE.Vector3(-0.8, 0.6, 0);
   addM2(parent, mount, elevation, 'flexible');
   rod(parent, v(hatchD - 0.1, roof - 0.02, 0), mount.clone().add(new THREE.Vector3(0, -0.05, 0)), 0.02, materials.aluminium);
-  const feedway = m2Point(mount, elevation, m2Feedway(1));
-  ammunitionFeed(parent, materials, v(hatchD - 0.2, floor + 0.15, 0.55), [0.3, 0.28, 0.16], 0, [v(hatchD - 0.2, floor + 0.29, 0.5), feedway.clone().add(new THREE.Vector3(0, -0.3, 0.15)), feedway]);
+  const ammunitionBox = v(hatchD - 0.2, floor + 0.15, 0.55);
+  feedGun(materials, {
+    boxParent: parent,
+    box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
+    gun: { origin: mount, direction: elevation, side: receiverSideToward(mount, elevation, ammunitionBox) },
+  });
 
   // Oxygen bottles under the starboard wall, a regulator for the operator, extinguisher on the forward bulkhead.
   for (let bottle = 0; bottle < 2; bottle++) {

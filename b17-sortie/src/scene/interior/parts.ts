@@ -20,6 +20,8 @@ export interface CompartmentContext {
   root: THREE.Object3D;
   materials: InteriorMaterials;
   topTurretYaw: THREE.Object3D;
+  /** The top turret's gun cradle, inside its yaw group: the guns' belts go with it. */
+  topTurretPitch: THREE.Object3D;
   ballTurretPitch: THREE.Object3D;
   createBomb: () => THREE.Object3D;
 }
@@ -85,15 +87,6 @@ export function extinguisher(parent: THREE.Object3D, materials: InteriorMaterial
   part(parent, new THREE.CylinderGeometry(0.045, 0.045, 0.3, 16), materials.extinguisher, base.x, base.y + 0.15, base.z);
   part(parent, new THREE.CylinderGeometry(0.018, 0.024, 0.06, 10), materials.brass, base.x, base.y + 0.33, base.z);
   part(parent, roundedBox(0.08, 0.015, 0.02, 0.004), materials.brass, base.x + 0.02, base.y + 0.36, base.z);
-}
-
-/** Ammunition box with a flexible feed chute curving to the gun's feed tray. */
-export function ammunitionFeed(parent: THREE.Object3D, materials: InteriorMaterials, boxCentre: THREE.Vector3, boxSize: [number, number, number], boxYaw: number, path: THREE.Vector3[]): void {
-  box(parent, boxCentre, boxSize, materials.ammunitionBox, boxYaw, 0.012);
-  const curve = new THREE.CatmullRomCurve3(path);
-  // The chute is a flat metal channel, roughly 6 x 3 cm in section.
-  const chute = new THREE.TubeGeometry(curve, Math.max(8, Math.ceil(curve.getLength() / 0.05)), 0.026, 4, false);
-  part(parent, chute, materials.aluminium, 0, 0, 0);
 }
 
 /** Round seat cushion on a pedestal post (bombardier, navigator, tail gunner's bicycle seat style). */

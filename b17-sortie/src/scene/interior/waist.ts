@@ -4,14 +4,19 @@ import { BALL, ballGunOrigin, ballShellGeometry, ballTurretCentre, ballWindowMas
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
-import { addM2, M2_BACKPLATE, M2_GRIPS, m2Feedway, m2Point } from '../m2';
+import { addM2, M2_BACKPLATE, M2_GRIPS, m2Point } from '../m2';
+import { beltFromAbove, feedGun, receiverSideToward } from './ammunition';
 import { BULKHEADS, TAIL, WAIST } from './layout';
-import { ammunitionFeed, box, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
+import { box, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, plantedFoot, pose, verticalGrip } from './poses';
 import { tailFloorHeight, waistFloorHeight } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
 const BALL_FORWARD = new THREE.Vector3(1, 0, 0);
+/** Ammunition boxes: length along the fuselage, height, depth out from the wall. */
+const WAIST_AMMUNITION_BOX: [number, number, number] = [0.3, 0.6, 0.2];
+const TAIL_AMMUNITION_BOX: [number, number, number] = [0.6, 0.45, 0.15];
+
 const BALL_RING_MOUNTS = 20;
 const AFT = new THREE.Vector3(-1, 0, 0);
 /** Waist gun on its K-6 mount in the window: the gun, the mount post, and its ammunition box and feed chute. */
@@ -33,16 +38,15 @@ function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { gr
     const trunnion = m2Point(mount, outward, new THREE.Vector3(-0.05, -0.03, offset));
     rod(parent, mount.clone().add(new THREE.Vector3(0, -0.1, 0)), trunnion, 0.01, materials.aluminium, 8);
   }
-  // Ammunition box on the floor against the wall aft of the window; the belt enters the receiver on its aft side.
+  // Ammunition box standing on the floor against the wall aft of the window, its chute sagging up to the receiver's
+  // aft side (Pilot's Manual figure 76). Box and chute stay with the gun in a cutaway.
   const floor = waistFloorHeight(d + 0.7);
-  const ammunition = v(d + 0.7, floor + 0.2, side * (hullHalfWidthAtHeight(d + 0.7, floor) - 0.12));
-  const aftSide = m2Point(mount, outward, new THREE.Vector3(0, 0, 1)).sub(mount).dot(ammunition.clone().sub(mount)) > 0 ? 1 : -1;
-  const feedway = m2Point(mount, outward, m2Feedway(aftSide));
-  ammunitionFeed(compartment, materials, ammunition, [0.34, 0.4, 0.2], 0, [
-    ammunition.clone().add(new THREE.Vector3(0, 0.2, 0)),
-    ammunition.clone().lerp(feedway, 0.5).add(new THREE.Vector3(0, 0.2, 0)),
-    feedway,
-  ]);
+  const ammunitionBox = v(d + 0.7, floor + WAIST_AMMUNITION_BOX[1] / 2, side * (hullHalfWidthAtHeight(d + 0.7, floor) - WAIST_AMMUNITION_BOX[2] / 2 - 0.03));
+  feedGun(materials, {
+    boxParent: parent,
+    box: { centre: ammunitionBox, size: WAIST_AMMUNITION_BOX, material: materials.aluminium },
+    gun: { origin: mount, direction: outward, side: receiverSideToward(mount, outward, ammunitionBox) },
+  });
   // The gunner faces the window: his yaw turns him to look out along the gun.
   return { grips: [m2Point(mount, outward, M2_GRIPS.left), m2Point(mount, outward, M2_GRIPS.right)], yaw: Math.atan2(-outward.z, outward.x) };
 }
@@ -111,17 +115,18 @@ function addBallTurretInterior(context: CompartmentContext): [THREE.Vector3, THR
   seat.rotation.z = 0.35;
   const backPad = part(pitch, roundedBox(0.04, 0.3, 0.28, 0.015), materials.seatCushion, -0.46, -0.16, 0);
   backPad.rotation.z = -0.6;
-  // Ammunition boxes: forward for the right gun (445 rounds), rear for the left (571), filling the top of the ball.
-  for (const [x, length] of [[0.235, 0.13], [0.09, 0.15]] as const) {
-    part(pitch, roundedBox(length, 0.22, 0.46, 0.012), materials.ammunitionBox, x, 0.26, 0);
-  }
-  for (const side of [-1, 1] as const) {
-    const origin = ballGunOrigin(side);
-    const feedway = m2Point(origin, BALL_FORWARD, m2Feedway(side));
-    const chute = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0.16, 0.16, side * 0.23), new THREE.Vector3(0.0, 0.1, side * 0.37), feedway.clone().add(new THREE.Vector3(0, 0.04, 0)), feedway,
-    ]);
-    part(pitch, new THREE.TubeGeometry(chute, 24, 0.022, 4, false), materials.aluminium, 0, 0, 0);
+  // Ammunition boxes filling the top of the ball in front of him: forward for the right gun (445 rounds), rear for the
+  // left (571). Each feeds its gun's outboard side, the belt coming down into the feedway from above.
+  for (const [side, x, length] of [[1, 0.235, 0.13], [-1, 0.09, 0.15]] as const) {
+    feedGun(materials, {
+      boxParent: pitch,
+      box: {
+        centre: new THREE.Vector3(x, 0.26, 0), size: [length, 0.22, 0.46], material: materials.ammunitionBox,
+        throat: { at: new THREE.Vector3(0, -0.04, side * 0.23), facing: new THREE.Vector3(0, -0.3, side).normalize() },
+      },
+      gun: { origin: ballGunOrigin(side), direction: BALL_FORWARD, side, approach: beltFromAbove(side) },
+      rise: 0.25,
+    });
   }
   // K-4 computing sight hanging under the boxes, its reflector glass on the line from his eye to the window.
   part(pitch, roundedBox(0.17, 0.13, 0.12, 0.01), materials.crinkle, -0.1, 0.09, 0);
@@ -192,11 +197,31 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   box(parent, v(TAIL.gripD + 0.06, gripY + 0.24, 0), [0.1, 0.1, 0.08], materials.crinkle, 0, 0.012);
   part(parent, new THREE.BoxGeometry(0.004, 0.07, 0.07), materials.glass, toX(TAIL.gripD + 0.02), gripY + 0.32, 0);
   for (const side of [-1, 1]) {
-    const ammunition = v(20.35, tailFloorHeight(20.35) + 0.18, side * (hullHalfWidthAtHeight(20.56, tailFloorHeight(20.35) + 0.03) - 0.08));
-    // Each gun feeds from its outboard side.
+    // Tall boxes on the floor against each wall ahead of him (Pilot's Manual figure 78), feed tracks running aft
+    // along the wall to each gun's outboard side.
+    const [length, height, depth] = TAIL_AMMUNITION_BOX;
+    const boxD = TAIL.ammunitionD + length / 2;
+    const boxFloor = tailFloorHeight(boxD);
     const gun = tailGuns[side < 0 ? 0 : 1];
-    const feedway = m2Point(gun, AFT, m2Feedway(side < 0 ? 1 : -1));
-    ammunitionFeed(parent, materials, ammunition, [0.42, 0.3, 0.13], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.15, 0)), v(21.3, gripY + 0.2, side * 0.2), feedway.clone().add(new THREE.Vector3(0.15, 0.05, 0)), feedway]);
+    const feedSide = receiverSideToward(gun, AFT, v(boxD, 0, side));
+    const trackD = TAIL.gunnerD + 0.3;
+    const trackY = tailFloorHeight(trackD) + 0.55;
+    feedGun(materials, {
+      boxParent: parent,
+      box: {
+        centre: v(boxD, boxFloor + height / 2, side * (hullHalfWidthAtHeight(TAIL.ammunitionD + length, tailFloorHeight(TAIL.ammunitionD + length)) - depth / 2 - 0.02)),
+        size: TAIL_AMMUNITION_BOX, material: materials.aluminium, holedFace: 1,
+        throat: { at: new THREE.Vector3(-length / 2 + 0.1, height / 2, 0), facing: new THREE.Vector3(0, 1, 0) },
+      },
+      // The cone is narrow at the guns, so the belt drops in nearly straight down.
+      gun: { origin: gun, direction: AFT, side: feedSide, approach: beltFromAbove(feedSide, 0.15) },
+      via: [
+        v(boxD + length / 2, trackY - 0.05, side * (hullHalfWidthAtHeight(boxD + length / 2, trackY) - 0.1)),
+        v(trackD, trackY, side * (hullHalfWidthAtHeight(trackD, trackY) - 0.1)),
+        // Down to the guns' level well inside the narrowing tail cone, then out to the feedway.
+        v(TAIL.gripD + 0.3, TAIL.gunY + 0.1, side * 0.2),
+      ],
+    });
   }
   regulator(parent, materials, v(TAIL.gunnerD - 0.4, tailFloor + 0.45, hullHalfWidthAtHeight(TAIL.gunnerD - 0.4, tailFloor + 0.45) - 0.04), -Math.PI / 2);
 

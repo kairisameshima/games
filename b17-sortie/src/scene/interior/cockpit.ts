@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { STATIONS } from '../b17-dimensions';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
+import { feedGun } from './ammunition';
 import { BULKHEADS, COCKPIT, FLIGHT_DECK, FLOORS } from './layout';
 import { applyPanelUvs, instrumentPanelTexture, panelOutline, PANEL_HEIGHT, PANEL_WIDTH } from './panels';
 import { box, oxygenBottle, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
@@ -10,6 +12,7 @@ import { addBulkhead, addSparTruss } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
 const WHEEL_TUBE = 0.017;
+const FORWARD = new THREE.Vector3(1, 0, 0);
 const THROTTLE_COUNT = 4;
 
 function addInstrumentPanel(context: CompartmentContext): void {
@@ -105,9 +108,17 @@ function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vect
   const platformY = FLIGHT_DECK.platformY - topTurretYaw.position.y;
   part(topTurretYaw, new THREE.CylinderGeometry(0.3, 0.3, 0.03, 28), materials.aluminium, 0, platformY - 0.015, 0);
   rod(topTurretYaw, new THREE.Vector3(-0.22, platformY, 0), new THREE.Vector3(-0.3, 0.02, 0), 0.03, materials.aluminium);
-  for (const side of [-1, 1]) {
-    part(topTurretYaw, roundedBox(0.26, 0.3, 0.13, 0.015), materials.ammunitionBox, -0.04, -0.42, side * 0.36);
-    rod(topTurretYaw, new THREE.Vector3(-0.04, -0.27, side * 0.33), new THREE.Vector3(0.12, 0.2, side * 0.16), 0.024, materials.aluminium, 6);
+  // Ammunition boxes either side below the guns, chutes rising to each gun's outboard feedway. The chutes are routed
+  // with the guns level; the belts ride with the guns.
+  const pitch = context.topTurretPitch;
+  for (const side of [-1, 1] as const) {
+    const gunInPitch = new THREE.Vector3(0, 0, (side * STATIONS.topTurret.gunSpacing) / 2);
+    feedGun(materials, {
+      boxParent: topTurretYaw,
+      box: { centre: new THREE.Vector3(-0.04, -0.42, side * 0.36), size: [0.26, 0.3, 0.13], material: materials.ammunitionBox },
+      gun: { origin: gunInPitch.clone().add(pitch.position), direction: FORWARD, side },
+      beltGun: { parent: pitch, gun: { origin: gunInPitch, direction: FORWARD, side } },
+    });
   }
   // Computing sight: housing, reflector glass, and the hand grips below.
   part(topTurretYaw, roundedBox(0.12, 0.13, 0.1, 0.015), materials.crinkle, 0.24, 0.17, 0);
@@ -196,8 +207,8 @@ export function buildCockpit(context: CompartmentContext): CompartmentResult {
       spineBend: 0.18,
       headPitch: -0.05,
       hands: {
-        left: verticalGrip(basket.leftGrip, 'left', yaw, { curl: 0.85, inward: 0.15, elbowOut: 0.8 }),
-        right: verticalGrip(basket.rightGrip, 'right', yaw, { curl: 0.85, inward: 0.15, elbowOut: 0.8 }),
+        left: verticalGrip(basket.leftGrip, 'left', yaw, { curl: 0.85, inward: 0.15, elbowOut: 0.35 }),
+        right: verticalGrip(basket.rightGrip, 'right', yaw, { curl: 0.85, inward: 0.15, elbowOut: 0.35 }),
       },
       feet: {
         left: plantedFoot(new THREE.Vector3(-0.05, engineerFeetY, -0.12), yaw, { toeOut: 0.2 }),

@@ -23,8 +23,6 @@ const AIRFOIL_POINTS_PER_SIDE = 28;
 const TAN_DIHEDRAL = Math.tan(THREE.MathUtils.degToRad(WING.dihedralDegrees));
 const BLADE_COUNT = 3;
 const TIP_STRIPE_LENGTH = 0.15;
-/** Centre-to-centre spacing of the twin guns in the Sperry top and ball turrets. */
-const TOP_TURRET_GUN_SPACING = 0.4;
 
 // Wing planform and section.
 
@@ -903,8 +901,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.oliveDrab, -0.4, 0.1, 0);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.position.set(0.18, 0.24, 0);
-  // The receivers run back either side of the engineer's head.
-  for (const offset of [-TOP_TURRET_GUN_SPACING / 2, TOP_TURRET_GUN_SPACING / 2]) addM2(topTurretPitch, new THREE.Vector3(0, 0, offset), FORWARD, 'turret');
+  for (const side of [-1, 1]) addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret');
   topTurretYaw.add(topTurretPitch);
   root.add(topTurretYaw);
 
@@ -955,6 +952,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     root,
     shells: [hullGeometry, tailHousingGeometry],
     topTurretYaw,
+    topTurretPitch,
     ballTurretPitch: ballPitch,
     createBomb,
     windowCutouts: cutouts,

@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, toX } from '../hull';
 import { part } from '../kit';
-import { addM2, m2Feedway, m2Point } from '../m2';
+import { addM2 } from '../m2';
+import { addAmmunitionBox, feedGun, receiverSideToward } from './ammunition';
 import { BULKHEADS, FLOORS, NOSE } from './layout';
-import { ammunitionFeed, box, extinguisher, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
+import { box, extinguisher, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
 import { addBulkhead } from './structure';
 
@@ -47,10 +48,12 @@ function addCheekGun(context: CompartmentContext, d: number, side: 1 | -1): void
   const direction = new THREE.Vector3(1, -0.05, side * 0.32);
   addM2(parent, mount, direction, 'flexible');
   // Boxes against the wall are inset from the skin at their bottom edge, where the nose is narrowest.
-  const ammunition = v(d + 0.15, FLOORS.nose.y + 0.14, side * (hullHalfWidthAtHeight(d, FLOORS.nose.y) - 0.1));
-  const nearSide = m2Point(mount, direction, new THREE.Vector3(0, 0, 1)).sub(mount).dot(ammunition.clone().sub(mount)) > 0 ? 1 : -1;
-  const feedway = m2Point(mount, direction, m2Feedway(nearSide));
-  ammunitionFeed(compartment, materials, ammunition, [0.3, 0.28, 0.16], 0, [ammunition.clone().add(new THREE.Vector3(0, 0.14, 0)), feedway.clone().add(new THREE.Vector3(0, -0.15, 0)), feedway]);
+  const ammunitionBox = v(d + 0.15, FLOORS.nose.y + 0.14, side * (hullHalfWidthAtHeight(d, FLOORS.nose.y) - 0.1));
+  feedGun(materials, {
+    boxParent: parent,
+    box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
+    gun: { origin: mount, direction, side: receiverSideToward(mount, direction, ammunitionBox) },
+  });
 }
 
 function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector3; chart: THREE.Vector3 } {
@@ -108,7 +111,10 @@ export function buildNose(context: CompartmentContext): CompartmentResult {
   addBulkhead(parent, materials.bulkheadWeb, BULKHEADS.noseToCockpit, { bottom: FLOORS.crawlway.y, top: FLOORS.cockpit.y - 0.04, halfWidth: 0.3 });
   extinguisher(parent, materials, v(BULKHEADS.noseToCockpit - 0.06, floor, 0.45));
   // Chin turret ammunition boxes either side of the floor ahead of the navigator.
-  for (const side of [-1, 1]) box(parent, v(1.62, floor + 0.12, side * (hullHalfWidthAtHeight(1.44, floor) - 0.09)), [0.36, 0.24, 0.14], materials.ammunitionBox);
+  // Their belts run down through the floor to the turret, so they have no chutes above it.
+  for (const side of [-1, 1]) {
+    addAmmunitionBox(parent, materials, { centre: v(1.62, floor + 0.12, side * (hullHalfWidthAtHeight(1.44, floor) - 0.09)), size: [0.36, 0.24, 0.14], material: materials.ammunitionBox });
+  }
 
   const bombardierYaw = FACING.forward;
   const bombardier: CrewMember = {

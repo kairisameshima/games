@@ -152,7 +152,8 @@ export const STATIONS = {
   astrodome: { d: 1.99, radius: 0.245 },
   windscreen: { start: 3.0, end: 3.62 },
   cockpitSideWindow: { start: 3.62, end: 4.67, top: 1.24, bottom: 0.9 },
-  topTurret: { d: 5.17, radius: 0.52, domeHeight: 0.44 },
+  /** `gunSpacing`: centre to centre of the twin guns, whose receivers run back either side of the engineer's head. */
+  topTurret: { d: 5.17, radius: 0.52, domeHeight: 0.44, gunSpacing: 0.4 },
   /** Doors span the bay between the spar bulkheads (interior/layout.ts BULKHEADS), less the bulkhead flanges. */
   bombBay: { start: 5.84, end: 8.41, halfWidth: 0.56 },
   radioHatch: { start: 8.95, end: 10.05 },

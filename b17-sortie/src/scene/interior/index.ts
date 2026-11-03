@@ -22,6 +22,7 @@ export interface InteriorHosts {
   /** Hull-shaped shells whose inner faces become the interior skin. */
   shells: THREE.BufferGeometry[];
   topTurretYaw: THREE.Object3D;
+  topTurretPitch: THREE.Object3D;
   ballTurretPitch: THREE.Object3D;
   createBomb: () => THREE.Object3D;
   /** The hull's window openings, cut through the interior skin too. */
@@ -83,7 +84,7 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
   const equipment = new THREE.Group();
   const context: CompartmentContext = {
     parent: equipment, root: hosts.root, materials,
-    topTurretYaw: hosts.topTurretYaw, ballTurretPitch: hosts.ballTurretPitch, createBomb: hosts.createBomb,
+    topTurretYaw: hosts.topTurretYaw, topTurretPitch: hosts.topTurretPitch, ballTurretPitch: hosts.ballTurretPitch, createBomb: hosts.createBomb,
   };
   const bombBay = buildBombBay(context);
   const compartments = [buildNose(context), buildCockpit(context), bombBay, buildRadioRoom(context), buildWaistAndTail(context)];
