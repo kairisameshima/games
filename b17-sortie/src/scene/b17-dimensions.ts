@@ -153,8 +153,9 @@ export const STATIONS = {
   windscreen: { start: 3.0, end: 3.62 },
   cockpitSideWindow: { start: 3.62, end: 4.67, top: 1.24, bottom: 0.9 },
   topTurret: { d: 5.17, radius: 0.52, domeHeight: 0.44 },
-  bombBay: { start: 7.5, end: 9.75, halfWidth: 0.56 },
-  radioHatch: { start: 9.1, end: 10.3 },
+  /** Doors span the bay between the spar bulkheads (interior/layout.ts BULKHEADS), less the bulkhead flanges. */
+  bombBay: { start: 5.84, end: 8.41, halfWidth: 0.56 },
+  radioHatch: { start: 8.95, end: 10.05 },
   ballTurret: { d: 11.12, h: -1.55, radius: 0.54 },
   waistWindowStarboard: { start: 13.1, end: 14.2 },
   waistWindowPort: { start: 13.6, end: 14.7 },

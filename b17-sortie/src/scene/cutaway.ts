@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { applyStudioShading } from '../render/studio';
 import type { B17 } from './b17';
 
 /** The cut plane sweeps from outside the starboard skin to the centreline, so the skin peels away rather than popping. */
 const CUT_START_Z = 1.6;
 const CUT_END_Z = 0.02;
 const SWEEP_SECONDS = 1.4;
+/** Starboard-wall equipment disappears once the plane has swept past the wall it hangs on. */
+const HIDE_WALL_AT = 0.35;
 
 /**
  * Starboard-half cutaway of one aircraft. The fuselage skin and the parts mounted on it get private copies of their
@@ -24,7 +25,10 @@ export class Cutaway {
   constructor(private readonly aircraft: B17) {
     const clones = new Map<THREE.Material, THREE.Material>();
     for (const material of aircraft.cutawayMaterials) {
-      const clone = applyStudioShading(material.clone() as THREE.MeshStandardMaterial);
+      // Material.clone() drops shader patches; carry over the original's (studio shading, window holes).
+      const clone = material.clone();
+      clone.onBeforeCompile = material.onBeforeCompile;
+      clone.customProgramCacheKey = material.customProgramCacheKey;
       clone.clippingPlanes = this.worldPlanes;
       clone.clipIntersection = true;
       clone.clipShadows = true;
@@ -62,5 +66,6 @@ export class Cutaway {
     // GTAO renders without material clipping, so the cut skin would still shade the interior; drop it from that pass.
     const cut = this.progress > 0;
     for (const entry of this.clippedMeshes) entry.mesh.userData.skipAmbientOcclusion = cut || entry.skippedAmbientOcclusion;
+    for (const object of this.aircraft.cutawayHidden) object.visible = this.amount < HIDE_WALL_AT;
   }
 }

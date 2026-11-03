@@ -31,3 +31,14 @@ The `*-raw.json` files are the column traces, and `fuselage-stations.json` is th
 ## Fidelity check
 
 `overlay-side.png`, `overlay-top.png` and `overlay-front.png` show the finished model rendered as an orthographic silhouette (red) at the drawing's scale over the 3-view. Side and plan outlines sit on the drawn lines. The front view shows the one deliberate difference: the model uses the B-17's NACA 0018 root and 0010 tip sections, which are thinner than the drawing's front-view wing band.
+
+## Interior sources
+
+- *Standard Aircraft Characteristics, B-17G* (AAF), inboard profile: compartment boundaries scaled to the 22.66 m length. Nose to bulkhead 4 at 2.85 m, pilots' compartment to the front spar at 5.76 m, bomb bay to the rear spar at 8.49 m, radio room to 10.6 m, waist to 16.7 m, tail beyond.
+- *EAA Flight Training Manual, B-17G "Aluminum Overcast"* (EAA, revised March 2012), weight and balance arms: pilots 167.6 in, top turret 193.6 in, radio room 374.0 in, waist gunners 559 and 621 in, tail wheel 665 in, from a datum 205 in ahead of the wing-root leading edge. These place the seats and gun positions along the fuselage.
+- *Pilot's Manual for Boeing B-17 Flying Fortress* (AAF), figures of the instrument panel (the panel texture follows its layout), pedestal, upper turret, bomb bay, radio room, ball turret, waist and tail positions.
+- *Pilot Training Manual for the B-17 Flying Fortress* (AAF Manual 50-13), [archive.org](https://archive.org/details/50-13): crew duties and stations, oxygen equipment, flight clothing.
+
+Crew outfits follow 1944 Eighth Air Force practice on a bomb run: oxygen masks on above 10,000 ft, M4 flak helmets and M1 vests on, waist and tail gunners in M3 aprons, and the ball turret gunner in an F-3 heated suit alone because nothing bulkier fits the 44 in ball.
+
+A fit audit run against the built scene checked the result: no crew or equipment vertex lies more than 2 cm outside the hull section (turret volumes excepted), and every hand and foot reaches its target within 2.2 cm.

@@ -6,7 +6,9 @@ import {
   TAILPLANE, WING, WING_SEMISPAN, type NacelleSpec,
 } from './b17-dimensions';
 import { mergeStaticMeshes, part, roundedBox } from './kit';
-import { buildInterior, type CrewStation } from './b17-interior';
+import type { FigureDetail } from './crew/figure';
+import { buildInterior, type B17Interior, type CrewStation } from './interior';
+import { WindowCutouts } from './window-cutouts';
 import { buildRadialEngine } from './engine';
 import { HULL_RING_POINTS, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
@@ -70,6 +72,7 @@ interface AircraftMaterials {
   fin: THREE.MeshStandardMaterial;
   nacelle: THREE.MeshStandardMaterial;
   oliveDrab: THREE.MeshStandardMaterial;
+  tailHousing: THREE.MeshStandardMaterial;
   neutralGray: THREE.MeshStandardMaterial;
   canopy: THREE.MeshPhysicalMaterial;
   windowPane: THREE.MeshStandardMaterial;
@@ -109,15 +112,16 @@ function decalMaterial(map: THREE.Texture, roughness = 0.6): THREE.MeshStandardM
   }));
 }
 
+/** Glazing: faintly tinted, mostly clear glass in an olive-drab frame strip; the alpha carries the transparency. */
 function windowPaneTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 256;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D canvas context unavailable');
   const gradient = context.createLinearGradient(0, 0, 256, 256);
-  gradient.addColorStop(0, '#2a3440');
-  gradient.addColorStop(0.5, '#0d1218');
-  gradient.addColorStop(1, '#1b232c');
+  gradient.addColorStop(0, 'rgba(170, 196, 214, 0.22)');
+  gradient.addColorStop(0.5, 'rgba(120, 146, 166, 0.12)');
+  gradient.addColorStop(1, 'rgba(150, 176, 196, 0.2)');
   context.fillStyle = gradient;
   context.fillRect(0, 0, 256, 256);
   context.strokeStyle = '#3c3b2a';
@@ -159,14 +163,16 @@ function aircraftMaterials(): AircraftMaterials {
     fin: paintMaterial(finTexture),
     nacelle: paintMaterial(nacelleTexture),
     oliveDrab: paintMaterial(null, PALETTE.oliveDrab),
+    // Its own material because the tail gunner's window holes are cut in it.
+    tailHousing: paintMaterial(null, PALETTE.oliveDrab),
     neutralGray: paintMaterial(null, PALETTE.neutralGray),
     canopy: applyStudioShading(new THREE.MeshPhysicalMaterial({
       color: '#dfeef5', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.2, depthWrite: false,
       clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6, side: THREE.DoubleSide,
     })),
     windowPane: applyStudioShading(new THREE.MeshPhysicalMaterial({
-      map: windowPaneTexture(), roughness: 0.1, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.7,
-      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      map: windowPaneTexture(), transparent: true, depthWrite: false, roughness: 0.06, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04,
+      envMapIntensity: 1.1, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     })),
     insignia: decalMaterial(insigniaTexture()),
     codes: decalMaterial(codeLettersTexture('LG')),
@@ -186,7 +192,7 @@ function aircraftMaterials(): AircraftMaterials {
     navRed: emissiveMaterial(PALETTE.navRed, 3.2),
     navGreen: emissiveMaterial(PALETTE.navGreen, 3.2),
     navWhite: emissiveMaterial('#fff4e0', 2.4),
-    bomb: paintMaterial(null, '#4f4d35'),
+    bomb: paintMaterial(null, '#3e3e2e'),
     bombBand: paintMaterial(null, PALETTE.tailYellow),
   };
   return sharedMaterials;
@@ -650,13 +656,22 @@ const UP = new THREE.Vector3(0, 1, 0);
 const STARBOARD = new THREE.Vector3(0, 0, 1);
 const PORT = new THREE.Vector3(0, 0, -1);
 
+/** A glazed pane: the glass decal, plus the matching hole in the skin so the compartment shows through it. */
+function addWindow(
+  airframe: THREE.Object3D, target: THREE.Mesh, material: THREE.Material, cutouts: WindowCutouts,
+  position: THREE.Vector3, normal: THREE.Vector3, along: THREE.Vector3, width: number, height: number, depth: number,
+): void {
+  addDecal(airframe, target, material, position, normal, along, width, height, depth);
+  cutouts.add(position, decalOrientation(normal, along), new THREE.Vector3(width, height, depth));
+}
+
 /** Window panes on both hull sides between two stations and heights. */
-function addSideWindows(airframe: THREE.Object3D, hull: THREE.Mesh, material: THREE.Material, start: number, end: number, top: number, bottom: number, sides: (1 | -1)[]): void {
+function addSideWindows(airframe: THREE.Object3D, hull: THREE.Mesh, material: THREE.Material, cutouts: WindowCutouts, start: number, end: number, top: number, bottom: number, sides: (1 | -1)[]): void {
   const d = (start + end) / 2;
   const h = (top + bottom) / 2;
   const halfWidth = hullSectionAt(d).halfWidth;
   for (const side of sides) {
-    addDecal(airframe, hull, material, new THREE.Vector3(toX(d), h, side * halfWidth), side > 0 ? STARBOARD : PORT, side > 0 ? FORWARD : FORWARD.clone().negate(), end - start, top - bottom, 0.5);
+    addWindow(airframe, hull, material, cutouts, new THREE.Vector3(toX(d), h, side * halfWidth), side > 0 ? STARBOARD : PORT, side > 0 ? FORWARD : FORWARD.clone().negate(), end - start, top - bottom, 0.5);
   }
 }
 
@@ -672,15 +687,19 @@ export interface B17 {
   /** Racked bombs in release order; hide each as it drops. */
   rackedBombs: THREE.Object3D[];
   crewStations: CrewStation[];
+  crew: B17Interior['crew'];
   /** Materials a cutaway clips: the fuselage skin and everything mounted on it. */
   cutawayMaterials: THREE.Material[];
+  /** Hidden once the cut opens; they hang on the starboard skin the cut removes. */
+  cutawayHidden: THREE.Object3D[];
   /** Turbosupercharger exhaust outlets, model space: where contrails form. */
   exhaustPorts: THREE.Vector3[];
   turboGlow: THREE.MeshBasicMaterial;
   navigationLights: THREE.Mesh[];
 }
 
-export function buildB17(): B17 {
+/** `crewDetail`: the lead ship's crew is meshed finely for close-ups; wingmen only show through their glazing. */
+export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   const materials = aircraftMaterials();
   const root = new THREE.Group();
   root.name = 'B-17G';
@@ -706,7 +725,7 @@ export function buildB17(): B17 {
   part(airframe, mirrorAcrossZ(tailplaneGeometry), materials.tailplane, 0, 0, 0);
   const fin = part(airframe, buildFinGeometry(), materials.fin, 0, 0, 0);
   const tailHousingGeometry = buildTailHousingGeometry();
-  const tailHousing = part(airframe, tailHousingGeometry, materials.oliveDrab, 0, 0, 0);
+  const tailHousing = part(airframe, tailHousingGeometry, materials.tailHousing, 0, 0, 0);
 
   // Engines.
   sharedBladeGeometry ??= buildBladeGeometry();
@@ -761,26 +780,27 @@ export function buildB17(): B17 {
   for (const side of [1, -1] as const) addWingIntakes(airframe, intakeMaterial, side);
 
   // Windows and canopy panes, projected onto the hull so they follow its curvature.
+  const cutouts = new WindowCutouts();
   const windscreen = STATIONS.windscreen;
   const windscreenMid = (windscreen.start + windscreen.end) / 2;
   const windscreenNormal = new THREE.Vector3(0.62, 0.79, 0);
   for (const side of [1, -1]) {
-    addDecal(airframe, hull, materials.windowPane, new THREE.Vector3(toX(windscreenMid), hullSurfaceHeight(windscreenMid, 0.33 * side, true), 0.33 * side), windscreenNormal, STARBOARD, 0.56, 0.62, 0.3);
+    addWindow(airframe, hull, materials.windowPane, cutouts, new THREE.Vector3(toX(windscreenMid), hullSurfaceHeight(windscreenMid, 0.33 * side, true), 0.33 * side), windscreenNormal, STARBOARD, 0.56, 0.62, 0.3);
   }
   const cockpitSide = STATIONS.cockpitSideWindow;
-  addSideWindows(airframe, hull, materials.windowPane, cockpitSide.start, (cockpitSide.start + cockpitSide.end) / 2 - 0.03, cockpitSide.top, cockpitSide.bottom, [1, -1]);
-  addSideWindows(airframe, hull, materials.windowPane, (cockpitSide.start + cockpitSide.end) / 2 + 0.03, cockpitSide.end, cockpitSide.top, cockpitSide.bottom, [1, -1]);
+  addSideWindows(airframe, hull, materials.windowPane, cutouts, cockpitSide.start, (cockpitSide.start + cockpitSide.end) / 2 - 0.03, cockpitSide.top, cockpitSide.bottom, [1, -1]);
+  addSideWindows(airframe, hull, materials.windowPane, cutouts, (cockpitSide.start + cockpitSide.end) / 2 + 0.03, cockpitSide.end, cockpitSide.top, cockpitSide.bottom, [1, -1]);
   const cheek = STATIONS.cheekWindows;
-  addSideWindows(airframe, hull, materials.windowPane, cheek.start, cheek.end, cheek.top, cheek.bottom, [1, -1]);
+  addSideWindows(airframe, hull, materials.windowPane, cutouts, cheek.start, cheek.end, cheek.top, cheek.bottom, [1, -1]);
   for (const [start, end] of STATIONS.navigatorWindows) {
-    addSideWindows(airframe, hull, materials.windowPane, start, end, STATIONS.navigatorWindowBand.top, STATIONS.navigatorWindowBand.bottom, [1, -1]);
+    addSideWindows(airframe, hull, materials.windowPane, cutouts, start, end, STATIONS.navigatorWindowBand.top, STATIONS.navigatorWindowBand.bottom, [1, -1]);
   }
   const waistBand = STATIONS.waistWindowBand;
-  addSideWindows(airframe, hull, materials.windowPane, STATIONS.waistWindowStarboard.start, STATIONS.waistWindowStarboard.end, waistBand.top, waistBand.bottom, [1]);
-  addSideWindows(airframe, hull, materials.windowPane, STATIONS.waistWindowPort.start, STATIONS.waistWindowPort.end, waistBand.top, waistBand.bottom, [-1]);
+  addSideWindows(airframe, hull, materials.windowPane, cutouts, STATIONS.waistWindowStarboard.start, STATIONS.waistWindowStarboard.end, waistBand.top, waistBand.bottom, [1]);
+  addSideWindows(airframe, hull, materials.windowPane, cutouts, STATIONS.waistWindowPort.start, STATIONS.waistWindowPort.end, waistBand.top, waistBand.bottom, [-1]);
   const radioHatch = STATIONS.radioHatch;
   const radioMid = (radioHatch.start + radioHatch.end) / 2;
-  addDecal(airframe, hull, materials.windowPane, new THREE.Vector3(toX(radioMid), hullSectionAt(radioMid).top, 0), UP, FORWARD, radioHatch.end - radioHatch.start, 0.62, 0.4);
+  addWindow(airframe, hull, materials.windowPane, cutouts, new THREE.Vector3(toX(radioMid), hullSectionAt(radioMid).top, 0), UP, FORWARD, radioHatch.end - radioHatch.start, 0.62, 0.4);
 
   // National insignia, codes and the 91st BG tail marking.
   const insignia = STATIONS.fuselageInsignia;
@@ -855,14 +875,14 @@ export function buildB17(): B17 {
   addGun(airframe, materials, new THREE.Vector3(toX(1.45), 0.05, -hullSectionAt(1.45).halfWidth + 0.02), new THREE.Vector3(1, -0.05, -0.32), 1.0);
   const starboardWaist = (STATIONS.waistWindowStarboard.start + STATIONS.waistWindowStarboard.end) / 2;
   const portWaist = (STATIONS.waistWindowPort.start + STATIONS.waistWindowPort.end) / 2;
-  addGun(airframe, materials, new THREE.Vector3(toX(starboardWaist), 0.12, hullSectionAt(starboardWaist).halfWidth - 0.15), new THREE.Vector3(-0.35, -0.1, 1), 1.1);
-  addGun(airframe, materials, new THREE.Vector3(toX(portWaist), 0.12, -hullSectionAt(portWaist).halfWidth + 0.15), new THREE.Vector3(-0.35, -0.1, -1), 1.1);
+  addGun(airframe, materials, new THREE.Vector3(toX(starboardWaist), 0.12, hullSectionAt(starboardWaist).halfWidth - 0.04), new THREE.Vector3(-0.35, -0.1, 1), 1.1);
+  addGun(airframe, materials, new THREE.Vector3(toX(portWaist), 0.12, -hullSectionAt(portWaist).halfWidth + 0.04), new THREE.Vector3(-0.35, -0.1, -1), 1.1);
   for (const offset of [-0.11, 0.11]) {
     addGun(airframe, materials, new THREE.Vector3(toX(FUSELAGE_LENGTH - 0.1), -0.06, offset), FORWARD.clone().negate(), 1.0);
   }
   const tailWindows = STATIONS.tailTurretWindows;
   // The tail gunner's windows sit in the housing, which forms the roof of his compartment.
-  addSideWindows(airframe, tailHousing, materials.windowPane, tailWindows.start, tailWindows.end, tailWindows.top, tailWindows.bottom, [1, -1]);
+  addSideWindows(airframe, tailHousing, materials.windowPane, cutouts, tailWindows.start, tailWindows.end, tailWindows.top, tailWindows.bottom, [1, -1]);
 
   // Astrodome, radio antennas, and the long aerial from the radio-room mast to the fin.
   const astrodome = STATIONS.astrodome;
@@ -894,12 +914,15 @@ export function buildB17(): B17 {
     topTurretYaw,
     ballTurretPitch: ballPitch,
     createBomb,
-  });
+    windowCutouts: cutouts,
+  }, crewDetail);
+  cutouts.apply(materials.hull);
+  cutouts.apply(materials.tailHousing);
 
   root.add(mergeStaticMeshes(airframe));
   // Glass and propeller blur are see-through, so they must not cast ambient occlusion on what lies behind them.
   root.traverse((object) => {
-    if (object instanceof THREE.Mesh && (object.material === materials.canopy || object.material === materials.propellerDisc)) {
+    if (object instanceof THREE.Mesh && [materials.canopy, materials.windowPane, materials.propellerDisc].includes(object.material)) {
       object.userData.skipAmbientOcclusion = true;
     }
   });
@@ -913,10 +936,12 @@ export function buildB17(): B17 {
     bombBayDoors,
     rackedBombs: interior.rackedBombs,
     crewStations: interior.stations,
+    crew: interior.crew,
     cutawayMaterials: [
       materials.hull, materials.oliveDrab, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
-      materials.neutralGray,
+      materials.neutralGray, materials.tailHousing, ...interior.clipMaterials,
     ],
+    cutawayHidden: [interior.starboardWall],
     exhaustPorts,
     turboGlow: materials.turboGlow,
     navigationLights,

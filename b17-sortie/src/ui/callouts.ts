@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CrewStation } from '../scene/b17-interior';
+import type { CrewStation } from '../scene/interior';
 
 /** Leader lengths alternate along the fuselage so neighbouring stations' chips do not overlap. */
 const LEADER_PIXELS = [30, 78] as const;

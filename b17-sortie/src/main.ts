@@ -106,7 +106,7 @@ const formationSlots = [
 ];
 
 const formation: FormationShip[] = formationSlots.map((slot, index) => {
-  const aircraft = buildB17();
+  const aircraft = buildB17(index === 0 ? 'high' : 'low');
   const holder = new THREE.Group();
   holder.position.copy(slot.position);
   holder.scale.setScalar(MODEL_SCALE);
