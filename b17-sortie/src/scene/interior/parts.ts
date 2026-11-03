@@ -66,19 +66,6 @@ export function box(parent: THREE.Object3D, centre: THREE.Vector3, size: [number
   return mesh;
 }
 
-/** A-12 demand oxygen regulator on a wall, face toward `facingYaw`. */
-export function regulator(parent: THREE.Object3D, materials: InteriorMaterials, centre: THREE.Vector3, facingYaw: number): void {
-  const housing = new THREE.Group();
-  housing.position.copy(centre);
-  housing.rotation.y = facingYaw;
-  part(housing, roundedBox(0.05, 0.16, 0.12, 0.012), materials.crinkle, 0, 0, 0);
-  const face = part(housing, new THREE.PlaneGeometry(0.11, 0.11), materials.regulatorFace, 0.0255, 0.015, 0);
-  face.rotation.y = Math.PI / 2;
-  // Hose coupling below the face.
-  part(housing, new THREE.CylinderGeometry(0.014, 0.016, 0.06, 12), materials.rubber, 0.02, -0.1, 0);
-  parent.add(housing);
-}
-
 /** Yellow low-pressure oxygen bottle (G-1 / A-4) strapped to a wall, axis along `axis`. */
 export function oxygenBottle(parent: THREE.Object3D, materials: InteriorMaterials, centre: THREE.Vector3, axis: THREE.Vector3, length = 0.5, radius = 0.1): void {
   const bottle = part(parent, new THREE.CapsuleGeometry(radius, length - radius * 2, 8, 18), materials.oxygen, centre.x, centre.y, centre.z);

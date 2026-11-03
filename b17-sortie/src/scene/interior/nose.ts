@@ -5,8 +5,9 @@ import { part } from '../kit';
 import { addM2 } from '../m2';
 import { addAmmunitionBox, feedGun, receiverSideToward } from './ammunition';
 import { BULKHEADS, FLOORS, NOSE } from './layout';
-import { box, extinguisher, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
+import { box, extinguisher, pedestalSeat, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
+import { oxygenStation } from './fittings';
 import { addBulkhead } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
@@ -77,7 +78,7 @@ function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector
   // B-5 drift meter on its floor pedestal ahead of the table.
   rod(parent, v(1.66, FLOORS.nose.y, -0.42), v(1.66, -0.18, -0.42), 0.05, materials.crinkle);
   part(parent, new THREE.CylinderGeometry(0.035, 0.03, 0.08, 14), materials.rubber, toX(1.66), -0.15, -0.42);
-  regulator(parent, materials, v(2.55, 0.25, -hullHalfWidthAtHeight(2.55, 0.25) + 0.04), -Math.PI / 2);
+  oxygenStation(parent, materials, { d: 2.55, y: 0.25, side: -1 });
   return { table: v(middle, table.topY, table.innerZ), chart };
 }
 
@@ -101,7 +102,7 @@ export function buildNose(context: CompartmentContext): CompartmentResult {
   box(parent, v(chin.d, chin.y, chin.z), [0.12, 0.14, 0.2], materials.crinkle, 0, 0.02);
   for (const offset of [-0.13, 0.13]) rod(parent, v(chin.d, chin.y, chin.z + offset * 0.6), v(chin.d, chin.y, chin.z + offset), 0.016, materials.rubber);
   // Below the starboard cheek gun's receiver, so his hose does not run through it.
-  regulator(parent, materials, v(1.35, -0.25, hullHalfWidthAtHeight(1.35, -0.25) - 0.04), -Math.PI / 2);
+  oxygenStation(parent, materials, { d: 1.35, y: -0.25, side: 1 });
 
   addCheekGun(context, NOSE.cheekGuns.starboardD, 1);
   addCheekGun(context, NOSE.cheekGuns.portD, -1);

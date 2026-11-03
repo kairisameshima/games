@@ -27,6 +27,8 @@ export interface InteriorMaterials {
   oxygen: THREE.MeshStandardMaterial;
   extinguisher: THREE.MeshStandardMaterial;
   rubber: THREE.MeshStandardMaterial;
+  /** Black-brown moulded knobs and handles. */
+  bakelite: THREE.MeshStandardMaterial;
   gunBlack: THREE.MeshStandardMaterial;
   ammunitionBox: THREE.MeshStandardMaterial;
   brass: THREE.MeshStandardMaterial;
@@ -34,6 +36,10 @@ export interface InteriorMaterials {
   bulkheadWeb: THREE.MeshStandardMaterial;
   radioFace: THREE.MeshStandardMaterial;
   regulatorFace: THREE.MeshStandardMaterial;
+  /** Small round instrument face: oxygen pressure gauges, flow blinkers, the aperiodic compass. */
+  dialFace: THREE.MeshStandardMaterial;
+  /** Aeronautic first-aid kit lid: red cross on a white field. */
+  firstAidLid: THREE.MeshStandardMaterial;
   lampLens: THREE.MeshBasicMaterial;
   glass: THREE.MeshStandardMaterial;
 }
@@ -254,6 +260,47 @@ function regulatorFaceTexture(): THREE.CanvasTexture {
   return finish(element);
 }
 
+/** Black instrument face with a white scale and needle, read at a few centimetres across. */
+function dialFaceTexture(): THREE.CanvasTexture {
+  const [element, context] = canvas(128, 128);
+  context.fillStyle = '#2f3133';
+  context.fillRect(0, 0, 128, 128);
+  context.fillStyle = '#0d0e0f';
+  context.beginPath();
+  context.arc(64, 64, 58, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = '#e8e2cf';
+  context.lineWidth = 3;
+  for (let tick = 0; tick <= 12; tick++) {
+    const angle = Math.PI * (0.75 + tick * 0.125);
+    const inner = tick % 3 === 0 ? 38 : 44;
+    context.beginPath();
+    context.moveTo(64 + Math.cos(angle) * inner, 64 + Math.sin(angle) * inner);
+    context.lineTo(64 + Math.cos(angle) * 52, 64 + Math.sin(angle) * 52);
+    context.stroke();
+  }
+  context.lineWidth = 4;
+  context.beginPath();
+  context.moveTo(64, 64);
+  context.lineTo(64 + Math.cos(Math.PI * 1.65) * 46, 64 + Math.sin(Math.PI * 1.65) * 46);
+  context.stroke();
+  return finish(element);
+}
+
+function firstAidLidTexture(): THREE.CanvasTexture {
+  const [element, context] = canvas(128, 96);
+  context.fillStyle = '#56583f';
+  context.fillRect(0, 0, 128, 96);
+  context.fillStyle = '#e9e5d8';
+  context.beginPath();
+  context.arc(64, 48, 34, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = '#b2261d';
+  context.fillRect(54, 22, 20, 52);
+  context.fillRect(38, 38, 52, 20);
+  return finish(element);
+}
+
 export function interiorMaterials(): InteriorMaterials {
   if (shared) return shared;
   const plywood = plywoodTexture();
@@ -275,6 +322,7 @@ export function interiorMaterials(): InteriorMaterials {
     oxygen: glossyMaterial('#b8922e'),
     extinguisher: glossyMaterial('#9b2a20'),
     rubber: matteMaterial('#151617', { roughness: 0.72, envMapIntensity: 0.35 }),
+    bakelite: glossyMaterial('#2b1e17', { roughness: 0.38, clearcoat: 0.4 }),
     gunBlack: metalMaterial('#15171b', { roughness: 0.46, metalness: 0.55 }),
     ammunitionBox: matteMaterial('#575a42', { roughness: 0.7 }),
     brass: metalMaterial('#b38a45', { roughness: 0.32, metalness: 1 }),
@@ -282,6 +330,8 @@ export function interiorMaterials(): InteriorMaterials {
     bulkheadWeb: metalMaterial('#868c90', { roughness: 0.6, metalness: 0.45, envMapIntensity: 0.5, side: THREE.DoubleSide }),
     radioFace: applyStudioShading(new THREE.MeshStandardMaterial({ map: radioFaceTexture(), roughness: 0.6 })),
     regulatorFace: applyStudioShading(new THREE.MeshStandardMaterial({ map: regulatorFaceTexture(), roughness: 0.5 })),
+    dialFace: applyStudioShading(new THREE.MeshStandardMaterial({ map: dialFaceTexture(), roughness: 0.35 })),
+    firstAidLid: applyStudioShading(new THREE.MeshStandardMaterial({ map: firstAidLidTexture(), roughness: 0.7 })),
     lampLens: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffcf8a').multiplyScalar(1.6) }),
     glass: applyStudioShading(new THREE.MeshPhysicalMaterial({ color: '#cfe2ea', roughness: 0.05, transparent: true, opacity: 0.25, depthWrite: false })),
   };

@@ -850,7 +850,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   addSideWindows(airframe, hull, materials.windowPane, cutouts, STATIONS.waistWindowPort.start, STATIONS.waistWindowPort.end, waistBand.top, waistBand.bottom, [-1]);
   const radioHatch = STATIONS.radioHatch;
   const radioMid = (radioHatch.start + radioHatch.end) / 2;
-  addWindow(airframe, hull, materials.windowPane, cutouts, new THREE.Vector3(toX(radioMid), hullSectionAt(radioMid).top, 0), UP, FORWARD, radioHatch.end - radioHatch.start, 0.62, 0.4);
+  addWindow(airframe, hull, materials.windowPane, cutouts, new THREE.Vector3(toX(radioMid), hullSectionAt(radioMid).top, 0), UP, FORWARD, radioHatch.end - radioHatch.start, radioHatch.width, 0.4);
 
   // The ball turret's 46 1/2 in hole in the belly.
   const ballCentre = ballTurretCentre();

@@ -5,8 +5,9 @@ import { part } from '../kit';
 import { addM2 } from '../m2';
 import { feedGun, receiverSideToward } from './ammunition';
 import { BOMB_BAY, BULKHEADS, FLOORS, RADIO_ROOM } from './layout';
-import { box, extinguisher, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult, type CrewStation } from './parts';
+import { box, extinguisher, oxygenBottle, pedestalSeat, rod, type CompartmentContext, type CompartmentResult, type CrewStation } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
+import { oxygenStation } from './fittings';
 import { addBulkhead, addSparTruss } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
@@ -124,7 +125,7 @@ export function buildRadioRoom(context: CompartmentContext): CompartmentResult {
   for (let bottle = 0; bottle < 2; bottle++) {
     oxygenBottle(parent, materials, v(9.15 + bottle * 0.22, floor + 0.2, hullHalfWidthAtHeight(9.15, floor + 0.2) - 0.14), new THREE.Vector3(1, 0, 0), 0.42, 0.09);
   }
-  regulator(parent, materials, v(9.35, 0.25, -hullHalfWidthAtHeight(9.35, 0.25) + 0.04), Math.PI / 2);
+  oxygenStation(parent, materials, { d: 9.35, y: 0.25, side: -1 });
   extinguisher(parent, materials, v(BULKHEADS.rearSpar + 0.08, floor, 0.45));
   // Radio-room / waist bulkhead No. 7 with its door.
   addBulkhead(parent, materials.bulkheadWeb, BULKHEADS.radioToWaist, { bottom: floor, top: 0.95, halfWidth: 0.26 });

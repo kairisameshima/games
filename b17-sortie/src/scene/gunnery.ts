@@ -33,7 +33,7 @@ const TRACER_LIFETIME = 1.1;
 const BURST_WINDOW = 2.4;
 const CASE_EJECT_SPEED = 2.2;
 const FLASH_SECONDS = 0.025;
-const FLASH_LIGHT_INTENSITY = 1.6;
+const FLASH_LIGHT_INTENSITY = 0.25;
 
 interface GunState {
   mounted: MountedGun;
@@ -117,7 +117,8 @@ export class Gunnery {
     insideMesh.castShadow = true;
     insideMesh.receiveShadow = true;
     aircraftRoot.add(insideMesh);
-    const light = new THREE.PointLight('#ffb766', 0, 1.2, 2);
+    // Reach of the flash's light in world units: about 2 m on the model.
+    const light = new THREE.PointLight('#ffb766', 0, 0.6, 2);
     aircraftRoot.add(light);
     this.ships.push({
       root: aircraftRoot,

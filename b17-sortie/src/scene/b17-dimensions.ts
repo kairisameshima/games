@@ -156,7 +156,7 @@ export const STATIONS = {
   topTurret: { d: 5.17, radius: 0.52, domeHeight: 0.44, gunSpacing: 0.4 },
   /** Doors span the bay between the spar bulkheads (interior/layout.ts BULKHEADS), less the bulkhead flanges. */
   bombBay: { start: 5.84, end: 8.41, halfWidth: 0.56 },
-  radioHatch: { start: 8.95, end: 10.05 },
+  radioHatch: { start: 8.95, end: 10.05, width: 0.62 },
   /** Sperry ball turret station, just aft of the radio-room bulkhead; its geometry lives in `ball-turret.ts`. */
   ballTurret: { d: 11.12 },
   waistWindowStarboard: { start: 13.1, end: 14.2 },

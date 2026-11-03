@@ -6,8 +6,9 @@ import { part, roundedBox } from '../kit';
 import { feedGun } from './ammunition';
 import { BULKHEADS, COCKPIT, FLIGHT_DECK, FLOORS } from './layout';
 import { applyPanelUvs, instrumentPanelTexture, panelOutline, PANEL_HEIGHT, PANEL_WIDTH } from './panels';
-import { box, oxygenBottle, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
+import { box, oxygenBottle, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, palmDown, plantedFoot, pose, seatedPelvis, verticalGrip } from './poses';
+import { oxygenStation } from './fittings';
 import { addBulkhead, addSparTruss } from './structure';
 
 const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
@@ -95,7 +96,7 @@ function addPilotControls(context: CompartmentContext, side: 1 | -1): { leftGrip
   // Side console on the wall beside each pilot; the skin narrows forward and upward, so its forward top edge sets the inset.
   const wall = side * (hullHalfWidthAtHeight(3.45, 0.81) - 0.05);
   box(parent, v(3.7, 0.7, wall), [0.5, 0.22, 0.08], materials.crinkle, 0, 0.012);
-  regulator(parent, materials, v(4.05, 0.85, side * (hullHalfWidthAtHeight(4.05, 0.95) - 0.05)), side > 0 ? -Math.PI / 2 : Math.PI / 2);
+  oxygenStation(parent, materials, { d: 4.05, y: 0.82, side });
   return { leftGrip, rightGrip, pedals, seat };
 }
 
@@ -148,7 +149,7 @@ export function buildCockpit(context: CompartmentContext): CompartmentResult {
     oxygenBottle(parent, materials, v(d, 0.5, -hullHalfWidthAtHeight(d, 0.5) + 0.13), new THREE.Vector3(0, 1, 0), 0.48, 0.09);
   }
   box(parent, v(BULKHEADS.frontSpar - 0.05, 0.55, 0.5), [0.06, 0.4, 0.3], materials.crinkle, 0, 0.01);
-  regulator(parent, materials, v(5.3, 0.9, hullHalfWidthAtHeight(5.3, 0.9) - 0.04), -Math.PI / 2);
+  oxygenStation(parent, materials, { d: 5.3, y: 0.9, side: 1 });
   addBulkhead(parent, materials.bulkheadWeb, BULKHEADS.frontSpar, { bottom: FLOORS.flightDeck.y, top: 1.05, halfWidth: 0.24 });
   addSparTruss(parent, materials.aluminium, BULKHEADS.frontSpar + 0.03, 0.95, -0.95);
 

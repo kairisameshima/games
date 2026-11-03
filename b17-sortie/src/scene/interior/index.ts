@@ -10,7 +10,10 @@ import { buildCockpit } from './cockpit';
 import { interiorMaterials } from './materials';
 import { buildNose } from './nose';
 import type { CompartmentContext, CrewStation, StationCrew } from './parts';
-import { addFloors, addSkinAndStructure } from './structure';
+import { addFloors, addSkinAndStructure, tailFloorHeight, waistFloorHeight } from './structure';
+import { addStationFittings } from './fittings';
+import { BOMB_BAY, BULKHEADS, FLOORS, TAIL, WAIST } from './layout';
+import { STATIONS } from '../b17-dimensions';
 import type { WindowCutouts } from '../window-cutouts';
 import { buildWaistAndTail } from './waist';
 
@@ -94,6 +97,20 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
     topTurretYaw: hosts.topTurretYaw, topTurretPitch: hosts.topTurretPitch, topTurretGuns: hosts.topTurretGuns, ballTurretGuns: hosts.ballTurretGuns, guns, ballTurretPitch: hosts.ballTurretPitch, createBomb: hosts.createBomb,
   };
   const bombBay = buildBombBay(context);
+  addStationFittings(equipment, materials, {
+    bulkheads: BULKHEADS,
+    floors: { nose: FLOORS.nose.y, radioRoom: FLOORS.radioRoom.y, catwalk: BOMB_BAY.catwalkY },
+    waistFloorAt: waistFloorHeight,
+    tailFloorAt: tailFloorHeight,
+    radioHatch: { start: STATIONS.radioHatch.start, end: STATIONS.radioHatch.end, halfWidth: STATIONS.radioHatch.width / 2 },
+    waist: {
+      starboardWindow: [STATIONS.waistWindowStarboard.start, STATIONS.waistWindowStarboard.end],
+      portWindow: [STATIONS.waistWindowPort.start, STATIONS.waistWindowPort.end],
+      door: [WAIST.door.start, WAIST.door.end],
+      windowMiddleY: (STATIONS.waistWindowBand.top + STATIONS.waistWindowBand.bottom) / 2,
+    },
+    tailGunnerD: TAIL.gunnerD,
+  });
   const compartments = [buildNose(context), buildCockpit(context), bombBay, buildRadioRoom(context), buildWaistAndTail(context)];
 
   const starboardWall = sortStarboardWall(equipment, hosts.airframe);

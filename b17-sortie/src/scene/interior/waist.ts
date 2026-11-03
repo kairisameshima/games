@@ -6,8 +6,9 @@ import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
 import { addM2, M2_BACKPLATE, M2_GRIPS, m2Point } from '../m2';
 import { beltFromAbove, feedGun, receiverSideToward } from './ammunition';
+import { oxygenStation, type WallSpot } from './fittings';
 import { BULKHEADS, TAIL, WAIST } from './layout';
-import { box, oxygenBottle, pedestalSeat, regulator, rod, type CompartmentContext, type CompartmentResult } from './parts';
+import { box, oxygenBottle, pedestalSeat, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, plantedFoot, pose, verticalGrip } from './poses';
 import { tailFloorHeight, waistFloorHeight } from './structure';
 
@@ -53,6 +54,17 @@ function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { gr
   return { grips: [m2Point(mount, outward, M2_GRIPS.left), m2Point(mount, outward, M2_GRIPS.right)], yaw: Math.atan2(-outward.z, outward.x) };
 }
 
+/** Each waist gunner's regulator, on the wall clear of his window: forward of the starboard one, aft of the port one. */
+function waistOxygenSpot(side: 1 | -1): WallSpot {
+  return side > 0 ? { d: WAIST.starboardGunD - 0.8, y: 0.12, side } : { d: WAIST.portGunD + 0.7, y: 0.12, side };
+}
+
+/** Where a mask hose plugs into the regulator at `spot`: the coupling under its face. */
+function hoseCoupling(spot: WallSpot): THREE.Vector3 {
+  const y = spot.y - 0.12;
+  return v(spot.d, y, spot.side * (hullHalfWidthAtHeight(spot.d, y) - 0.06));
+}
+
 function waistGunner(role: string, gun: { grips: [THREE.Vector3, THREE.Vector3]; yaw: number }, d: number, side: 1 | -1, faceSeed: number): CrewMember {
   const floor = waistFloorHeight(d);
   const forward = new THREE.Vector3(Math.cos(gun.yaw), 0, -Math.sin(gun.yaw));
@@ -80,7 +92,7 @@ function waistGunner(role: string, gun: { grips: [THREE.Vector3, THREE.Vector3];
       },
     }),
     outfit: { upper: 'b3', lower: 'a3', flakVest: true, flakApron: true, flakHelmet: true, lifeVest: true, harness: true, goggles: 'down', oxygenMask: true },
-    regulator: v(d - 0.5, floor + 1.0, side * (hullHalfWidthAtHeight(d - 0.5, floor + 1.0) - 0.07)),
+    regulator: hoseCoupling(waistOxygenSpot(side)),
     faceSeed,
   };
 }
@@ -163,8 +175,7 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
 
   const starboardGun = addWaistGun(context, WAIST.starboardGunD, 1);
   const portGun = addWaistGun(context, WAIST.portGunD, -1);
-  regulator(parent, materials, v(WAIST.starboardGunD - 0.5, 0.15, hullHalfWidthAtHeight(WAIST.starboardGunD - 0.5, 0.15) - 0.04), -Math.PI / 2);
-  regulator(parent, materials, v(WAIST.portGunD - 0.5, 0.15, -hullHalfWidthAtHeight(WAIST.portGunD - 0.5, 0.15) + 0.04), Math.PI / 2);
+  for (const side of [-1, 1] as const) oxygenStation(parent, materials, waistOxygenSpot(side));
   for (let bottle = 0; bottle < 3; bottle++) {
     const d = 12.0 + bottle * 0.25;
     oxygenBottle(parent, materials, v(d, waistFloorHeight(d) + 0.12, -hullHalfWidthAtHeight(d, waistFloorHeight(d) + 0.12) + 0.13), new THREE.Vector3(1, 0, 0), 0.4, 0.09);
@@ -230,7 +241,8 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
     // The Cheyenne mount chutes its cases and links overboard.
     context.guns.push({ gun: tailGunHandles[side < 0 ? 0 : 1], belt, caseFloorY: null });
   }
-  regulator(parent, materials, v(TAIL.gunnerD - 0.4, tailFloor + 0.45, hullHalfWidthAtHeight(TAIL.gunnerD - 0.4, tailFloor + 0.45) - 0.04), -Math.PI / 2);
+  // One regulator on each side wall (Pilot's Manual section XI).
+  for (const side of [-1, 1] as const) oxygenStation(parent, materials, { d: TAIL.gunnerD - 0.4, y: tailFloor + 0.45, side });
 
   const aft = FACING.aft;
   const tailGunner: CrewMember = {
