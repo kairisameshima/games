@@ -5,7 +5,7 @@ import {
   COWL_RADIUS, FIN_OUTLINE, FUSELAGE_LENGTH, NACELLES, NOSE_GLAZING_END, PROPELLER_RADIUS, STATIONS,
   TAILPLANE, WING, WING_SEMISPAN, type NacelleSpec,
 } from './b17-dimensions';
-import { mergeStaticMeshes, part, roundedBox } from './kit';
+import { mergeRigidMeshes, mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
 import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt } from './assemblies';
@@ -921,6 +921,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   }
   part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.oliveDrab, -0.4, 0.1, 0);
   const topTurretPitch = new THREE.Group();
+  topTurretPitch.userData.unmerged = true;
   topTurretPitch.position.set(0.18, 0.24, 0);
   const topTurretGuns = [-1, 1].map((side) => addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret'));
   topTurretYaw.add(topTurretPitch);
@@ -931,6 +932,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   ballYaw.position.copy(ballTurretCentre());
   addBallTurretMount(ballYaw, { structure: materials.neutralGray, steel: materials.gunmetal });
   const ballPitch = new THREE.Group();
+  ballPitch.userData.unmerged = true;
   addBallTurretShell(ballPitch, { shell: materials.neutralGray, glass: materials.canopy, seam: materials.rubber, steel: materials.steel });
   const ballTurretGuns = ([-1, 1] as const).map((side) => addM2(ballPitch, ballGunOrigin(side), FORWARD, 'turret'));
   ballYaw.add(ballPitch);
@@ -993,6 +995,10 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   }
   interior.starboardWall.removeFromParent();
   assemblies.adoptRootChildren();
+  // The turrets and every other moving part were left whole by the bake; merge each one's fixed pieces in its own space.
+  const movingParts: THREE.Object3D[] = [topTurretYaw, ballYaw, chinTurret];
+  root.traverse((object) => { if (object.userData.unmerged) movingParts.push(object); });
+  for (const moving of movingParts) mergeRigidMeshes(moving);
   const starboardWall: THREE.Object3D[] = [];
   root.traverse((object) => { if (object.userData.hiddenInCutaway) starboardWall.push(object); });
   // Callouts ride with the assembly their man is in: the engineer with the top turret, the gunners with their sections.

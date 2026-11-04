@@ -114,6 +114,54 @@ export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
   return merged;
 }
 
+/**
+ * Merges the meshes that move with `node` and with nothing else into one mesh per (material, shadow flags, attribute
+ * layout), in `node`'s space: every draw call a turret or a gun saves is saved again in the shadow and reflection
+ * passes. The walk stops at anything that moves or changes on its own, which keeps its meshes and is merged the same
+ * way inside: a part flagged `userData.unmerged`, or one hidden at build time (a muzzle flash shown per shot).
+ */
+export function mergeRigidMeshes(node: THREE.Object3D): void {
+  node.updateMatrixWorld(true);
+  const toNode = node.matrixWorld.clone().invert();
+  const buckets = new Map<string, { material: THREE.Material; template: THREE.Mesh; meshes: THREE.Mesh[] }>();
+  const articulated: THREE.Object3D[] = [];
+  const visit = (object: THREE.Object3D): void => {
+    for (const child of object.children) {
+      if (child.userData.unmerged || !child.visible) {
+        articulated.push(child);
+        continue;
+      }
+      visit(child);
+      if (!(child instanceof THREE.Mesh) || child instanceof THREE.InstancedMesh || child instanceof THREE.SkinnedMesh) continue;
+      const mesh: THREE.Mesh = child;
+      if (Array.isArray(mesh.material) || mesh.children.length > 0) continue;
+      const layout = Object.entries(mesh.geometry.attributes)
+        .map(([name, attribute]) => `${name}:${attribute.itemSize}:${attribute.normalized}`).sort().join(',');
+      const key = `${mesh.material.uuid}|${mesh.castShadow}|${mesh.receiveShadow}|${mesh.renderOrder}|${layout}`;
+      const bucket = buckets.get(key) ?? { material: mesh.material, template: mesh, meshes: [] };
+      bucket.meshes.push(mesh);
+      buckets.set(key, bucket);
+    }
+  };
+  visit(node);
+  for (const { material, template, meshes } of buckets.values()) {
+    if (meshes.length < 2) continue;
+    const geometries = meshes.map((mesh) => {
+      const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+      return geometry.applyMatrix4(toNode.clone().multiply(mesh.matrixWorld));
+    });
+    const geometry = mergeGeometries(geometries);
+    if (!geometry) throw new Error(`Cannot merge ${meshes.length} rigid meshes for material ${material.type}`);
+    const merged = new THREE.Mesh(geometry, material);
+    merged.castShadow = template.castShadow;
+    merged.receiveShadow = template.receiveShadow;
+    merged.renderOrder = template.renderOrder;
+    for (const mesh of meshes) mesh.removeFromParent();
+    node.add(merged);
+  }
+  for (const inner of articulated) mergeRigidMeshes(inner);
+}
+
 export interface TextPlateOptions {
   width: number;
   height: number;

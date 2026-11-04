@@ -121,6 +121,8 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
     const mesh = crewMesh(station, detail);
     // The figure's mesh sits at the origin; its pelvis says which compartment it is in.
     mesh.userData.stationX = buildSkeleton(station.member.pose).pelvis.position.x * (station.member.stature ?? 1);
+    // Its geometry arrives later from a worker, so no merge may fold it in.
+    mesh.userData.unmerged = true;
     (station.host ?? hosts.root).add(mesh);
     return { station, mesh };
   });
