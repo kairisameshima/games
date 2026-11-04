@@ -178,6 +178,15 @@ export const STATIONS = {
   /** Side panes per side (fore and aft, between stations), their sill and head, and the rear window on the housing's end. */
   tailTurretWindows: { panes: [[20.24, 20.56], [20.68, 21.72]] as [number, number][], top: 0.8, bottom: 0.44, rear: { width: 0.54, top: 0.8, bottom: 0.42 } },
   /**
+   * The original B-17G tail gun position, the "stinger" (photograph of 42-102509): a lower, rounder cab whose roof slopes
+   * down to the tapered tail end, two small panes a side, a sighting window on the slope, and the guns out of the end
+   * in canvas boots. `slopeFrom` is where the roof starts down to the cab's end on the cone; aft of `coneFrom` the cone
+   * narrows to its blunt end, each entry a station and the fraction of the section there.
+   */
+  stingerHousing: { start: 19.45, slopeFrom: 21.25, end: 22.36, top: 0.8 },
+  stingerCone: { from: 22.36, taper: [[22.5, 0.86], [22.64, 0.68], [22.76, 0.5]] as [number, number][] },
+  stingerWindows: { panes: [[20.5, 20.82], [20.92, 21.24]] as [number, number][], top: 0.74, bottom: 0.5, sight: { d: 21.82, width: 0.32, length: 0.3 } },
+  /**
    * The Cheyenne gun mount closing the tail cone: the skin curls in round an opening from `opening` to `rim`, closing
    * to `rimScale` of the cone's section, and an armoured dome stands in it, reaching the tail's end, its two vertical
    * slots carrying the guns.

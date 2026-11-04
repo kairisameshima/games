@@ -28,7 +28,11 @@ export const BULKHEADS = {
 export const FLOORS = {
   /** Nose compartment floor, laid over the chin turret housing. */
   nose: { start: 0.72, end: 2.85, y: -0.66 },
-  /** Crawlway from the nose under the cockpit floor up to the flight deck. */
+  /**
+   * Crawlway from the nose under the cockpit floor up to the flight deck. No source gives its height; it is bounded by
+   * the floors either side: it continues the nose floor through bulkhead 4 (no step in the inboard profile), and the
+   * pilots' floor above cannot rise because the seated pilots' heads already clear the cabin roof by only 3 cm.
+   */
   crawlway: { start: 2.85, end: 4.75, y: -0.66 },
   /** From bulkhead 4 (no gap for the crawlway to see up into) to the flight deck. */
   cockpit: { start: 2.87, end: 4.75, y: 0.0 },
@@ -54,6 +58,12 @@ export const CRAWLWAY = {
   step: { d: 4.58, topY: -0.34, width: 0.4 },
   /** Forward entrance hatch (along the fuselage, and across from the centreline to port). */
   forwardHatch: { start: 3.3, end: 3.95, inner: -0.02, outer: -0.44 },
+} as const;
+
+/** Wall fittings the cutaway's hotspots point at, placed once here: station, height, and side (port −1). */
+export const WALL_FITTINGS = {
+  navigatorJackBox: { d: 2.62, y: 0.42, side: -1 },
+  navigatorRegulator: { d: 2.55, y: 0.25, side: -1 },
 } as const;
 
 export const NOSE = {
@@ -89,6 +99,12 @@ export const FLIGHT_DECK = {
 export const BOMB_BAY = {
   catwalkY: -0.86,
   catwalkHalfWidth: 0.11,
+  /**
+   * The step at the forward end of the catwalk, halving the drop from the flight deck. It carries the hand-crank
+   * connection for the bomb doors, the emergency bomb release under its hinged guard, and the step light (Pilot's
+   * Manual, "Bomb bay").
+   */
+  step: { endD: 6.1, topY: -0.45, halfWidth: 0.2 },
   /** Bombs stack in two vertical racks, one each side of the catwalk: rack at `rackFrameZ`, bomb axes at `rackZ`. */
   rackFrameZ: 0.11,
   rackZ: 0.31,

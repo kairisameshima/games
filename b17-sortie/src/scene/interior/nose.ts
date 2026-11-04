@@ -4,7 +4,7 @@ import { hullHalfWidthAtHeight, toX } from '../hull';
 import { part } from '../kit';
 import { addM2 } from '../m2';
 import { addAmmunitionBox, feedGun, receiverSideToward } from './ammunition';
-import { BULKHEADS, FLOORS, NOSE } from './layout';
+import { BULKHEADS, FLOORS, NOSE, WALL_FITTINGS } from './layout';
 import { box, extinguisher, pedestalSeat, rod, type CompartmentContext, type CompartmentResult } from './parts';
 import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis } from './poses';
 import { oxygenStation } from './fittings';
@@ -78,7 +78,7 @@ function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector
   // B-5 drift meter on its floor pedestal ahead of the table.
   rod(parent, v(1.66, FLOORS.nose.y, -0.42), v(1.66, -0.18, -0.42), 0.05, materials.crinkle);
   part(parent, new THREE.CylinderGeometry(0.035, 0.03, 0.08, 14), materials.rubber, toX(1.66), -0.15, -0.42);
-  oxygenStation(parent, materials, { d: 2.55, y: 0.25, side: -1 });
+  oxygenStation(parent, materials, WALL_FITTINGS.navigatorRegulator);
   return { table: v(middle, table.topY, table.innerZ), chart };
 }
 

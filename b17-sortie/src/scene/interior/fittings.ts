@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
 import type { InteriorMaterials } from './materials';
+import { WALL_FITTINGS } from './layout';
 import { rod } from './parts';
 
 /**
@@ -253,7 +254,7 @@ export function addStationFittings(parent: THREE.Object3D, materials: InteriorMa
   suitHeaterOutlet(parent, materials, { d: 1.62, y: -0.32, side: 1 });
   portableOxygen(parent, materials, { d: 2.42, y: -0.38, side: 1 });
   tableLamp(parent, materials, { d: 1.98, y: 0.62, side: -1 }, 0.22);
-  jackBox(parent, materials, { d: 2.62, y: 0.42, side: -1 });
+  jackBox(parent, materials, WALL_FITTINGS.navigatorJackBox);
   suitHeaterOutlet(parent, materials, { d: 2.66, y: -0.22, side: -1 });
   fuseBoxOnBulkhead(parent, materials, bulkheads.noseToCockpit, -0.05, 0.45, -1);
   domeLight(parent, materials, 1.95);

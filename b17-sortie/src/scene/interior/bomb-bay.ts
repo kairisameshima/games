@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CrewMember } from '../crew/figure';
 import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
-import { part } from '../kit';
+import { part, roundedBox } from '../kit';
 import { addM2 } from '../m2';
 import { feedGun, receiverSideToward } from './ammunition';
 import { BOMB_BAY, BULKHEADS, FLOORS, RADIO_ROOM } from './layout';
@@ -14,6 +14,27 @@ const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
 const RACK_UPRIGHT_SPACING = 0.84;
 /** AN-M64 suspension lugs are 14 in apart. */
 const BOMB_LUG_SPACING = 0.356;
+
+/** The step at the catwalk's forward end, from the front spar bulkhead to `BOMB_BAY.step.endD`, and what is on it. */
+function addCatwalkStep(context: CompartmentContext, start: number): void {
+  const { parent, materials } = context;
+  const step = BOMB_BAY.step;
+  const length = step.endD - start;
+  const middle = (start + step.endD) / 2;
+  const tread = 0.03;
+  box(parent, v(middle, step.topY - tread / 2, 0), [length, tread, step.halfWidth * 2], materials.plywood, 0, 0.006);
+  // Riser on the aft face down to the catwalk, with the step light in it, lens aft along the catwalk.
+  const riserHeight = step.topY - tread - BOMB_BAY.catwalkY;
+  box(parent, v(step.endD - 0.01, BOMB_BAY.catwalkY + riserHeight / 2, 0), [0.02, riserHeight, step.halfWidth * 2], materials.frameGreen, 0, 0.004);
+  part(parent, new THREE.CylinderGeometry(0.03, 0.034, 0.025, 14), materials.aluminium, toX(step.endD + 0.003), step.topY - 0.12, 0, { rotation: [0, 0, Math.PI / 2] });
+  part(parent, new THREE.SphereGeometry(0.022, 12, 8, 0, Math.PI), materials.lampLens, toX(step.endD + 0.016), step.topY - 0.12, 0, { rotation: [0, -Math.PI / 2, 0] });
+  // Hand-crank torque connection for the bomb doors: a boss on the tread, starboard.
+  part(parent, new THREE.CylinderGeometry(0.025, 0.03, 0.03, 12), materials.gunBlack, toX(middle), step.topY + 0.015, 0.11);
+  // Emergency bomb release handle, port, under its hinged guard.
+  part(parent, roundedBox(0.1, 0.025, 0.03, 0.008), materials.extinguisher, toX(middle), step.topY + 0.02, -0.11);
+  const guard = part(parent, roundedBox(0.16, 0.006, 0.08, 0.002), materials.aluminium, toX(middle), step.topY + 0.05, -0.11);
+  guard.rotation.x = -0.25;
+}
 
 export interface BombBayResult extends CompartmentResult {
   /** Racked bombs in release order: bottom tier first, alternating starboard and port. */
@@ -35,6 +56,7 @@ export function buildBombBay(context: CompartmentContext): BombBayResult {
   for (let d = start + 0.2; d < end; d += 0.55) {
     for (const side of [-1, 1]) rod(parent, v(d, bay.catwalkY - 0.2, 0), v(d, hullSectionAt(d).bottom + 0.12, side * 0.28), 0.014, materials.aluminium, 8);
   }
+  addCatwalkStep(context, start);
   // Bomb racks: a vertical rack each side of the catwalk, its two uprights on the bay floor frames and up to the roof.
   // The bombs hang outboard of it on their sides, lugs inboard, each in a B-7 shackle bolted to the rack.
   const topTierY = bay.lowestTierY + (bay.tiers - 1) * bay.tierSpacing;

@@ -20,15 +20,23 @@ export class Callouts {
 
   /**
    * `root` is the aircraft; a station's anchor is in its `space` if it has one, else in the root. `fadeOnPortSide`
-   * hides a callout when the camera swings round to the side the cutaway leaves whole.
+   * hides a callout when the camera swings round to the side the cutaway leaves whole. With `onSelect`, clicking a
+   * callout's chip reports its station.
    */
-  constructor(container: HTMLElement, private readonly root: THREE.Object3D, stations: CrewStation[], private readonly fadeOnPortSide = true) {
+  constructor(
+    container: HTMLElement, private readonly root: THREE.Object3D, stations: CrewStation[], private readonly fadeOnPortSide = true,
+    onSelect: ((station: CrewStation) => void) | null = null,
+  ) {
     this.callouts = stations.map((station, index) => {
       const element = document.createElement('div');
       element.className = `callout is-${station.placement}`;
       element.style.setProperty('--leader', `${LEADER_PIXELS[index % LEADER_PIXELS.length]}px`);
       const text = document.createElement('span');
       text.textContent = station.role;
+      if (onSelect) {
+        element.classList.add('is-selectable');
+        text.addEventListener('click', () => onSelect(station));
+      }
       element.append(text, document.createElement('i'));
       container.append(element);
       return { station, element, text };

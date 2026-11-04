@@ -11,6 +11,11 @@ export interface UiCallbacks {
   onShowChange: (mode: ShowMode) => void;
   onRecordLog: () => void;
   onNoseArtChange: (choice: NoseArtChoice) => void;
+  /** Replays the prologue: boarding on the hardstand and the take-off onto the stand. */
+  onHardstand: () => void;
+  onSoundToggle: () => void;
+  onPhoto: () => void;
+  onKitBench: () => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -35,6 +40,8 @@ export class Ui {
   private readonly viewButtons: Record<ViewMode, HTMLButtonElement>;
   private readonly showButtons: Record<ShowMode, HTMLButtonElement>;
   private readonly noseArtButtons: Record<NoseArtChoice, HTMLButtonElement>;
+  private readonly soundButton: HTMLButtonElement;
+  private readonly kitButton: HTMLButtonElement;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -94,8 +101,13 @@ export class Ui {
     hintRow('C', 'cutaway');
     hintRow('E', 'exploded');
     hintRow('N', 'nose art');
+    hintRow('H', 'hardstand: board, take off');
+    hintRow('M', 'sound on / off');
+    hintRow('P', 'photo: save a still · Esc back');
+    hintRow('K', 'kit box and turntable');
     hintRow('L', 'record render log');
     hintRow('Drag', 'orbit · scroll to zoom');
+    hintRow('Click', 'crew label: walk there');
     const makeToggleButton = (toggle: HTMLElement, label: string, onClick: () => void) => {
       const button = element('button', '', label);
       button.type = 'button';
@@ -125,10 +137,16 @@ export class Ui {
     makeToggleButton(logToggle, 'Record render log', callbacks.onRecordLog);
     this.logStatus = element('div', 'log-status', 'about 40 s, then saves a .json');
     logRow.append(logToggle, this.logStatus);
-    hints.append(viewToggle, showToggle, noseArtToggle, this.meterSlot, logRow);
+    const hardstandToggle = element('div', 'view-toggle');
+    makeToggleButton(hardstandToggle, 'Hardstand · take off', callbacks.onHardstand);
+    this.kitButton = makeToggleButton(hardstandToggle, 'Kit box', callbacks.onKitBench);
+    const mediaToggle = element('div', 'view-toggle');
+    this.soundButton = makeToggleButton(mediaToggle, 'Sound off', callbacks.onSoundToggle);
+    makeToggleButton(mediaToggle, 'Photo', callbacks.onPhoto);
+    hints.append(viewToggle, showToggle, noseArtToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
-    root.append(titlePanel, phasePanel, hints, this.loading);
+    root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'));
   }
 
   update(state: SortieState): void {
@@ -168,6 +186,15 @@ export class Ui {
 
   setNoseArt(choice: NoseArtChoice): void {
     for (const [button, element] of Object.entries(this.noseArtButtons)) element.classList.toggle('is-active', button === choice);
+  }
+
+  setKitBench(shown: boolean): void {
+    this.kitButton.classList.toggle('is-active', shown);
+  }
+
+  setSound(on: boolean): void {
+    this.soundButton.textContent = on ? 'Sound on' : 'Sound off';
+    this.soundButton.classList.toggle('is-active', on);
   }
 
   setLogStatus(text: string): void {

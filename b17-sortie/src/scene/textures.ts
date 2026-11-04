@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import hallucinatinHattieUrl from '../assets/nose-art-hallucinatin-hattie.png';
 import { PALETTE } from './palette';
+import type { Finish } from './livery';
 
 function createCanvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement('canvas');
@@ -65,8 +66,11 @@ export interface HullPaintOptions {
   /** Frame stations in metres along the hull, drawn as circumferential panel lines. */
   majorJoints: number[];
   frameSpacing: number;
+  finish: Finish;
   /** Half the angular width of the Olive Drab band either side of the top, as a fraction of a full turn. */
   oliveDrabHalfBand: number;
+  /** On bare metal, the Olive Drab anti-glare panel over the top of the nose ahead of the windscreen, in metres. */
+  antiGlare?: [number, number];
   /** Station range (fraction of length) where turbo exhaust soot streaks the underside, if any. */
   sootFrom?: number;
   seed: number;
@@ -83,36 +87,19 @@ export function hullPaintTexture(options: HullPaintOptions): THREE.CanvasTexture
   const [canvas, context] = createCanvas(width, height);
   const random = seededRandom(options.seed);
 
-  context.fillStyle = PALETTE.neutralGray;
-  context.fillRect(0, 0, width, height);
-  // Soft-edged spray demarcation that wanders a little along the hull.
-  const bandHalf = options.oliveDrabHalfBand * height;
-  for (let x = 0; x < width; x += 4) {
-    const wobble = Math.sin(x * 0.011 + options.seed) * height * 0.008 + Math.sin(x * 0.037) * height * 0.003;
-    const gradient = context.createLinearGradient(0, height / 2 - bandHalf - wobble - 6, 0, height / 2 + bandHalf + wobble + 6);
-    const edge = 6 / (2 * (bandHalf + wobble + 6));
-    gradient.addColorStop(0, 'rgba(91,88,67,0)');
-    gradient.addColorStop(edge, PALETTE.oliveDrab);
-    gradient.addColorStop(1 - edge, PALETTE.oliveDrab);
-    gradient.addColorStop(1, 'rgba(91,88,67,0)');
-    context.fillStyle = gradient;
-    context.fillRect(x, height / 2 - bandHalf - wobble - 6, 4, 2 * (bandHalf + wobble + 6));
-  }
-  fadeMottle(context, 0, height / 2 - bandHalf, width, bandHalf * 2, random, 160);
-
   const pixelsPerMetre = width / options.lengthMetres;
-  for (let station = options.frameSpacing; station < options.lengthMetres; station += options.frameSpacing) {
-    panelLine(context, station * pixelsPerMetre, 0, station * pixelsPerMetre, height, 0.12, 1.1);
+  if (options.finish === 'naturalMetal') {
+    bareMetalPanels(context, width, height, options.frameSpacing * pixelsPerMetre, height / 24, random);
+    if (options.antiGlare) {
+      const [start, end] = options.antiGlare;
+      const halfBand = options.oliveDrabHalfBand * 0.35 * height;
+      context.fillStyle = PALETTE.oliveDrab;
+      context.fillRect(start * pixelsPerMetre, height / 2 - halfBand, (end - start) * pixelsPerMetre, halfBand * 2);
+    }
+  } else {
+    sprayCamouflage(context, width, height, options, random);
   }
-  for (const joint of options.majorJoints) {
-    const x = joint * pixelsPerMetre;
-    panelLine(context, x, 0, x, height, 0.38, 2);
-    rivetRow(context, x + 4, 0, x + 4, height, 6);
-  }
-  for (let stringer = 1; stringer < 24; stringer++) {
-    const y = (stringer / 24) * height;
-    panelLine(context, 0, y, width, y, stringer % 3 === 0 ? 0.22 : 0.08, stringer % 3 === 0 ? 1.6 : 1);
-  }
+  hullPanelLines(context, width, height, options, pixelsPerMetre);
 
   if (options.sootFrom !== undefined) {
     // Exhaust soot along the underside (UV y near 0 and 1, which is canvas top and bottom).
@@ -126,6 +113,57 @@ export function hullPaintTexture(options: HullPaintOptions): THREE.CanvasTexture
     }
   }
   return finishTexture(canvas);
+}
+
+/** Olive Drab sprayed over the Neutral Gray, the band either side of the top with a soft, wandering demarcation. */
+function sprayCamouflage(context: CanvasRenderingContext2D, width: number, height: number, options: HullPaintOptions, random: () => number): void {
+  context.fillStyle = PALETTE.neutralGray;
+  context.fillRect(0, 0, width, height);
+  const bandHalf = options.oliveDrabHalfBand * height;
+  for (let x = 0; x < width; x += 4) {
+    const wobble = Math.sin(x * 0.011 + options.seed) * height * 0.008 + Math.sin(x * 0.037) * height * 0.003;
+    const gradient = context.createLinearGradient(0, height / 2 - bandHalf - wobble - 6, 0, height / 2 + bandHalf + wobble + 6);
+    const edge = 6 / (2 * (bandHalf + wobble + 6));
+    gradient.addColorStop(0, 'rgba(91,88,67,0)');
+    gradient.addColorStop(edge, PALETTE.oliveDrab);
+    gradient.addColorStop(1 - edge, PALETTE.oliveDrab);
+    gradient.addColorStop(1, 'rgba(91,88,67,0)');
+    context.fillStyle = gradient;
+    context.fillRect(x, height / 2 - bandHalf - wobble - 6, 4, 2 * (bandHalf + wobble + 6));
+  }
+  fadeMottle(context, 0, height / 2 - bandHalf, width, bandHalf * 2, random, 160);
+}
+
+/** How far a bare skin panel's tone strays from the aluminium, either way: sheets from different batches and tempers. */
+const BARE_PANEL_TONE_SPREAD = 0.07;
+
+/** Bare aluminium, panel by panel, each sheet a slightly different tone. */
+function bareMetalPanels(context: CanvasRenderingContext2D, width: number, height: number, panelWidth: number, panelHeight: number, random: () => number): void {
+  context.fillStyle = PALETTE.aluminium;
+  context.fillRect(0, 0, width, height);
+  for (let x = 0; x < width; x += panelWidth) {
+    for (let y = 0; y < height; y += panelHeight) {
+      const tone = (random() * 2 - 1) * BARE_PANEL_TONE_SPREAD;
+      context.fillStyle = tone > 0 ? `rgba(255,255,255,${tone})` : `rgba(40,44,48,${-tone})`;
+      context.fillRect(x, y, panelWidth, panelHeight);
+    }
+  }
+}
+
+/** Frame lines, the section joints with their rivet rows, and the stringer lines. */
+function hullPanelLines(context: CanvasRenderingContext2D, width: number, height: number, options: HullPaintOptions, pixelsPerMetre: number): void {
+  for (let station = options.frameSpacing; station < options.lengthMetres; station += options.frameSpacing) {
+    panelLine(context, station * pixelsPerMetre, 0, station * pixelsPerMetre, height, 0.12, 1.1);
+  }
+  for (const joint of options.majorJoints) {
+    const x = joint * pixelsPerMetre;
+    panelLine(context, x, 0, x, height, 0.38, 2);
+    rivetRow(context, x + 4, 0, x + 4, height, 6);
+  }
+  for (let stringer = 1; stringer < 24; stringer++) {
+    const y = (stringer / 24) * height;
+    panelLine(context, 0, y, width, y, stringer % 3 === 0 ? 0.22 : 0.08, stringer % 3 === 0 ? 1.6 : 1);
+  }
 }
 
 export interface SurfacePaintOptions {
@@ -160,6 +198,7 @@ export function surfacePaintTexture(options: SurfacePaintOptions): THREE.CanvasT
   context.fillStyle = options.upperColor;
   // Factory Olive Drab wraps a few percent of chord under the leading edge.
   context.fillRect(0, canvasY(lowerParam(0.03)), width, height - canvasY(lowerParam(0.03)));
+  if (options.upperColor === PALETTE.aluminium) bareMetalPanels(context, width, height, spanX(options.ribSpacing * 2), height / 16, random);
   if (options.upperColor === PALETTE.oliveDrab) fadeMottle(context, 0, height / 2, width, height / 2, random, 140);
   if (options.lowerColor === PALETTE.oliveDrab) fadeMottle(context, 0, 0, width, height / 2, random, 140);
 
@@ -348,10 +387,10 @@ export function insigniaDecal(): DecalArt {
   return waterSlideDecal(canvas, 12);
 }
 
-/** Fuselage codes in the medium-grey stencil the 91st BG used on camouflaged aircraft. */
-export function codeLettersDecal(letters: string): DecalArt {
+/** Fuselage codes: medium grey on camouflage, black on bare metal (303rd BG markings notes, after Freeman). */
+export function codeLettersDecal(letters: string, finish: Finish): DecalArt {
   const [canvas, context] = createCanvas(256 * letters.length, 320);
-  context.fillStyle = PALETTE.codeGray;
+  context.fillStyle = finish === 'naturalMetal' ? PALETTE.stencilBlack : PALETTE.codeGray;
   context.font = '700 300px "DM Mono", Menlo, monospace';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
@@ -359,23 +398,28 @@ export function codeLettersDecal(letters: string): DecalArt {
   return waterSlideDecal(canvas, 10);
 }
 
-/** 91st BG "Triangle A" in white with the group letter in insignia blue, and the tail serial below in yellow. */
-export function tailMarkingDecal(serial: string, aircraftLetter: string): DecalArt {
+/**
+ * 91st BG "Triangle A" with the tail serial and call letter below: on camouflage a white triangle with the letter in
+ * insignia blue and the serial in yellow; on bare metal a black triangle with a white letter and black stencils, as
+ * 42-102509 wears them (reference/photo-91bg-b17g-42-102509.jpg).
+ */
+export function tailMarkingDecal(serial: string, aircraftLetter: string, finish: Finish): DecalArt {
+  const bareMetal = finish === 'naturalMetal';
   const [canvas, context] = createCanvas(512, 760);
-  context.fillStyle = PALETTE.insigniaWhite;
+  context.fillStyle = bareMetal ? PALETTE.stencilBlack : PALETTE.insigniaWhite;
   context.beginPath();
   context.moveTo(256, 20);
   context.lineTo(486, 400);
   context.lineTo(26, 400);
   context.closePath();
   context.fill();
-  context.fillStyle = PALETTE.insigniaBlue;
+  context.fillStyle = bareMetal ? PALETTE.insigniaWhite : PALETTE.insigniaBlue;
   context.font = '800 250px Outfit, Arial, sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText('A', 256, 280);
-  context.fillStyle = PALETTE.tailYellow;
-  context.font = '700 112px "DM Mono", Menlo, monospace';
+  context.fillStyle = bareMetal ? PALETTE.stencilBlack : PALETTE.tailYellow;
+  context.font = `700 ${serial.length > 6 ? 98 : 112}px "DM Mono", Menlo, monospace`;
   context.fillText(serial, 256, 500);
   context.font = '700 170px "DM Mono", Menlo, monospace';
   context.fillText(aircraftLetter, 256, 660);
@@ -595,6 +639,127 @@ export function hatchOutlineTexture(): THREE.CanvasTexture {
   context.beginPath();
   context.roundRect(450, 140, 34, 60, 8);
   context.fill();
+  return finishTexture(canvas);
+}
+
+/**
+ * Flak damage as a modeller paints it over a scratch-built hole: soot scorched out round each strike, the hole itself
+ * black, and its torn edge picked out in bare aluminium where the paint flaked off. Transparent everywhere else.
+ */
+export function flakDamageTexture(seed: number): THREE.CanvasTexture {
+  const size = 512;
+  const [canvas, context] = createCanvas(size, size);
+  const random = seededRandom(seed);
+  const strikes = Array.from({ length: 5 }, () => ({
+    x: size * (0.2 + random() * 0.6), y: size * (0.2 + random() * 0.6), radius: size * (0.025 + random() * 0.05),
+  }));
+  for (const strike of strikes) {
+    const soot = context.createRadialGradient(strike.x, strike.y, strike.radius, strike.x, strike.y, strike.radius * 4.2);
+    soot.addColorStop(0, 'rgba(18,16,14,0.85)');
+    soot.addColorStop(1, 'rgba(18,16,14,0)');
+    context.fillStyle = soot;
+    context.fillRect(0, 0, size, size);
+  }
+  for (const strike of strikes) {
+    const points = 11;
+    const outline = Array.from({ length: points }, (_, index) => {
+      const angle = (index / points) * Math.PI * 2;
+      const reach = strike.radius * (0.6 + random() * 0.8);
+      return [strike.x + Math.cos(angle) * reach, strike.y + Math.sin(angle) * reach] as const;
+    });
+    context.beginPath();
+    outline.forEach(([x, y], index) => (index === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
+    context.closePath();
+    context.lineWidth = 5;
+    context.strokeStyle = PALETTE.aluminium;
+    context.stroke();
+    context.fillStyle = '#060606';
+    context.fill();
+  }
+  return finishTexture(canvas);
+}
+
+/**
+ * The kit box's lid: a night-blue sky with searchlight beams, the nose art as the box painting, and the title band, the
+ * way 1950s kit boxes put the subject's art over the name.
+ */
+export function kitBoxLidTexture(): THREE.CanvasTexture {
+  if (!noseArtPainting) throw new Error('Nose art not loaded: await loadNoseArt() before building the kit box');
+  const [canvas, context] = createCanvas(1536, 1024);
+  const sky = context.createLinearGradient(0, 0, 0, 1024);
+  sky.addColorStop(0, '#0d1b33');
+  sky.addColorStop(0.7, '#3b4d6b');
+  sky.addColorStop(1, '#c9864a');
+  context.fillStyle = sky;
+  context.fillRect(0, 0, 1536, 1024);
+  context.fillStyle = 'rgba(255,240,200,0.1)';
+  for (const [x, lean] of [[220, 0.5], [1250, -0.4], [900, 0.2]]) {
+    context.beginPath();
+    context.moveTo(x - 30, 1024);
+    context.lineTo(x + 30, 1024);
+    context.lineTo(x + lean * 900 + 120, 0);
+    context.lineTo(x + lean * 900 - 120, 0);
+    context.fill();
+  }
+  const artHeight = 760;
+  const artWidth = (noseArtPainting.naturalWidth / noseArtPainting.naturalHeight) * artHeight;
+  context.drawImage(noseArtPainting, 1536 - artWidth - 60, 40, artWidth, artHeight);
+  context.fillStyle = PALETTE.tailYellow;
+  context.fillRect(0, 820, 1536, 204);
+  context.fillStyle = '#1b1c1d';
+  context.font = '800 112px Outfit, Arial, sans-serif';
+  context.textBaseline = 'middle';
+  context.fillText('B-17G FLYING FORTRESS', 48, 905);
+  context.font = '700 52px "DM Mono", Menlo, monospace';
+  context.fillText('1/72 · 91st BG · 1944', 52, 985);
+  context.font = '700 64px "DM Mono", Menlo, monospace';
+  context.fillStyle = '#f3ebe0';
+  context.fillText('KIT No. 17', 52, 80);
+  return finishTexture(canvas);
+}
+
+/** One of the box's sides: the title in a band, plain card round it. */
+export function kitBoxSideTexture(): THREE.CanvasTexture {
+  const [canvas, context] = createCanvas(1024, 160);
+  context.fillStyle = '#0d1b33';
+  context.fillRect(0, 0, 1024, 160);
+  context.fillStyle = PALETTE.tailYellow;
+  context.fillRect(0, 100, 1024, 60);
+  context.fillStyle = '#f3ebe0';
+  context.font = '800 60px Outfit, Arial, sans-serif';
+  context.textBaseline = 'middle';
+  context.fillText('B-17G FLYING FORTRESS', 24, 52);
+  context.fillStyle = '#1b1c1d';
+  context.font = '700 34px "DM Mono", Menlo, monospace';
+  context.fillText('1/72 SCALE PLASTIC KIT', 24, 131);
+  return finishTexture(canvas);
+}
+
+/** The decal sheet as it came in the box: every marking the lead wears, laid out on its blue backing paper. */
+export function decalSheetTexture(arts: DecalArt[]): THREE.CanvasTexture {
+  const width = 2048;
+  const height = 1400;
+  const [canvas, context] = createCanvas(width, height);
+  context.fillStyle = '#d9dde3';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#20406e';
+  context.font = '700 40px "DM Mono", Menlo, monospace';
+  context.fillText('B-17G  ·  1/72  ·  DECALS  ·  91st BG', 40, 70);
+  // Shelf-pack the pieces in rows, each scaled to the row height.
+  const rowHeight = 300;
+  let x = 40;
+  let y = 110;
+  for (const art of arts) {
+    const image = art.map.image as HTMLCanvasElement;
+    const scale = Math.min(rowHeight / image.height, 1);
+    const pieceWidth = image.width * scale;
+    if (x + pieceWidth > width - 40) {
+      x = 40;
+      y += rowHeight + 30;
+    }
+    context.drawImage(image, x, y, pieceWidth, image.height * scale);
+    x += pieceWidth + 30;
+  }
   return finishTexture(canvas);
 }
 

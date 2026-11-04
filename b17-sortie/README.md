@@ -24,8 +24,10 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Wing, tailplane, fin | NACA sections lofted along the traced planform (0018 root to 0010 tip on the wing) |
 | Nacelles | Cowl, cowl flaps and nacelle body lofted per engine and tucked into the wing surface |
 | Propellers | Three twisted Hamilton Standard blades with yellow tips |
-| Paint | Olive Drab 41 over Neutral Gray 43 with panel lines, rivets, fade, de-icer boots and exhaust soot, brushed on: strokes along each part with bristle grooves and paint built up at their edges |
-| Markings | Water-slide decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial, nose art on the port side under the navigator's windows, switchable between "Hallucinatin' Hattie" (a 1944-style calendar girl on a typewriter whose ticker tape curls into her name banner) and "King of Hearts" (a crowned playing card over a script banner) and a 24-mission tally of yellow bombs under the pilot's window, each printed on a glossy carrier film that stands off the paint with a lip and a hairline of shadow |
+| Paint | Olive Drab 41 over Neutral Gray 43 (bare aluminium on 42-102509, with an Olive Drab anti-glare panel ahead of the windscreen) with panel lines at the skin joints traced from the Emoscopes side view, rivets, fade, de-icer boots and exhaust soot, brushed on: strokes along each part with bristle grooves and paint built up at their edges |
+| Markings | Water-slide decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial (42-97261, the first B-17G fitted with the Cheyenne tail), nose art on the port side under the navigator's windows, switchable between "Hallucinatin' Hattie" (a 1944-style calendar girl on a typewriter whose ticker tape curls into her name banner) and "King of Hearts" (a crowned playing card over a script banner) and a 24-mission tally of yellow bombs under the pilot's window, each printed on a glossy carrier film that stands off the paint with a lip and a hairline of shadow |
+| Wingmen | Two real 91st BG ships, each with its own markings and production features: 42-31909 "Nine-O-Nine" (323rd BS, `OR-R`, Olive Drab) and 42-102509 "The Liberty Run" (401st BS, `LL-A`, bare metal with black stencils, from the reference photograph), both with the original "stinger" tail: a lower glazed cab sloping down to a tapered tail end, the guns out through canvas boots |
+| Battle damage | On the bomb run a burst under the lead's right wing holes the skin by the bomb bay and the wing beside No. 3 engine (painted holes with scorched soot and torn bare-metal edges); No. 3 trails charcoal cotton smoke and is feathered, its propeller stopped with the blades edge-on |
 | Clouds, contrails, flak | Cotton wool: lumpy tufts with a halo of tangled fibres; contrails are tufts pulled out thin behind each turbo and fattening aft, flak is wool dyed near black |
 | Turrets | Sperry top turret; Sperry ball turret to its handbook's installation drawing (glazed end bells, sighting window, ring gear, hanger, gunner folded as figure 39 shows); Bendix chin turret; Cheyenne tail (photographs of 44-85734 "Liberty Belle"): a flat-sided glazed cab with two panes a side and a square rear window, over an armoured gun-mount dome set in the curled-in end of the tail cone, its guns in two vertical slots; cheek, waist and radio-hatch guns |
 | Guns | Thirteen Browning AN/M2 .50s at true size (1.44 m, TM 9-225): receiver with feed cover, feedways and slide handle, perforated cooling jacket, flash hider; hand-held guns add spade grips, butterfly trigger and ring-and-bead sight |
@@ -39,6 +41,12 @@ The exploded view (**E**) pulls the lead ship apart along the lines it was built
 
 The cutaway (**C**) peels the lead ship's starboard skin, frames and bulkheads back to the centreline and labels each crew station. The skin is clipped in the shader, so the cut follows the aircraft as it banks and the turrets keep turning with their gunners inside. Equipment hung on the starboard wall hides once the cut passes it. With the skin on, the crew show through glazed window openings.
 
+On load the film opens on the **hardstand**: the lead stands on its wheels (main gear and tail wheel let down, three-point stance) on a painted concrete card on the studio floor while four of the crew walk out as replacement figures, the officers swinging up through the forward entrance hatch and the gunners stepping in at the main door. The engines start, and the animator runs the ship along the taxiway, lifts it off, folds the undercarriage and flies it round onto its stand. **H** replays it.
+
+In the cutaway, clicking a crew label walks the camera through the ship to that station along the crew's own way: past the navigator, through bulkhead 4 and the crawlway, up behind the pilots, round the top turret, down the catwalk step between the bomb racks, through the radio room, past the ball turret and up the tail. Close in, amber rings mark named fittings; hovering one gives its name and the Pilot's Manual figure it was modelled from.
+
+**K** puts the finished lead on a turntable on the set floor beside its kit box (the nose art as the box painting) and the decal sheet its markings came from. **P** stops the film, clears the overlays and saves the frame re-rendered at three times the screen's resolution; **M** switches on the foley: a synthesised engine drone (three engines once No. 3 is feathered), gun bursts that land on the exposures, flak thumps and a shutter click per frame.
+
 The sortie loop runs 72 seconds:
 
 | Phase | What happens |
@@ -47,6 +55,7 @@ The sortie loop runs 72 seconds:
 | Fighter attack | Unseen fighters press in; every gun in the box fires short bursts |
 | Initial point | Turn onto the run, bomb bay doors open, flak starts |
 | Bomb run | Held level through heavy flak |
+| Flak hit | A burst under the right wing holes the lead and hits No. 3 engine, which smokes and is feathered |
 | Bombs away | Twelve 500 lb bombs leave in train from each ship |
 | Rally | Doors close, banked turn off the target |
 | Withdrawal | Flak thins out behind |
@@ -69,6 +78,11 @@ npm run build      # typecheck + production build into dist/
 | C | cutaway of the lead ship |
 | E | exploded view of the lead ship |
 | N | switch the nose art between Hallucinatin' Hattie and the King of Hearts card (also in the controls panel) |
+| H | replay the hardstand: boarding and take-off |
+| K | kit box and turntable |
+| P | photo mode: save a high-resolution still (Esc leaves) |
+| M | sound on / off |
+| Click a crew label | walk there through the cutaway |
 | L | record a render log: about 40 s, then saves a `.json` with this machine's GPU, frame timings and what each cost adds |
 | Drag, scroll | orbit and zoom |
 
@@ -80,5 +94,5 @@ Under the controls, a frame-rate readout (average of the last second, and the wo
 - `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
 - `src/scene/effects.ts` runs flak bursts, contrails and falling bombs with their rigs, `src/scene/stop-motion.ts` times the exposures and their hand spacing; `src/scene/gunnery.ts` fires the guns. `src/scene/set.ts` also builds the workshop props.
-- `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.
+- `src/sortie.ts` is the mission timeline. `src/scene/livery.ts` holds each ship's markings, finish and tail gun position. `src/scene/hardstand.ts` runs the prologue, `src/scene/kit-bench.ts` the turntable, `src/walkthrough.ts` the walk through the cutaway, `src/audio/foley.ts` the sound. `src/main.ts` wires the formation, camera, views and adaptive quality.
 - `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view. `src/render/miniature.ts` adds the brushwork, shelf dust and the cotton wool, `src/render/film-gate.ts` the grain, gate weave and vignette, `src/render/render-log.ts` records the render log.

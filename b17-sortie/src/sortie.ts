@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PhaseId = 'cruise' | 'fighters' | 'initial-point' | 'bomb-run' | 'bombs-away' | 'rally' | 'withdrawal';
+export type PhaseId = 'cruise' | 'fighters' | 'initial-point' | 'bomb-run' | 'flak-hit' | 'bombs-away' | 'rally' | 'withdrawal';
 
 export interface Phase {
   id: PhaseId;
@@ -15,7 +15,8 @@ export const PHASES: readonly Phase[] = [
   { id: 'cruise', label: 'Formation cruise', detail: 'Combat box at altitude, gunners scanning for fighters.', start: 0, end: 10 },
   { id: 'fighters', label: 'Fighter attack', detail: 'Fighters press in on the box. Every gun that bears answers; the box holds formation for mutual fire.', start: 10, end: 24 },
   { id: 'initial-point', label: 'Initial point', detail: 'Turn onto the bomb-run heading. Bomb bay doors open.', start: 24, end: 32 },
-  { id: 'bomb-run', label: 'Bomb run', detail: 'Bombardier flies the aircraft through the Norden sight. No evasive action through the flak.', start: 32, end: 44 },
+  { id: 'bomb-run', label: 'Bomb run', detail: 'Bombardier flies the aircraft through the Norden sight. No evasive action through the flak.', start: 32, end: 39 },
+  { id: 'flak-hit', label: 'Flak hit', detail: 'A burst under the right wing holes the skin and hits No. 3 engine. It smokes, and the pilot feathers it. The run holds.', start: 39, end: 44 },
   { id: 'bombs-away', label: 'Bombs away', detail: 'Twelve 500 lb bombs released in train.', start: 44, end: 48 },
   { id: 'rally', label: 'Rally', detail: 'Doors closed, diving turn off the target to re-form.', start: 48, end: 58 },
   { id: 'withdrawal', label: 'Withdrawal', detail: 'Heading home, flak thinning out behind.', start: 58, end: 72 },
@@ -28,6 +29,11 @@ const BOMB_RELEASE_START = 44.3;
 const GUNFIRE = { opens: [10.6, 11.6], ceases: [22.4, 23.6] } as const;
 const BOMB_RELEASE_INTERVAL = 0.14;
 const DOORS_OPEN = [26, 28.5] as const;
+/** The burst that hits the lead, the smoke from No. 3 engine until it is feathered and stops, and when its prop stops. */
+const FLAK_HIT = { at: 39.3, smokeUntil: 47, featheredAt: 40.8 } as const;
+/** Film time of the burst that hits the lead. */
+export const FLAK_HIT_SECONDS = FLAK_HIT.at;
+
 const DOORS_CLOSE = [49, 51.5] as const;
 const RALLY_TURN = [49.5, 57.5] as const;
 /** Mission clock reading when the loop starts: four hours and ten minutes after take-off. */
@@ -44,6 +50,12 @@ export interface SortieState {
   flakRate: number;
   /** 0..1: how hard the formation's gunners are firing at the attacking fighters. */
   gunfire: number;
+  /** The lead has been hit: its skin is holed. */
+  flakHit: boolean;
+  /** No. 3 engine trails smoke. */
+  engineSmoking: boolean;
+  /** No. 3 engine's propeller is feathered and stopped. */
+  propellerFeathered: boolean;
   /** Positive is right wing down. */
   bankRadians: number;
   pitchRadians: number;
@@ -88,6 +100,9 @@ export function sortieStateAt(time: number): SortieState {
     bombsReleased,
     flakRate: Math.max(flakRate, 0),
     gunfire: smooth(GUNFIRE.opens[0], GUNFIRE.opens[1], time) * (1 - smooth(GUNFIRE.ceases[0], GUNFIRE.ceases[1], time)),
+    flakHit: time >= FLAK_HIT.at,
+    engineSmoking: time >= FLAK_HIT.at && time < FLAK_HIT.smokeUntil,
+    propellerFeathered: time >= FLAK_HIT.featheredAt,
     bankRadians,
     pitchRadians,
     headingDegrees,

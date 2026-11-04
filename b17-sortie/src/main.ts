@@ -6,16 +6,24 @@ import {
   type VirtualLight,
 } from './render/studio';
 import { buildB17, createBomb, type B17 } from './scene/b17';
+import { LEAD_LIVERY, WINGMAN_LIVERIES } from './scene/livery';
+import type { CrewStation } from './scene/interior';
+import { Walkthrough } from './walkthrough';
+import { Hardstand, PROLOGUE_ENGINES_START_SECONDS, PROLOGUE_LIFT_OFF_SECONDS } from './scene/hardstand';
+import { Foley } from './audio/foley';
+import { KitBench } from './scene/kit-bench';
+import { fittingHotspots } from './scene/interior/hotspots';
+import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
-import { BombTrain, Contrails, FlakField } from './scene/effects';
+import { BombTrain, Contrails, ENGINE_SMOKE_LOOK, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { STOP_MOTION_FPS, StopMotionClock } from './scene/stop-motion';
-import { loadNoseArt, type NoseArtChoice } from './scene/textures';
+import { codeLettersDecal, insigniaDecal, loadNoseArt, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, tailMarkingDecal, type NoseArtChoice } from './scene/textures';
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, type DisplayStand } from './scene/set';
-import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
+import { BOMB_COUNT, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ShowMode, type ViewMode } from './ui/ui';
@@ -115,13 +123,13 @@ interface FormationShip {
 }
 
 const formationSlots = [
-  { position: new THREE.Vector3(0, 3.6, 0), lag: 0, plaque: { title: 'B-17G FLYING FORTRESS', subtitle: '91st BG · 322nd BS · LG-K' } },
-  { position: new THREE.Vector3(-7.5, 5.3, -7.2), lag: 0.45, plaque: null },
-  { position: new THREE.Vector3(-9.0, 2.3, -1.2), lag: 0.8, plaque: null },
+  { position: new THREE.Vector3(0, 3.6, 0), lag: 0, livery: LEAD_LIVERY, plaque: { title: 'B-17G FLYING FORTRESS', subtitle: '91st BG · 322nd BS · LG-K' } },
+  { position: new THREE.Vector3(-7.5, 5.3, -7.2), lag: 0.45, livery: WINGMAN_LIVERIES[0], plaque: null },
+  { position: new THREE.Vector3(-9.0, 2.3, -1.2), lag: 0.8, livery: WINGMAN_LIVERIES[1], plaque: null },
 ];
 
 const formation: FormationShip[] = formationSlots.map((slot, index) => {
-  const aircraft = buildB17({ crewDetail: index === 0 ? 'high' : 'low', opensUp: index === 0 });
+  const aircraft = buildB17({ crewDetail: index === 0 ? 'high' : 'low', opensUp: index === 0, livery: slot.livery });
   const holder = new THREE.Group();
   holder.position.copy(slot.position);
   holder.scale.setScalar(MODEL_SCALE);
@@ -139,15 +147,20 @@ const formation: FormationShip[] = formationSlots.map((slot, index) => {
 const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
 const flak = new FlakField();
 const contrails = new Contrails(contrailEmitters.length);
+/** Oil smoke from the lead's hit engine. */
+const engineSmoke = new Contrails(1, ENGINE_SMOKE_LOOK);
+const engineSmokeEmitter = [new THREE.Vector3()];
 const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, bombs.root, gunnery.root);
+scene.add(flak.root, contrails.root, engineSmoke.root, bombs.root, gunnery.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
-const callouts = new Callouts(calloutRoot, formation[0].aircraft.root, formation[0].aircraft.crewStations);
+const callouts = new Callouts(calloutRoot, formation[0].aircraft.root, formation[0].aircraft.crewStations, true, walkToStation);
+const walkthrough = new Walkthrough(formation[0].aircraft.root);
+const hotspots = new Hotspots(calloutRoot, formation[0].aircraft.root, fittingHotspots());
 // Exploded view of the lead ship: compartments, wings, engines, tail surfaces and turrets pulled apart and named.
 const exploded = new ExplodedView(formation[0].aircraft.assemblies);
 
@@ -194,10 +207,13 @@ depthOfField.uFocusRange.value = FOCUS_RANGE.exterior;
 const filmGate = new FilmGatePass();
 pipeline.composer.addPass(filmGate);
 
+/** How close the orbit may come to its target: outside the ship, and inside it once a walk has taken the camera in. */
+const ORBIT_MIN_DISTANCE = { outside: 6, inside: 0.05 } as const;
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 6;
+controls.minDistance = ORBIT_MIN_DISTANCE.outside;
 controls.maxDistance = 40;
 controls.maxPolarAngle = 1.72;
 controls.target.set(0.3, 3.9, 0);
@@ -208,6 +224,7 @@ interface CameraTween { fromTarget: THREE.Vector3; toTarget: THREE.Vector3; from
 let cameraTween: CameraTween | null = null;
 controls.addEventListener('start', () => {
   cameraTween = null;
+  walkthrough.cancel();
   bumpTripod();
 });
 
@@ -319,6 +336,7 @@ function applyView(next: ViewMode): void {
   set.sweep.visible = next === 'studio';
   set.practicalLights.forEach((light, index) => { light.intensity = next === 'lab' ? practicalIntensities[index] : 0; });
   contrails.setStudioMode(next === 'studio');
+  engineSmoke.setStudioMode(next === 'studio');
   document.body.classList.toggle('is-studio', next === 'studio');
   ui.setView(next);
 }
@@ -354,13 +372,14 @@ function switchView(next: ViewMode): void {
   }, VEIL_MS);
 }
 
-// Nose art: every ship in the box carries the same artwork, switched together.
+// Nose art: only the lead carries it; the wingmen are real aircraft whose own art is not modelled.
 
 let noseArt: NoseArtChoice = 'pinup';
 
 function setNoseArt(choice: NoseArtChoice): void {
   noseArt = choice;
   for (const ship of formation) {
+    if (!ship.aircraft.noseArt) continue;
     for (const [option, decal] of Object.entries(ship.aircraft.noseArt)) decal.visible = option === choice;
   }
   ui.setNoseArt(choice);
@@ -369,6 +388,101 @@ function setNoseArt(choice: NoseArtChoice): void {
 // Playback.
 
 let sortieTime = 0;
+
+// The prologue: the lead boards on its hardstand and takes off onto its stand; it runs once on load, and again on H.
+const foley = new Foley();
+
+// The kit bench: the finished lead on a turntable on the set floor, by its box and decal sheet.
+const kitBench = new KitBench(formation[0].aircraft, MODEL_SCALE, [
+  insigniaDecal(), codeLettersDecal(LEAD_LIVERY.codes, LEAD_LIVERY.finish), codeLettersDecal(LEAD_LIVERY.letter, LEAD_LIVERY.finish),
+  tailMarkingDecal(LEAD_LIVERY.tailSerial, LEAD_LIVERY.letter, LEAD_LIVERY.finish), noseArtDecal('pinup'), noseArtDecal('card'), missionTallyDecal(MISSIONS_FLOWN),
+]);
+scene.add(kitBench.root);
+/** Film seconds the lead has been on the turntable, or null while it flies. */
+let kitTime: number | null = null;
+const KIT_SHOT = { target: KitBench.focus, spherical: new THREE.Spherical(21, 1.05, 0.5) };
+
+function setKitBench(shown: boolean): void {
+  if (shown && prologueTime !== null) finishPrologue();
+  if (shown && show !== 'exterior') setShow('exterior');
+  kitTime = shown ? 0 : null;
+  kitBench.setShown(shown);
+  formation[0].stand.root.visible = !shown;
+  formation[0].aircraft.landingGear.setExtension(shown ? 1 : 0);
+  ui.setKitBench(shown);
+  tweenCamera(shown ? KIT_SHOT : FORMATION_SHOT);
+}
+
+/** Puts the lead on the turntable over whatever the formation gave it this exposure. */
+function stepKitBench(deltaSec: number): void {
+  if (kitTime === null) return;
+  kitTime += deltaSec;
+  const pose = kitBench.update(kitTime);
+  formation[0].holder.position.copy(pose.position);
+  formation[0].holder.rotation.copy(pose.rotation);
+}
+
+async function setSound(enabled: boolean): Promise<void> {
+  await foley.setEnabled(enabled);
+  ui.setSound(foley.enabled);
+}
+
+const hardstand = new Hardstand(formation[0].aircraft, MODEL_SCALE, formationSlots[0].position);
+scene.add(hardstand.root);
+/** Film seconds into the prologue, or null once the lead is on its stand. */
+let prologueTime: number | null = null;
+/** Where No. 1 to No. 4's propellers stand while the engines are cold. */
+const COLD_PROPELLER_ANGLES = [0.5, 1.4, 2.2, 0.9];
+const HARDSTAND_SHOT = { target: new THREE.Vector3(-10, 0.9, 10), spherical: new THREE.Spherical(13, 1.22, 0.75) };
+const FORMATION_SHOT = { target: new THREE.Vector3(0.3, 3.9, 0), spherical: new THREE.Spherical(16, 1.36, 0.95) };
+
+/** On load the prologue holds this long first, while the boarding men are still being meshed. */
+const PROLOGUE_LOAD_HOLD = 3;
+
+function startPrologue(hold = 0): void {
+  if (kitTime !== null) setKitBench(false);
+  if (show !== 'exterior') setShow('exterior');
+  jumpToPhase(0);
+  prologueTime = -hold;
+  playing = true;
+  ui.setPlaying(true);
+  hardstand.setShown(true);
+  formation[0].stand.root.visible = false;
+  for (const man of formation[0].aircraft.crew) man.mesh.visible = false;
+  tweenCamera(HARDSTAND_SHOT);
+}
+
+function finishPrologue(): void {
+  prologueTime = null;
+  hardstand.setShown(false);
+  formation[0].stand.root.visible = true;
+  formation[0].aircraft.landingGear.setExtension(0);
+  for (const man of formation[0].aircraft.crew) man.mesh.visible = true;
+}
+
+/** Poses the lead from the prologue over whatever the formation gave it this exposure. */
+function stepPrologue(deltaSec: number): void {
+  if (prologueTime === null) return;
+  const before = prologueTime;
+  prologueTime += deltaSec;
+  const frame = hardstand.update(prologueTime);
+  const { aircraft, holder } = formation[0];
+  holder.position.copy(frame.position);
+  holder.rotation.copy(frame.rotation);
+  aircraft.landingGear.setExtension(frame.gearExtension);
+  for (const man of aircraft.crew) man.mesh.visible = frame.crewAboard;
+  if (!frame.enginesRunning) aircraft.propellers.forEach((propeller, index) => { propeller.rotation.x = COLD_PROPELLER_ANGLES[index]; });
+  if (before < PROLOGUE_LIFT_OFF_SECONDS && prologueTime >= PROLOGUE_LIFT_OFF_SECONDS) tweenCamera(FORMATION_SHOT);
+  if (frame.finished) finishPrologue();
+}
+
+function tweenCamera(shot: { target: THREE.Vector3; spherical: THREE.Spherical }): void {
+  cameraTween = {
+    fromTarget: controls.target.clone(), toTarget: shot.target.clone(),
+    fromPosition: camera.position.clone(), toPosition: new THREE.Vector3().setFromSpherical(shot.spherical).add(shot.target), progress: 0,
+  };
+  bumpTripod();
+}
 let playing = true;
 
 function resetEffects(): void {
@@ -379,6 +493,7 @@ function resetEffects(): void {
 }
 
 function jumpToPhase(index: number): void {
+  if (prologueTime !== null && index !== 0) finishPrologue();
   const wrapped = (index + PHASES.length) % PHASES.length;
   sortieTime = PHASES[wrapped].start;
   resetEffects();
@@ -389,7 +504,11 @@ let show: ShowMode = 'exterior';
 
 /** Cutaway and exploded are exclusive: opening one closes the other, and each brings its own camera shot. */
 function setShow(mode: ShowMode): void {
+  if (prologueTime !== null && mode !== 'exterior') finishPrologue();
+  if (kitTime !== null && mode !== 'exterior') setKitBench(false);
   show = mode;
+  walkthrough.cancel();
+  controls.minDistance = ORBIT_MIN_DISTANCE.outside;
   cutaway.setOpen(mode === 'cutaway');
   exploded.setOpen(mode === 'exploded');
   ui.setShow(mode);
@@ -405,13 +524,22 @@ function setShow(mode: ShowMode): void {
   bumpTripod();
 }
 
+/** Opens the cutaway and walks the camera along the crew's route to the station whose callout was clicked. */
+function walkToStation(station: CrewStation): void {
+  if (show !== 'cutaway') setShow('cutaway');
+  cameraTween = null;
+  controls.minDistance = ORBIT_MIN_DISTANCE.inside;
+  walkthrough.walkTo(station, camera.position, controls.target);
+}
+
 const ui = new Ui(uiRoot, {
-  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt,
+  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null),
 });
 const fpsMeter = new FpsMeter(ui.meterSlot);
 ui.setShow('exterior');
 setNoseArt('pinup');
 applyView('lab');
+startPrologue(PROLOGUE_LOAD_HOLD);
 
 addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLButtonElement && (event.key === ' ' || event.key === 'Enter')) return;
@@ -431,13 +559,23 @@ addEventListener('keydown', (event) => {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
   } else if (event.key === 'n' || event.key === 'N') {
     setNoseArt(noseArt === 'pinup' ? 'card' : 'pinup');
+  } else if (event.key === 'k' || event.key === 'K') {
+    setKitBench(kitTime === null);
+  } else if (event.key === 'p' || event.key === 'P') {
+    takePhoto();
+  } else if (event.key === 'Escape' && photoMode) {
+    leavePhotoMode();
+  } else if (event.key === 'm' || event.key === 'M') {
+    void setSound(!foley.enabled);
+  } else if (event.key === 'h' || event.key === 'H') {
+    startPrologue();
   } else if (event.key === 'l' || event.key === 'L') {
     renderLog.start();
   }
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.root, flak.root];
+const cottonSet = [set.clouds, contrails.root, engineSmoke.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -477,8 +615,12 @@ const scratchPosition = new THREE.Vector3();
 const scratchQuaternion = new THREE.Quaternion();
 const standMount = new THREE.Vector3(9.0 - STAND_MOUNT_D, -1.22, 0);
 
+/** Where No. 3's feathered propeller stops, and how far its blades turn about their length to stand edge-on. */
+const FEATHERED_PROPELLER = { restAngle: 0.4, bladeTurn: 1.25 } as const;
+
 function animateShip(ship: FormationShip, state: SortieState, elapsed: number, deltaSec: number, shipIndex: number): void {
   const { aircraft, holder } = ship;
+  const damaged = shipIndex === 0;
   // Each ship holds its own slightly different station in the box.
   const wander = shipIndex * 1.7;
   holder.rotation.set(
@@ -494,7 +636,17 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
     const random = stopMotion.random;
     ship.handling.offset.set(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(2 * HANDLING.offset);
     ship.handling.turn.set((random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn);
-    for (const propeller of aircraft.propellers) propeller.rotation.x = random() * Math.PI * 2;
+    for (const propeller of aircraft.propellers) {
+      if (propeller === aircraft.battleDamage.propeller && damaged && state.propellerFeathered) continue;
+      propeller.rotation.x = random() * Math.PI * 2;
+    }
+  }
+  // Only the lead is hit: its holes show, and No. 3's propeller stops with its blades turned edge-on to the air.
+  for (const hole of aircraft.battleDamage.holes) hole.visible = damaged && state.flakHit;
+  const feathered = damaged && state.propellerFeathered;
+  if (feathered) aircraft.battleDamage.propeller.rotation.x = FEATHERED_PROPELLER.restAngle;
+  for (const blade of aircraft.battleDamage.propeller.children) {
+    if (blade.userData.blade) blade.rotation.y = feathered ? FEATHERED_PROPELLER.bladeTurn : 0;
   }
   holder.position.x = formationSlots[shipIndex].position.x + ship.handling.offset.x;
   holder.position.y += ship.handling.offset.y;
@@ -503,7 +655,7 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
   holder.rotation.y += ship.handling.turn.y;
   holder.rotation.z += ship.handling.turn.z;
 
-  const onRun = state.phase.id === 'bomb-run' || state.phase.id === 'bombs-away';
+  const onRun = state.phase.id === 'bomb-run' || state.phase.id === 'flak-hit' || state.phase.id === 'bombs-away';
   aircraft.topTurret.yaw.rotation.y = Math.sin(elapsed * 0.31 + wander) * (onRun ? 0.6 : 1.4) + Math.sin(elapsed * 0.83) * 0.2;
   aircraft.topTurret.pitch.rotation.z = 0.12 + Math.sin(elapsed * 0.47 + wander) * 0.1;
   aircraft.ballTurret.yaw.rotation.y = elapsed * 0.35 + wander;
@@ -566,6 +718,48 @@ function resize(): void {
 }
 addEventListener('resize', resize);
 resize();
+
+// Photo mode: the film stops on the frame, the overlays step aside, and each press of P saves the frame re-rendered at
+// several times the screen's resolution with every quality feature back on.
+
+/** The still's pixels per CSS pixel, before the GPU's largest texture caps it. */
+const PHOTO_PIXEL_RATIO = 3;
+let photoMode = false;
+let playingBeforePhoto = true;
+
+function takePhoto(): void {
+  if (!photoMode) {
+    photoMode = true;
+    playingBeforePhoto = playing;
+    playing = false;
+    ui.setPlaying(false);
+    document.body.classList.add('is-photo');
+  }
+  const shed = featuresShed;
+  applyFeaturesShed(0);
+  const ratio = Math.min(PHOTO_PIXEL_RATIO, renderer.capabilities.maxTextureSize / Math.max(innerWidth, innerHeight));
+  pipeline.resize(innerWidth, innerHeight, ratio);
+  const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
+  floorReflection.setSize(drawingBuffer.x, drawingBuffer.y);
+  renderer.shadowMap.needsUpdate = true;
+  floorReflection.render(renderer, scene, camera, focusPoint);
+  pipeline.composer.render(0);
+  // Read straight after drawing, before the browser may clear the drawing buffer.
+  const link = document.createElement('a');
+  link.download = `b17-sortie-${drawingBuffer.x}x${drawingBuffer.y}.png`;
+  link.href = renderer.domElement.toDataURL('image/png');
+  link.click();
+  applyFeaturesShed(shed);
+  resize();
+  cameraMoved = true;
+}
+
+function leavePhotoMode(): void {
+  photoMode = false;
+  document.body.classList.remove('is-photo');
+  playing = playingBeforePhoto;
+  ui.setPlaying(playing);
+}
 
 function applyFeaturesShed(count: number): void {
   featuresShed = count;
@@ -672,7 +866,8 @@ function exposeFrame(exposureSec: number): void {
   const deltaSec = playing ? stopMotion.space(exposureSec) : 0;
   filmTime += deltaSec;
   const previousTime = sortieTime;
-  sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
+  // The sortie holds at the start of the cruise while the lead is still on the hardstand.
+  if (prologueTime === null) sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
   if (sortieTime < previousTime) resetEffects();
   const leadState = sortieStateAt(sortieTime);
   exploded.update(exposureSec);
@@ -684,6 +879,8 @@ function exposeFrame(exposureSec: number): void {
     gunnery.updateShip(index, state.time, state.gunfire, deltaSec);
   });
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
+  if (prologueTime !== null) stepPrologue(deltaSec);
+  stepKitBench(deltaSec);
 
   if (deltaSec > 0) setCottonFrame(stopMotion.frame);
   driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45, stopMotion.random);
@@ -694,10 +891,17 @@ function exposeFrame(exposureSec: number): void {
   formation[0].holder.updateMatrixWorld(true);
   cutaway.update(exposureSec);
   updateLeadCabinShadows();
-  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random);
+  // No trails while the lead is on the ground or climbing out; the box forms up behind it.
+  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null);
+  const damage = formation[0].aircraft.battleDamage;
+  damage.smokePort.getWorldPosition(engineSmokeEmitter[0]);
+  engineSmoke.update(deltaSec, AIR_DRIFT_SPEED, engineSmokeEmitter, stopMotion.random, leadState.engineSmoking);
+  if (previousTime < FLAK_HIT_SECONDS && sortieTime >= FLAK_HIT_SECONDS) flak.burstAt(damage.burstPoint.getWorldPosition(scratchPosition));
   if (deltaSec > 0) {
     flickerLamps();
     filmGate.advance(stopMotion.random);
+    const leadEngines = prologueTime !== null && prologueTime < PROLOGUE_ENGINES_START_SECONDS ? 0 : leadState.propellerFeathered ? 3 : 4;
+    foley.expose({ enginesRunning: leadEngines, gunfire: leadState.gunfire, flakBursts: flak.takeBurstCount() }, stopMotion.random);
   }
   renderer.shadowMap.needsUpdate = !shadowMapHeld;
 }
@@ -711,6 +915,10 @@ function frame(timestamp: number): void {
   timer.update(timestamp);
   const exposureSec = stopMotion.advance(Math.min(timer.getDelta(), MAX_FRAME_SEC));
   if (exposureSec > 0) stepCameraTween(exposureSec);
+  if (exposureSec > 0 && walkthrough.active) {
+    walkthrough.step(exposureSec, camera.position, controls.target);
+    cameraMoved = true;
+  }
   liftTripodBump();
   controls.update();
   applyTripodBump(exposureSec > 0);
@@ -730,6 +938,7 @@ function frame(timestamp: number): void {
   depthOfField.uFocusDistance.value = camera.position.distanceTo(controls.target);
   callouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(cutaway.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
   assemblyCallouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(exploded.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
+  hotspots.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(cutaway.amount, 0.6, 1));
 
   stepAdaptiveQuality(drawnSec);
   floorReflection.render(renderer, scene, camera, focusPoint);

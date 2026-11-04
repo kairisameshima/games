@@ -10,19 +10,22 @@ import {
 import { mergeRigidMeshes, mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
-import { CRAWLWAY, TAIL } from './interior/layout';
+import { CRAWLWAY, TAIL, WAIST } from './interior/layout';
+import { rod } from './interior/parts';
+import { waistFloorHeight } from './interior/structure';
 import { interiorMaterials } from './interior/materials';
 import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt } from './assemblies';
 import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
 import type { MountedGun } from './gunnery';
 import { addM2, type M2Gun } from './m2';
 import { WindowCutouts } from './window-cutouts';
+import { LEAD_LIVERY, type Finish, type Livery, type TailGunPosition } from './livery';
 import { buildRadialEngine } from './engine';
 import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, hullSurfaceHeight, toX } from './hull';
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersDecal, fingerprintTexture, hatchOutlineTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
+  codeLettersDecal, fingerprintTexture, flakDamageTexture, hatchOutlineTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
   type DecalArt,
 } from './textures';
 
@@ -70,7 +73,7 @@ export function wingSurfaceAt(span: number, d: number): { upper: number; lower: 
   return { upper: middle + halfThickness, lower: middle - halfThickness, middle };
 }
 
-// Materials and textures are shared by every aircraft in the formation.
+// Materials and textures are shared by every aircraft in the same livery.
 
 interface AircraftMaterials {
   hull: THREE.MeshStandardMaterial;
@@ -78,9 +81,10 @@ interface AircraftMaterials {
   tailplane: THREE.MeshStandardMaterial;
   fin: THREE.MeshStandardMaterial;
   nacelle: THREE.MeshStandardMaterial;
-  oliveDrab: THREE.MeshStandardMaterial;
+  /** Plain paint of the upper and lower surfaces: Olive Drab over Neutral Gray, or bare metal both. */
+  upperPaint: THREE.MeshStandardMaterial;
   tailHousing: THREE.MeshStandardMaterial;
-  neutralGray: THREE.MeshStandardMaterial;
+  lowerPaint: THREE.MeshStandardMaterial;
   canopy: THREE.MeshPhysicalMaterial;
   /** Kit flaws on the glazing: cement fog where glue touched it, and a thumbprint. */
   glueFog: THREE.MeshStandardMaterial;
@@ -96,6 +100,10 @@ interface AircraftMaterials {
   hatchOutline: THREE.MeshStandardMaterial;
   bayDoor: THREE.MeshStandardMaterial;
   cowlLiner: THREE.MeshStandardMaterial;
+  /** Scorched flak holes, painted on with the soot round them. */
+  flakDamage: THREE.MeshStandardMaterial;
+  /** Doped canvas of the stinger guns' boots. */
+  canvas: THREE.MeshStandardMaterial;
   gunmetal: THREE.MeshStandardMaterial;
   gunBlack: THREE.MeshStandardMaterial;
   steel: THREE.MeshStandardMaterial;
@@ -109,15 +117,19 @@ interface AircraftMaterials {
   bombBand: THREE.MeshStandardMaterial;
 }
 
-let sharedMaterials: AircraftMaterials | null = null;
+/** Each livery's materials; ships with the same livery share them. */
+const materialsByLivery = new Map<Livery, AircraftMaterials>();
 
 /** Flat, sun-faded lacquer with a thin clearcoat, so softbox streaks still run along the hull. */
 /** Brush-painted enamel, the way a kit is finished by hand. */
-function paintMaterial(map: THREE.Texture | null, color: THREE.ColorRepresentation = '#ffffff'): THREE.MeshStandardMaterial {
-  return applyBrushwork(applyStudioShading(new THREE.MeshPhysicalMaterial({
-    color, map, roughness: 0.66, metalness: 0, clearcoat: 0.18, clearcoatRoughness: 0.5, envMapIntensity: 0.72,
-  })));
+function paintMaterial(map: THREE.Texture | null, color: THREE.ColorRepresentation = '#ffffff', finish: Finish = 'oliveDrab'): THREE.MeshStandardMaterial {
+  const sheen = finish === 'naturalMetal' ? SILVER_PAINT : FLAT_PAINT;
+  return applyBrushwork(applyStudioShading(new THREE.MeshPhysicalMaterial({ color, map, ...sheen })));
 }
+
+/** Flat enamel for the camouflage; the bare-metal ships are brushed in silver paint, which reflects the softboxes. */
+const FLAT_PAINT = { roughness: 0.66, metalness: 0, clearcoat: 0.18, clearcoatRoughness: 0.5, envMapIntensity: 0.72 } as const;
+const SILVER_PAINT = { roughness: 0.38, metalness: 0.72, clearcoat: 0.25, clearcoatRoughness: 0.35, envMapIntensity: 1.0 } as const;
 
 /** Bump of a decal's film and ink over the paint, in the bump map's 0–1 height. */
 const DECAL_RELIEF = 6;
@@ -153,37 +165,71 @@ function windowPaneTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-function aircraftMaterials(): AircraftMaterials {
-  if (sharedMaterials) return sharedMaterials;
-  const hullTexture = hullPaintTexture({
-    lengthMetres: FUSELAGE_LENGTH, majorJoints: [0.78, 3.0, 7.5, 10.3, 13.0, 16.0, 19.45], frameSpacing: 0.5,
-    oliveDrabHalfBand: 0.3, seed: 11, width: 2048, height: 1024,
-  });
-  const nacelleTexture = hullPaintTexture({
-    lengthMetres: 7.8, majorJoints: [0.2, 1.4, 2.1], frameSpacing: 0.45, oliveDrabHalfBand: 0.31, sootFrom: 0.42, seed: 5, width: 1024, height: 512,
-  });
-  const wingTexture = surfacePaintTexture({
-    spanMetres: WING_SEMISPAN, upperColor: PALETTE.oliveDrab, lowerColor: PALETTE.neutralGray,
-    deIcerBoots: [[1.3, 2.25], [3.7, 5.8], [7.4, 15.3]], controlSurfaces: [[1.1, 10.2], [10.3, 15.1]], ribSpacing: 0.6, seed: 3,
-  });
-  const tailplaneTexture = surfacePaintTexture({
-    spanMetres: 6.31, upperColor: PALETTE.oliveDrab, lowerColor: PALETTE.neutralGray,
-    deIcerBoots: [[0.95, 5.85]], controlSurfaces: [[0.9, 5.9]], ribSpacing: 0.45, seed: 9,
-  });
-  const finTexture = surfacePaintTexture({
-    spanMetres: 4.65, upperColor: PALETTE.oliveDrab, lowerColor: PALETTE.oliveDrab,
-    deIcerBoots: [[1.7, 4.3]], controlSurfaces: [[0.9, 4.45]], ribSpacing: 0.45, seed: 13,
-  });
-  sharedMaterials = {
-    hull: paintMaterial(hullTexture),
-    wing: paintMaterial(wingTexture),
-    tailplane: paintMaterial(tailplaneTexture),
-    fin: paintMaterial(finTexture),
-    nacelle: paintMaterial(nacelleTexture),
-    oliveDrab: paintMaterial(null, PALETTE.oliveDrab),
+interface PaintTextures { hull: THREE.Texture; nacelle: THREE.Texture; wing: THREE.Texture; tailplane: THREE.Texture; fin: THREE.Texture }
+
+const paintTexturesByFinish = new Map<Finish, PaintTextures>();
+
+/** The painted skins for a finish, drawn once and shared by every ship in it. */
+function paintTextures(finish: Finish): PaintTextures {
+  const cached = paintTexturesByFinish.get(finish);
+  if (cached) return cached;
+  const { upper, lower } = FINISH_COLOURS[finish];
+  const textures: PaintTextures = {
+    hull: hullPaintTexture({
+      lengthMetres: FUSELAGE_LENGTH, majorJoints: HULL_SKIN_JOINTS, frameSpacing: 0.5, finish,
+      oliveDrabHalfBand: 0.3, antiGlare: [NOSE_GLAZING_END, COCKPIT_WINDSCREEN_D], seed: 11, width: 2048, height: 1024,
+    }),
+    nacelle: hullPaintTexture({
+      lengthMetres: 7.8, majorJoints: [0.2, 1.4, 2.1], frameSpacing: 0.45, finish, oliveDrabHalfBand: 0.31, sootFrom: 0.42, seed: 5, width: 1024, height: 512,
+    }),
+    wing: surfacePaintTexture({
+      spanMetres: WING_SEMISPAN, upperColor: upper, lowerColor: lower,
+      deIcerBoots: [[1.3, 2.25], [3.7, 5.8], [7.4, 15.3]], controlSurfaces: [[1.1, 10.2], [10.3, 15.1]], ribSpacing: 0.6, seed: 3,
+    }),
+    tailplane: surfacePaintTexture({
+      spanMetres: 6.31, upperColor: upper, lowerColor: lower,
+      deIcerBoots: [[0.95, 5.85]], controlSurfaces: [[0.9, 5.9]], ribSpacing: 0.45, seed: 9,
+    }),
+    fin: surfacePaintTexture({
+      spanMetres: 4.65, upperColor: upper, lowerColor: upper,
+      deIcerBoots: [[1.7, 4.3]], controlSurfaces: [[0.9, 4.45]], ribSpacing: 0.45, seed: 13,
+    }),
+  };
+  paintTexturesByFinish.set(finish, textures);
+  return textures;
+}
+
+const FINISH_COLOURS: Record<Finish, { upper: string; lower: string }> = {
+  oliveDrab: { upper: PALETTE.oliveDrab, lower: PALETTE.neutralGray },
+  naturalMetal: { upper: PALETTE.aluminium, lower: PALETTE.aluminium },
+};
+
+/**
+ * The skin's circumferential joints, in metres aft of the nose glazing tip, traced from the vertical panel lines of the
+ * Emoscopes side view (reference/b17g-profile-emoscopes.png, 31.7 px to the metre on its scale bar): behind the
+ * glazing, bulkhead 4, the front spar, either side of the radio room, the waist, the tail wheel and the tail section.
+ */
+const HULL_SKIN_JOINTS = [0.74, 2.82, 5.61, 7.66, 10.38, 12.51, 14.49, 16.11, 19.33, 20.94];
+
+/** Where the windscreen's base meets the nose top: the anti-glare panel of a bare-metal ship ends here. */
+const COCKPIT_WINDSCREEN_D = 3.2;
+
+function aircraftMaterials(livery: Livery): AircraftMaterials {
+  const cached = materialsByLivery.get(livery);
+  if (cached) return cached;
+  const { finish } = livery;
+  const textures = paintTextures(finish);
+  const { upper, lower } = FINISH_COLOURS[finish];
+  const materials: AircraftMaterials = {
+    hull: paintMaterial(textures.hull, undefined, finish),
+    wing: paintMaterial(textures.wing, undefined, finish),
+    tailplane: paintMaterial(textures.tailplane, undefined, finish),
+    fin: paintMaterial(textures.fin, undefined, finish),
+    nacelle: paintMaterial(textures.nacelle, undefined, finish),
+    upperPaint: paintMaterial(null, upper, finish),
     // Its own material because the tail gunner's window holes are cut in it.
-    tailHousing: paintMaterial(null, PALETTE.oliveDrab),
-    neutralGray: paintMaterial(null, PALETTE.neutralGray),
+    tailHousing: paintMaterial(null, upper, finish),
+    lowerPaint: paintMaterial(null, lower, finish),
     canopy: applyStudioShading(new THREE.MeshPhysicalMaterial({
       color: '#dfeef5', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.2, depthWrite: false,
       clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6, side: THREE.DoubleSide,
@@ -201,17 +247,22 @@ function aircraftMaterials(): AircraftMaterials {
       polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
     })),
     insignia: decalMaterial(insigniaDecal()),
-    codes: decalMaterial(codeLettersDecal('LG')),
-    aircraftLetter: decalMaterial(codeLettersDecal('K')),
-    tailMarking: decalMaterial(tailMarkingDecal('238107', 'K')),
+    codes: decalMaterial(codeLettersDecal(livery.codes, finish)),
+    aircraftLetter: decalMaterial(codeLettersDecal(livery.letter, finish)),
+    tailMarking: decalMaterial(tailMarkingDecal(livery.tailSerial, livery.letter, finish)),
     noseArt: { pinup: decalMaterial(noseArtDecal('pinup')), card: decalMaterial(noseArtDecal('card')) },
     missionTally: decalMaterial(missionTallyDecal(MISSIONS_FLOWN)),
     hatchOutline: applyStudioShading(new THREE.MeshPhysicalMaterial({
       map: hatchOutlineTexture(), transparent: true, depthWrite: false, roughness: 0.7,
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     })),
-    bayDoor: Object.assign(paintMaterial(null, PALETTE.neutralGray), { side: THREE.DoubleSide }),
+    bayDoor: Object.assign(paintMaterial(null, lower, finish), { side: THREE.DoubleSide }),
     cowlLiner: matteMaterial('#1c1e1f', { roughness: 0.8, side: THREE.DoubleSide }),
+    canvas: matteMaterial('#7d7255', { roughness: 0.9 }),
+    flakDamage: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      map: flakDamageTexture(7), transparent: true, depthWrite: false, roughness: 0.85,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+    })),
     gunmetal: metalMaterial(PALETTE.gunmetal, { roughness: 0.36 }),
     gunBlack: metalMaterial(PALETTE.anodised, { roughness: 0.46, metalness: 0.55 }),
     steel: metalMaterial(PALETTE.chrome, { roughness: 0.22, metalness: 1 }),
@@ -226,7 +277,8 @@ function aircraftMaterials(): AircraftMaterials {
     bomb: paintMaterial(null, '#3e3e2e'),
     bombBand: paintMaterial(null, PALETTE.tailYellow),
   };
-  return sharedMaterials;
+  materialsByLivery.set(livery, materials);
+  return materials;
 }
 
 // Geometry builders.
@@ -272,11 +324,23 @@ function cutHullOpenings(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
 }
 
 /**
- * The hull to the gun mount's opening, where the skin curls in round the mount: rings of the last section, each a
- * little further aft and drawn in towards its centre. Both ends stay open: the nose shows through the glazing, the tail
- * is closed by the mount.
+ * The hull, open at the nose so the compartment shows through the glazing. With the Cheyenne tail it runs to the gun
+ * mount's opening, where the skin curls in round the mount: rings of the last section, each a little further aft and
+ * drawn in towards its centre, the mount closing it. With the stinger the cone runs to the end and is closed there; the
+ * guns leave it through their boots.
  */
-function buildHullGeometry(): THREE.BufferGeometry {
+function buildHullGeometry(tailGunPosition: TailGunPosition): THREE.BufferGeometry {
+  if (tailGunPosition === 'stinger') {
+    const cone = STATIONS.stingerCone;
+    const stations = hullStations().filter((d) => d <= cone.from);
+    const rings = stations.map((d) => hullRing(d));
+    const params = stations.map((d) => d / FUSELAGE_LENGTH);
+    for (const [d, scale] of cone.taper) {
+      rings.push(scaledRing(hullRing(cone.from), scale, toX(d)));
+      params.push(Math.min(d / FUSELAGE_LENGTH, 1));
+    }
+    return cutHullOpenings(loftGeometry(rings, params, false, true));
+  }
   const mount = STATIONS.tailGunMount;
   const stations = hullStations().filter((d) => d < mount.opening - 0.02);
   stations.push(mount.opening);
@@ -372,6 +436,21 @@ function buildTailGunMountGeometry(): { dome: THREE.BufferGeometry; slotLips: TH
   return { dome, slotLips, backing };
 }
 
+/** Each stinger gun's canvas boot: where it starts inside the tail end, its length aft, and its radius each end. */
+const STINGER_BOOT = { insideEnd: 0.06, length: 0.3, rootRadius: 0.085, tipRadius: 0.03 } as const;
+
+/** The stinger guns leave the tail end through slots each closed round its barrel by a tapered canvas boot. */
+function addStingerGunBoots(airframe: THREE.Object3D, materials: AircraftMaterials): void {
+  const taper = STATIONS.stingerCone.taper;
+  const rootD = taper[taper.length - 1][0] - STINGER_BOOT.insideEnd;
+  for (const z of TAIL.gunSpacing) {
+    const boot = new THREE.CylinderGeometry(STINGER_BOOT.tipRadius, STINGER_BOOT.rootRadius, STINGER_BOOT.length, 14, 3);
+    // Aft is model -x: the cylinder's +y (its tip) turned to point aft.
+    boot.rotateZ(Math.PI / 2);
+    part(airframe, boot, materials.canvas, toX(rootD + STINGER_BOOT.length / 2), TAIL.gunY, z);
+  }
+}
+
 /** The dome's mesh (points round the rim, rows from its crown to the rim) and its slot lips (tube radius, stand-off). */
 const TAIL_DOME = { points: 192, rows: 32, lipRadius: 0.009, lipStandOff: 0.003 } as const;
 
@@ -438,16 +517,15 @@ const ROOT_SKIN_OFFSET = 0.005;
  * hull instead of running through the compartments. `outward` is the direction the surface leaves the hull: sideways
  * for the wing and tailplane, up for the fin. Normals stay as lofted: the moved vertices are hidden in the joint.
  */
-function conformRootToHull(geometry: THREE.BufferGeometry, outward: 'side' | 'up'): THREE.BufferGeometry {
+function conformRootToHull(geometry: THREE.BufferGeometry, outward: 'side' | RoofHeight): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
   for (let index = 0; index < position.count; index++) {
     const d = toX(position.getX(index));
     if (d <= 0 || d >= FUSELAGE_LENGTH) continue;
     const y = position.getY(index);
     const z = position.getZ(index);
-    if (outward === 'up') {
-      // Over the tail gunner the Cheyenne housing is the roof, so the fin stands on it rather than on the hull.
-      const roof = Math.max(hullSurfaceHeight(d, z, true), tailHousingSurfaceHeight(d, z) ?? -Infinity);
+    if (outward !== 'side') {
+      const roof = outward(d, z);
       if (y < roof && insideHull(d, y, z, roof)) position.setY(index, roof + ROOT_SKIN_OFFSET);
     } else if (insideHull(d, y, z, hullSectionAt(d).top)) {
       position.setZ(index, Math.sign(z) * (hullHalfWidthAtHeight(d, y) + ROOT_SKIN_OFFSET));
@@ -455,6 +533,9 @@ function conformRootToHull(geometry: THREE.BufferGeometry, outward: 'side' | 'up
   }
   return geometry;
 }
+
+/** Height of whatever roofs the hull at a station and lateral offset, for a surface standing up out of it. */
+type RoofHeight = (d: number, z: number) => number;
 
 /** Inside the hull section at `d`, with its top raised to `top` where a fairing roofs it. */
 function insideHull(d: number, y: number, z: number, top: number): boolean {
@@ -520,7 +601,7 @@ function finEdges(height: number): { leading: number; trailing: number } {
   };
 }
 
-function buildFinGeometry(): THREE.BufferGeometry {
+function buildFinGeometry(tailGunPosition: TailGunPosition): THREE.BufferGeometry {
   const heights = [0.25, 0.7, 1.04, 1.2, 1.4, 1.61, 1.8, 2.0, 2.4, 2.9, 3.4, 3.8, 4.1, 4.35, 4.5, 4.58, 4.63, FIN_TOP - 0.005];
   const rings = heights.map((height) => {
     const { leading, trailing } = finEdges(height);
@@ -529,22 +610,35 @@ function buildFinGeometry(): THREE.BufferGeometry {
     return airfoilSection(thickness / chord, 0, 0.4, AIRFOIL_POINTS_PER_SIDE).map((point) =>
       new THREE.Vector3(toX(leading + point.x * chord), height, point.y * chord));
   });
-  return conformRootToHull(loftGeometry(rings, heights.map((height) => height / FIN_TOP), true, true), 'up');
+  // Over the tail gunner his cab is the roof, so the fin stands on it rather than on the hull.
+  const roof: RoofHeight = (d, z) => Math.max(hullSurfaceHeight(d, z, true), tailHousingSurfaceHeight(d, z, tailGunPosition) ?? -Infinity);
+  return conformRootToHull(loftGeometry(rings, heights.map((height) => height / FIN_TOP), true, true), roof);
 }
 
-/** Superellipse exponent of the Cheyenne housing's sections: flatter-sided than the hull. */
-/** Flat sides and roof with tight rounded corners, as the Cheyenne cab's sheet metal and glazing frames make. */
-const TAIL_HOUSING_EXPONENT = 4.5;
-
-/** The housing's lofted sections: top, bottom and half-width at each station. */
 /**
- * The housing rises out of the cone under the fin, runs flat-roofed to the rear window and stops there square: its end
- * is the window, so the loft is capped flat at the last station.
+ * Superellipse exponent of the gunner's cab sections. The Cheyenne cab is flat-sided and flat-roofed with tight corners,
+ * as its sheet metal and glazing frames make; the stinger's is rounder, nearer the hull's own sections.
  */
-function tailHousingSections(): NacelleProfile[] {
-  const { start, end, top } = STATIONS.tailTurretHousing;
-  const stations = [start, start + 0.3, start + 0.7, end - 0.12, end];
-  const tops = [hullSectionAt(start).top - 0.02, top - 0.1, top, top, top - 0.025];
+const TAIL_HOUSING_EXPONENT: Record<TailGunPosition, number> = { cheyenne: 4.5, stinger: 3.2 };
+
+/**
+ * The gunner's cab's lofted sections: top, bottom and half-width at each station. The Cheyenne cab rises out of the
+ * cone under the fin, runs flat-roofed to the rear window and stops there square: its end is the window. The stinger's
+ * roof runs level over the gunner and then slopes down to meet the cone's top at the tail end.
+ */
+function tailHousingSections(tailGunPosition: TailGunPosition): NacelleProfile[] {
+  let stations: number[];
+  let tops: number[];
+  if (tailGunPosition === 'stinger') {
+    const { start, slopeFrom, end, top } = STATIONS.stingerHousing;
+    const endTop = hullSectionAt(end).top;
+    stations = [start, start + 0.3, start + 0.8, slopeFrom, (slopeFrom + end) / 2, end];
+    tops = [hullSectionAt(start).top - 0.02, top - 0.08, top, top, (top + endTop) / 2 + 0.03, endTop];
+  } else {
+    const { start, end, top } = STATIONS.tailTurretHousing;
+    stations = [start, start + 0.3, start + 0.7, end - 0.12, end];
+    tops = [hullSectionAt(start).top - 0.02, top - 0.1, top, top, top - 0.025];
+  }
   return stations.map((d, index) => {
     const hull = hullSectionAt(d);
     return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(hull.halfWidth + 0.015, 0.4) };
@@ -552,8 +646,9 @@ function tailHousingSections(): NacelleProfile[] {
 }
 
 /** Height of the housing's upper surface at a station and lateral offset, or null outside the housing. */
-function tailHousingSurfaceHeight(d: number, z: number): number | null {
-  const sections = tailHousingSections();
+function tailHousingSurfaceHeight(d: number, z: number, tailGunPosition: TailGunPosition): number | null {
+  const sections = tailHousingSections(tailGunPosition);
+  const exponent = TAIL_HOUSING_EXPONENT[tailGunPosition];
   const after = sections.findIndex((section) => section.d >= d);
   if (after <= 0 || d > sections[sections.length - 1].d) return null;
   const a = sections[after - 1], b = sections[after];
@@ -562,14 +657,14 @@ function tailHousingSurfaceHeight(d: number, z: number): number | null {
   const bottom = THREE.MathUtils.lerp(a.bottom, b.bottom, t);
   const halfWidth = THREE.MathUtils.lerp(a.halfWidth, b.halfWidth, t);
   const lateral = Math.min(Math.abs(z) / halfWidth, 0.999);
-  return (top + bottom) / 2 + (1 - lateral ** TAIL_HOUSING_EXPONENT) ** (1 / TAIL_HOUSING_EXPONENT) * (top - bottom) / 2;
+  return (top + bottom) / 2 + (1 - lateral ** exponent) ** (1 / exponent) * (top - bottom) / 2;
 }
 
-/** Cheyenne tail-gun housing under the rudder: a raised, slab-sided fairing over the tail cone. */
-function buildTailHousingGeometry(): THREE.BufferGeometry {
-  const sections = tailHousingSections();
+/** The tail gunner's cab under the rudder: a raised fairing over the tail cone. */
+function buildTailHousingGeometry(tailGunPosition: TailGunPosition): THREE.BufferGeometry {
+  const sections = tailHousingSections(tailGunPosition);
   const rings = sections.map((section) =>
-    ellipseRing(new THREE.Vector3(toX(section.d), 0, 0), section.top, section.bottom, section.halfWidth, HULL_RING_POINTS, TAIL_HOUSING_EXPONENT));
+    ellipseRing(new THREE.Vector3(toX(section.d), 0, 0), section.top, section.bottom, section.halfWidth, HULL_RING_POINTS, TAIL_HOUSING_EXPONENT[tailGunPosition]));
   return loftGeometry(rings, sections.map((section) => section.d / FUSELAGE_LENGTH), true, true);
 }
 
@@ -702,7 +797,7 @@ function addCowlFlaps(parent: THREE.Object3D, materials: AircraftMaterials, spec
     hinge.rotation.z = -THREE.MathUtils.degToRad(COWL_FLAP.openDegrees);
     ring.add(hinge);
     parent.add(ring);
-    const material = Math.cos(angle) < COWL_FLAP_GRAY_BELOW ? materials.neutralGray : materials.oliveDrab;
+    const material = Math.cos(angle) < COWL_FLAP_GRAY_BELOW ? materials.lowerPaint : materials.upperPaint;
     part(hinge, geometry, material, -COWL_FLAP.length / 2, COWL_FLAP.thickness / 2, 0);
   }
 }
@@ -792,7 +887,7 @@ function buildChinTurret(materials: AircraftMaterials): { turret: THREE.Group; g
   const spec = STATIONS.chinTurret;
   const turret = new THREE.Group();
   turret.position.set(toX(spec.d), 0, 0);
-  part(turret, buildChinTurretGeometry(), materials.oliveDrab, 0, 0, 0);
+  part(turret, buildChinTurretGeometry(), materials.upperPaint, 0, 0, 0);
   // Gun slots in the front face, where the face sits a little behind the drum's nose because of the plan rounding.
   const slotZ = spec.gunSpacing;
   const faceX = spec.halfLength * (1 - (slotZ / spec.halfWidth) ** CHIN_TURRET_PLAN_EXPONENT) ** (1 / CHIN_TURRET_PLAN_EXPONENT);
@@ -813,6 +908,81 @@ function decalOrientation(normal: THREE.Vector3, along: THREE.Vector3): THREE.Eu
   const yAxis = zAxis.clone().cross(xAxis);
   return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
 }
+
+/**
+ * Main gear: the oleo leg from its pivot in the inboard nacelle down to the axle, and the 56 in wheel (the retracted
+ * wheel's size). Tail wheel: its fork under the tail wheel well, a 26 in wheel. Extended, the main wheels stand well
+ * below the props and the ship sits nose-up on all three, as the B-17's three-point stance.
+ */
+const MAIN_GEAR = { pivotD: 5.2, pivotDrop: 0.5, axleD: 5.55, axleY: -2.3, wheelRadius: 0.71, tyre: 0.19, retractTurn: 1.45 } as const;
+const TAIL_GEAR = { forkTopAbove: 0.05, axleBelow: 0.36, axleAft: 0.12, wheelRadius: 0.33, tyre: 0.09, retractTurn: 1.2 } as const;
+
+function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): LandingGear {
+  const legs: { group: THREE.Group; turn: number }[] = [];
+  const thrustLine = NACELLES[0].thrustLineH;
+  const pivotY = thrustLine - MAIN_GEAR.pivotDrop;
+  for (const side of [1, -1] as const) {
+    const leg = new THREE.Group();
+    leg.position.set(toX(MAIN_GEAR.pivotD), pivotY, side * NACELLES[0].span);
+    assignAssembly(leg, engineAssembly(side, true));
+    const axle = new THREE.Vector3(toX(MAIN_GEAR.axleD) - toX(MAIN_GEAR.pivotD), MAIN_GEAR.axleY - pivotY, 0);
+    for (const offset of [-0.2, 0.2]) {
+      const strut = part(leg, new THREE.CylinderGeometry(0.07, 0.08, axle.length(), 12), materials.steel, 0, 0, offset);
+      strut.position.copy(axle).multiplyScalar(0.5).setZ(offset);
+      strut.quaternion.setFromUnitVectors(UP, axle.clone().normalize());
+    }
+    part(leg, new THREE.CylinderGeometry(0.05, 0.05, 0.5, 10), materials.steel, axle.x, axle.y, 0, { rotation: [Math.PI / 2, 0, 0] });
+    part(leg, new THREE.TorusGeometry(MAIN_GEAR.wheelRadius - MAIN_GEAR.tyre, MAIN_GEAR.tyre, 14, 36), materials.rubber, axle.x, axle.y, 0);
+    part(leg, new THREE.CylinderGeometry(0.36, 0.36, 0.24, 24), materials.gunmetal, axle.x, axle.y, 0, { rotation: [Math.PI / 2, 0, 0] });
+    leg.userData.unmerged = true;
+    root.add(leg);
+    legs.push({ group: leg, turn: MAIN_GEAR.retractTurn });
+  }
+  const tailD = WAIST.tailwheelD;
+  const tailBottom = hullSectionAt(tailD).bottom;
+  const tail = new THREE.Group();
+  tail.position.set(toX(tailD), tailBottom + TAIL_GEAR.forkTopAbove, 0);
+  assignAssembly(tail, fuselageSectionAt(tailD));
+  const tailAxle = new THREE.Vector3(-TAIL_GEAR.axleAft, -TAIL_GEAR.axleBelow - TAIL_GEAR.forkTopAbove, 0);
+  for (const z of [-0.1, 0.1]) rod(tail, new THREE.Vector3(0, 0, z), tailAxle.clone().setZ(z), 0.035, materials.steel);
+  part(tail, new THREE.TorusGeometry(TAIL_GEAR.wheelRadius - TAIL_GEAR.tyre, TAIL_GEAR.tyre, 10, 28), materials.rubber, tailAxle.x, tailAxle.y, 0);
+  part(tail, new THREE.CylinderGeometry(0.14, 0.14, 0.12, 16), materials.gunmetal, tailAxle.x, tailAxle.y, 0, { rotation: [Math.PI / 2, 0, 0] });
+  tail.userData.unmerged = true;
+  root.add(tail);
+  legs.push({ group: tail, turn: TAIL_GEAR.retractTurn });
+
+  // Three-point stance: pitch the ship until both main tyres and the tail tyre touch the same ground line.
+  const mainContact = new THREE.Vector2(toX(MAIN_GEAR.axleD), MAIN_GEAR.axleY - MAIN_GEAR.wheelRadius);
+  const tailContact = new THREE.Vector2(toX(tailD) + tailAxle.x, tail.position.y + tailAxle.y - TAIL_GEAR.wheelRadius);
+  const pitch = Math.atan2(tailContact.y - mainContact.y, mainContact.x - tailContact.x);
+  const height = -(mainContact.x * Math.sin(pitch) + mainContact.y * Math.cos(pitch));
+
+  const hatch = CRAWLWAY.forwardHatch;
+  const hatchD = (hatch.start + hatch.end) / 2;
+  const hatchZ = (hatch.inner + hatch.outer) / 2;
+  const doorD = (WAIST.door.start + WAIST.door.end) / 2;
+  // The door's sill stands a little above the waist floor, as the interior builds it.
+  const doorSill = waistFloorHeight(doorD) + 0.05;
+  const setExtension = (amount: number) => {
+    for (const { group, turn } of legs) {
+      group.visible = amount > 0.01;
+      // Model x is forward: a positive turn about z swings the leg's foot forward and up.
+      group.rotation.z = (1 - amount) * turn;
+    }
+  };
+  setExtension(0);
+  return {
+    setExtension,
+    ground: { pitch, height },
+    entries: {
+      forwardHatch: new THREE.Vector3(toX(hatchD), hullSurfaceHeight(hatchD, hatchZ, false), hatchZ),
+      mainDoor: new THREE.Vector3(toX(doorD), doorSill, hullHalfWidthAtHeight(doorD, doorSill)),
+    },
+  };
+}
+
+/** Where the flak strikes land: the hull's starboard side by the bomb bay, and the wing's top beside No. 3 engine. */
+const FLAK_HOLES = { hull: { d: 6.9, y: 0.25 }, wing: { span: 4.2, d: 6.6 } } as const;
 
 /** Depth of the nose art's projector box, deep enough to reach the skin where the nose curves in under it. */
 const NOSE_ART_PROJECTOR_DEPTH = 1.4;
@@ -871,7 +1041,7 @@ const KIT_FLAWS = {
 } as const;
 
 function addKitFlaws(airframe: THREE.Object3D, root: THREE.Object3D, noseGlazing: THREE.Mesh, materials: AircraftMaterials): void {
-  for (const [upper, gaps, material] of [[true, KIT_FLAWS.seamGapsTop, materials.oliveDrab], [false, KIT_FLAWS.seamGapsBottom, materials.neutralGray]] as const) {
+  for (const [upper, gaps, material] of [[true, KIT_FLAWS.seamGapsTop, materials.upperPaint], [false, KIT_FLAWS.seamGapsBottom, materials.lowerPaint]] as const) {
     for (const [start, end] of seamRuns(NOSE_GLAZING_END + 0.05, STATIONS.tailGunMount.opening - 0.05, gaps)) {
       const points: THREE.Vector3[] = [];
       for (let d = start; d <= end + 1e-6; d += Math.min(0.15, end - start)) {
@@ -887,7 +1057,7 @@ function addKitFlaws(airframe: THREE.Object3D, root: THREE.Object3D, noseGlazing
     const section = hullSectionAt(d);
     const y = section.bottom + (section.top - section.bottom) * fraction;
     const z = side * hullHalfWidthAtHeight(d, y);
-    part(airframe, new THREE.CylinderGeometry(0.018, 0.022, 0.016, 10), materials.neutralGray, toX(d), y, z, { rotation: [Math.PI / 2, 0, 0] });
+    part(airframe, new THREE.CylinderGeometry(0.018, 0.022, 0.016, 10), materials.lowerPaint, toX(d), y, z, { rotation: [Math.PI / 2, 0, 0] });
   }
   // Cement that fogged the glazing where it meets the frame, and a thumbprint from setting it in place.
   noseGlazing.updateMatrixWorld(true);
@@ -927,28 +1097,32 @@ function addWindow(
   cutouts.add(position, decalOrientation(normal, along), new THREE.Vector3(width, height, depth));
 }
 
-/** Window panes on both hull sides between two stations and heights. */
 /**
- * The Cheyenne cab's glazing: two panes in each flat side and the rear window in its square end, each in a raised
- * frame, with the hole cut in the housing behind it so the gunner shows through.
+ * The gunner's cab's glazing, each pane in a raised frame with the hole cut in the housing behind it so the gunner
+ * shows through: the Cheyenne cab has two panes in each flat side and the rear window in its square end; the stinger
+ * two small panes a side and the sighting window on its sloping roof.
  */
-function addTailGunnerGlazing(airframe: THREE.Object3D, housing: THREE.Mesh, materials: AircraftMaterials, cutouts: WindowCutouts): void {
-  const windows = STATIONS.tailTurretWindows;
+function addTailGunnerGlazing(airframe: THREE.Object3D, housing: THREE.Mesh, materials: AircraftMaterials, cutouts: WindowCutouts, tailGunPosition: TailGunPosition): void {
+  const windows = tailGunPosition === 'stinger' ? STATIONS.stingerWindows : STATIONS.tailTurretWindows;
   const sill = windows.bottom;
   const head = windows.top;
   const middleY = (sill + head) / 2;
   for (const [start, end] of windows.panes) {
     for (const side of [1, -1] as const) {
-      const at = (d: number, y: number) => new THREE.Vector3(toX(d), y, side * tailHousingHalfWidthAt(d, y));
+      const at = (d: number, y: number) => new THREE.Vector3(toX(d), y, side * tailHousingHalfWidthAt(d, y, tailGunPosition));
       const middle = (start + end) / 2;
       const outward = side > 0 ? STARBOARD : PORT;
       addWindow(airframe, housing, materials.windowPane, cutouts, at(middle, middleY), outward, side > 0 ? FORWARD : FORWARD.clone().negate(), end - start, head - sill, 0.3);
       const corners = [at(start, sill), at(end, sill), at(end, head), at(start, head)];
-      corners.forEach((corner, index) => frameStrip(airframe, materials.oliveDrab, corner, corners[(index + 1) % 4], outward));
+      corners.forEach((corner, index) => frameStrip(airframe, materials.upperPaint, corner, corners[(index + 1) % 4], outward));
     }
   }
+  if (tailGunPosition === 'stinger') {
+    addStingerSightingWindow(airframe, housing, materials, cutouts);
+    return;
+  }
   const { end } = STATIONS.tailTurretHousing;
-  const rear = windows.rear;
+  const rear = STATIONS.tailTurretWindows.rear;
   const aftFace = toX(end);
   const centre = new THREE.Vector3(aftFace, (rear.top + rear.bottom) / 2, 0);
   addWindow(airframe, housing, materials.windowPane, cutouts, centre, AFT, STARBOARD, rear.width, rear.top - rear.bottom, 0.16);
@@ -957,12 +1131,29 @@ function addTailGunnerGlazing(airframe: THREE.Object3D, housing: THREE.Mesh, mat
     new THREE.Vector3(aftFace, rear.bottom, -halfWidth), new THREE.Vector3(aftFace, rear.bottom, halfWidth),
     new THREE.Vector3(aftFace, rear.top, halfWidth), new THREE.Vector3(aftFace, rear.top, -halfWidth),
   ];
-  corners.forEach((corner, index) => frameStrip(airframe, materials.oliveDrab, corner, corners[(index + 1) % 4], AFT));
+  corners.forEach((corner, index) => frameStrip(airframe, materials.upperPaint, corner, corners[(index + 1) % 4], AFT));
+}
+
+/** The stinger's sighting window, lying on the sloping roof ahead of the tail end. */
+function addStingerSightingWindow(airframe: THREE.Object3D, housing: THREE.Mesh, materials: AircraftMaterials, cutouts: WindowCutouts): void {
+  const sight = STATIONS.stingerWindows.sight;
+  const half = sight.length / 2;
+  const surface = (d: number) => tailHousingSurfaceHeight(d, 0, 'stinger') ?? hullSectionAt(d).top;
+  const fore = new THREE.Vector3(toX(sight.d - half), surface(sight.d - half), 0);
+  const aft = new THREE.Vector3(toX(sight.d + half), surface(sight.d + half), 0);
+  const downSlope = aft.clone().sub(fore).normalize();
+  const outward = new THREE.Vector3().crossVectors(downSlope, STARBOARD).negate().normalize();
+  const centre = fore.clone().add(aft).multiplyScalar(0.5);
+  addWindow(airframe, housing, materials.windowPane, cutouts, centre, outward, STARBOARD, sight.width, fore.distanceTo(aft), 0.2);
+  const across = STARBOARD.clone().multiplyScalar(sight.width / 2);
+  const corners = [fore.clone().sub(across), fore.clone().add(across), aft.clone().add(across), aft.clone().sub(across)];
+  corners.forEach((corner, index) => frameStrip(airframe, materials.upperPaint, corner, corners[(index + 1) % 4], outward));
 }
 
 /** Half-width of the housing's wall at a station and height, on the same superellipse its loft uses. */
-function tailHousingHalfWidthAt(d: number, y: number): number {
-  const sections = tailHousingSections();
+function tailHousingHalfWidthAt(d: number, y: number, tailGunPosition: TailGunPosition): number {
+  const sections = tailHousingSections(tailGunPosition);
+  const exponent = TAIL_HOUSING_EXPONENT[tailGunPosition];
   const after = Math.max(1, sections.findIndex((section) => section.d >= d));
   const a = sections[after - 1], b = sections[after];
   const t = THREE.MathUtils.clamp((d - a.d) / (b.d - a.d), 0, 1);
@@ -970,7 +1161,7 @@ function tailHousingHalfWidthAt(d: number, y: number): number {
   const bottom = THREE.MathUtils.lerp(a.bottom, b.bottom, t);
   const halfWidth = THREE.MathUtils.lerp(a.halfWidth, b.halfWidth, t);
   const vertical = Math.min(Math.abs(y - (top + bottom) / 2) / ((top - bottom) / 2), 0.999);
-  return halfWidth * (1 - vertical ** TAIL_HOUSING_EXPONENT) ** (1 / TAIL_HOUSING_EXPONENT);
+  return halfWidth * (1 - vertical ** exponent) ** (1 / exponent);
 }
 
 /** Window frame section: width on the skin, and how far it stands proud. */
@@ -997,10 +1188,35 @@ function addSideWindows(airframe: THREE.Object3D, hull: THREE.Mesh, material: TH
   }
 }
 
+/**
+ * The flak hit the lead takes on the bomb run, built hidden on every ship: holes in the skin, No. 3 engine's smoke port
+ * and propeller, and where the burst goes off under the starboard wing.
+ */
+export interface BattleDamage {
+  holes: THREE.Mesh[];
+  /** No. 3 engine's propeller: the one feathered. */
+  propeller: THREE.Object3D;
+  /** Where its oil smoke streams from, behind the cowl. */
+  smokePort: THREE.Object3D;
+  burstPoint: THREE.Object3D;
+}
+
+/** The undercarriage let down for the ground: hidden until extended, swung forward up into the nacelles to retract. */
+export interface LandingGear {
+  /** 0 retracted (only the exposed wheels show), 1 down and locked. */
+  setExtension(amount: number): void;
+  /** On its wheels: the nose-up pitch about model z, and the model origin's height over the ground, in model metres. */
+  ground: { pitch: number; height: number };
+  /** Model-space positions of the forward entrance hatch and the main door's sill, where the crew climb in. */
+  entries: { forwardHatch: THREE.Vector3; mainDoor: THREE.Vector3 };
+}
+
 export interface B17 {
   /** Model space is metres, nose toward +x, starboard toward +z. Scale and pose it from outside. */
   root: THREE.Group;
+  landingGear: LandingGear;
   propellers: THREE.Object3D[];
+  battleDamage: BattleDamage;
   topTurret: { yaw: THREE.Object3D; pitch: THREE.Object3D };
   ballTurret: { yaw: THREE.Object3D; pitch: THREE.Object3D };
   chinTurret: THREE.Object3D;
@@ -1027,8 +1243,8 @@ export interface B17 {
    * cast shadows or show in the floor's reflection, which saves most of each ship's triangles in those passes.
    */
   interiorMeshes: THREE.Mesh[];
-  /** The nose art the ship carries, each artwork its own decal; show one. */
-  noseArt: Record<NoseArtChoice, THREE.Mesh>;
+  /** The nose art the ship carries, each artwork its own decal, so show one; null if its livery has none. */
+  noseArt: Record<NoseArtChoice, THREE.Mesh> | null;
   /**
    * The part of `interiorMeshes` a distant viewer cannot make out through the glazing: everything but the crew and the
    * insulated skin, which closes the hull from inside (the outer skin is single-sided).
@@ -1044,22 +1260,24 @@ export interface B17Options {
    * apart; a ship that never opens merges its fixed parts across them, a fraction of the draw calls.
    */
   opensUp: boolean;
+  livery: Livery;
 }
 
-export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
-  const materials = aircraftMaterials();
+export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
+  const materials = aircraftMaterials(livery);
+  const stinger = livery.tailGunPosition === 'stinger';
   const root = new THREE.Group();
   root.name = 'B-17G';
   const airframe = new THREE.Group();
 
   // Hull and nose glazing; the crew and fittings inside come from the interior builder below.
-  const hullGeometry = buildHullGeometry();
+  const hullGeometry = buildHullGeometry(livery.tailGunPosition);
   const hull = part(airframe, hullGeometry, materials.hull, 0, 0, 0);
   const noseGlazing = part(root, buildNoseGlazingGeometry(), materials.canopy, 0, 0, 0, { castShadow: false });
   addKitFlaws(airframe, root, noseGlazing, materials);
   const glazingFrame = new THREE.TorusGeometry(1, 0.018, 6, 48);
   const frameSection = hullSectionAt(NOSE_GLAZING_END);
-  const frame = part(airframe, glazingFrame, materials.oliveDrab, toX(NOSE_GLAZING_END), (frameSection.top + frameSection.bottom) / 2, 0, { rotation: [0, Math.PI / 2, 0] });
+  const frame = part(airframe, glazingFrame, materials.upperPaint, toX(NOSE_GLAZING_END), (frameSection.top + frameSection.bottom) / 2, 0, { rotation: [0, Math.PI / 2, 0] });
   frame.scale.set(frameSection.halfWidth + 0.01, (frameSection.top - frameSection.bottom) / 2 + 0.01, 1);
   part(airframe, roundedBox(0.34, 0.3, 0.26, 0.04), materials.gunmetal, toX(0.5), -0.3, 0);
   part(airframe, new THREE.CylinderGeometry(0.06, 0.08, 0.24, 12), materials.gunBlack, toX(0.4), -0.05, 0);
@@ -1071,14 +1289,16 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   const tailplaneGeometry = buildTailplaneGeometry();
   assignAssembly(part(airframe, tailplaneGeometry, materials.tailplane, 0, 0, 0), 'stabilizer-starboard');
   assignAssembly(part(airframe, mirrorAcrossZ(tailplaneGeometry), materials.tailplane, 0, 0, 0), 'stabilizer-port');
-  const fin = assignAssembly(part(airframe, buildFinGeometry(), materials.fin, 0, 0, 0), 'fin');
-  const tailHousingGeometry = buildTailHousingGeometry();
+  const fin = assignAssembly(part(airframe, buildFinGeometry(livery.tailGunPosition), materials.fin, 0, 0, 0), 'fin');
+  const tailHousingGeometry = buildTailHousingGeometry(livery.tailGunPosition);
   const tailHousing = part(airframe, tailHousingGeometry, materials.tailHousing, 0, 0, 0);
 
   // Engines.
   sharedBladeGeometry ??= buildBladeGeometry();
   const propellers: THREE.Object3D[] = [];
   const exhaustPorts: THREE.Object3D[] = [];
+  let damagedEngine: { nacelle: THREE.Object3D; smokePort: THREE.Object3D } | null = null;
+  let damagedPropeller: THREE.Object3D | null = null;
   const navigationLights: THREE.Mesh[] = [];
   for (const spec of NACELLES) {
     const nacelleGeometry = buildNacelleGeometry(spec);
@@ -1094,7 +1314,7 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
       const engine = buildRadialEngine(cylinderPlaneD - (spec.propellerD + PROPELLER_HUB_REAR));
       engine.position.set(toX(cylinderPlaneD), spec.thrustLineH, span);
       nacelle.add(engine);
-      part(nacelle, new THREE.TorusGeometry(COWL_RADIUS * 0.85, 0.028, 8, 48), materials.oliveDrab, toX(spec.cowlFrontD + 0.01), spec.thrustLineH, span, { rotation: [0, Math.PI / 2, 0] });
+      part(nacelle, new THREE.TorusGeometry(COWL_RADIUS * 0.85, 0.028, 8, 48), materials.upperPaint, toX(spec.cowlFrontD + 0.01), spec.thrustLineH, span, { rotation: [0, Math.PI / 2, 0] });
       part(nacelle, cowlLinerGeometry(), materials.cowlLiner, toX(spec.cowlFrontD), spec.thrustLineH, span, { castShadow: false });
       addCowlFlaps(nacelle, materials, spec, span);
 
@@ -1108,6 +1328,12 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
       exhaust.userData.unmerged = true;
       nacelle.add(exhaust);
       exhaustPorts.push(exhaust);
+      if (spec === NACELLES[0] && side > 0) {
+        damagedEngine = { nacelle, smokePort: new THREE.Object3D() };
+        damagedEngine.smokePort.position.set(toX(spec.cowlRearD + 0.1), spec.thrustLineH - COWL_RADIUS * 0.6, span);
+        damagedEngine.smokePort.userData.unmerged = true;
+        nacelle.add(damagedEngine.smokePort);
+      }
 
       // Main wheel: the B-17 leaves a third of the tyre exposed below the inboard nacelle when retracted.
       if (spec === NACELLES[0]) {
@@ -1122,6 +1348,8 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
       for (let blade = 0; blade < BLADE_COUNT; blade++) {
         const bladeMesh = part(propeller, sharedBladeGeometry, materials.blade, 0, 0, 0);
         bladeMesh.rotation.x = (blade / BLADE_COUNT) * Math.PI * 2;
+        // Feathering turns each blade about its own length (local y).
+        bladeMesh.userData.blade = true;
         // Clamp ring where the shank leaves the hub barrel.
         part(bladeMesh, new THREE.CylinderGeometry(0.085, 0.09, 0.07, 18), materials.gunmetal, 0, 0.235, 0);
       }
@@ -1129,6 +1357,7 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
       propeller.userData.unmerged = true;
       root.add(propeller);
       propellers.push(propeller);
+      if (spec === NACELLES[0] && side > 0) damagedPropeller = propeller;
     }
   }
   const intakeMaterial = matteMaterial('#0d0e10', { roughness: 0.9 });
@@ -1182,7 +1411,7 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   // Both artworks are on the ship, one shown at a time; kept out of the merge so either can be switched on.
   const noseArtSpot = STATIONS.noseArt;
   const noseArtCentre = new THREE.Vector3(toX(noseArtSpot.d), noseArtSpot.h, -hullHalfWidthAtHeight(noseArtSpot.d, noseArtSpot.h));
-  const noseArt = Object.fromEntries((['pinup', 'card'] as const).map((choice) => {
+  const noseArt = livery.noseArt ? Object.fromEntries((['pinup', 'card'] as const).map((choice) => {
     const { width, height } = noseArtSpot.sizes[choice];
     // A deep projector: the nose curves away fast below the art's middle, and a shallow one would clip its foot.
     const decal = addDecal(airframe, hull, materials.noseArt[choice], noseArtCentre, PORT, FORWARD.clone().negate(), width, height, NOSE_ART_PROJECTOR_DEPTH);
@@ -1190,9 +1419,11 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
     assignAssembly(decal, 'nose');
     decal.userData.unmerged = true;
     return [choice, decal];
-  })) as Record<NoseArtChoice, THREE.Mesh>;
-  const tally = STATIONS.missionTally;
-  addDecal(airframe, hull, materials.missionTally, new THREE.Vector3(toX(tally.d), tally.h, -hullHalfWidthAtHeight(tally.d, tally.h)), PORT, FORWARD.clone().negate(), tally.width, tally.height, 0.4);
+  })) as Record<NoseArtChoice, THREE.Mesh> : null;
+  if (livery.noseArt) {
+    const tally = STATIONS.missionTally;
+    addDecal(airframe, hull, materials.missionTally, new THREE.Vector3(toX(tally.d), tally.h, -hullHalfWidthAtHeight(tally.d, tally.h)), PORT, FORWARD.clone().negate(), tally.width, tally.height, 0.4);
+  }
   // The forward entrance hatch in the belly under the crawlway, port of the centreline.
   const hatch = CRAWLWAY.forwardHatch;
   const hatchD = (hatch.start + hatch.end) / 2;
@@ -1205,6 +1436,22 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   // Upper surface of the port wing and lower surface of the starboard wing, per USAAF practice from 1943.
   assignAssembly(addDecal(airframe, portWing, materials.insignia, new THREE.Vector3(toX(wingInsigniaD), wingInsigniaSurface.upper, -wingInsigniaSpan), UP, STARBOARD, 2.87, 1.52, 0.28), 'wing-port');
   assignAssembly(addDecal(airframe, starboardWing, materials.insignia, new THREE.Vector3(toX(wingInsigniaD), wingInsigniaSurface.lower, wingInsigniaSpan), UP.clone().negate(), STARBOARD, 2.87, 1.52, 0.28), 'wing-starboard');
+
+  if (!damagedEngine || !damagedPropeller) throw new Error('No. 3 engine was not built');
+  const hitEngine = { smokePort: damagedEngine.smokePort, propeller: damagedPropeller };
+  // Flak holes, hidden until the hit: in the starboard side by the bomb bay and in the wing beside No. 3 engine.
+  const holes = [
+    addDecal(airframe, hull, materials.flakDamage, new THREE.Vector3(toX(FLAK_HOLES.hull.d), FLAK_HOLES.hull.y, hullHalfWidthAtHeight(FLAK_HOLES.hull.d, FLAK_HOLES.hull.y)), STARBOARD, FORWARD, 1.1, 0.8, 0.5),
+    assignAssembly(addDecal(airframe, starboardWing, materials.flakDamage, new THREE.Vector3(toX(FLAK_HOLES.wing.d), wingSurfaceAt(FLAK_HOLES.wing.span, FLAK_HOLES.wing.d).upper, FLAK_HOLES.wing.span), UP, FORWARD, 0.9, 0.9, 0.3), 'wing-starboard'),
+  ];
+  for (const hole of holes) {
+    hole.visible = false;
+    hole.userData.unmerged = true;
+  }
+  assignAssembly(holes[0], fuselageSectionAt(FLAK_HOLES.hull.d));
+  const burstPoint = new THREE.Object3D();
+  burstPoint.position.set(toX(FLAK_HOLES.wing.d + 0.6), wingSurfaceAt(FLAK_HOLES.wing.span, FLAK_HOLES.wing.d).lower - 1.4, FLAK_HOLES.wing.span + 0.8);
+  root.add(burstPoint);
 
   // Bomb bay doors: patches of the skin hinged along the outer edges of the opening.
   const bay = STATIONS.bombBay;
@@ -1229,10 +1476,10 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   const dome = part(topTurretYaw, new THREE.SphereGeometry(topTurretSpec.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), materials.canopy, 0, 0.08, 0, { castShadow: false });
   dome.scale.y = topTurretSpec.domeHeight / topTurretSpec.radius;
   for (let rib = 0; rib < 4; rib++) {
-    const ribMesh = part(topTurretYaw, new THREE.TorusGeometry(topTurretSpec.radius, 0.014, 6, 32, Math.PI), materials.oliveDrab, 0, 0.08, 0, { rotation: [0, (rib * Math.PI) / 4, 0] });
+    const ribMesh = part(topTurretYaw, new THREE.TorusGeometry(topTurretSpec.radius, 0.014, 6, 32, Math.PI), materials.upperPaint, 0, 0.08, 0, { rotation: [0, (rib * Math.PI) / 4, 0] });
     ribMesh.scale.y = topTurretSpec.domeHeight / topTurretSpec.radius;
   }
-  part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.oliveDrab, -0.4, 0.1, 0);
+  part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.upperPaint, -0.4, 0.1, 0);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.userData.unmerged = true;
   topTurretPitch.position.set(0.18, 0.24, 0);
@@ -1244,25 +1491,29 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   const ballYaw = assignAssembly(new THREE.Group(), 'ball-turret');
   ballYaw.userData.unmerged = true;
   ballYaw.position.copy(ballTurretCentre());
-  addBallTurretMount(ballYaw, { structure: materials.neutralGray, steel: materials.gunmetal });
+  addBallTurretMount(ballYaw, { structure: materials.lowerPaint, steel: materials.gunmetal });
   const ballPitch = new THREE.Group();
   ballPitch.userData.unmerged = true;
-  addBallTurretShell(ballPitch, { shell: materials.neutralGray, glass: materials.canopy, seam: materials.rubber, steel: materials.steel });
+  addBallTurretShell(ballPitch, { shell: materials.lowerPaint, glass: materials.canopy, seam: materials.rubber, steel: materials.steel });
   const ballTurretGuns = ([-1, 1] as const).map((side) => addM2(ballPitch, ballGunOrigin(side), FORWARD, 'turret'));
   ballYaw.add(ballPitch);
   root.add(ballYaw);
 
   // Bendix chin turret on its fixed fairing.
-  part(airframe, buildChinFairingGeometry(), materials.oliveDrab, 0, 0, 0);
+  part(airframe, buildChinFairingGeometry(), materials.upperPaint, 0, 0, 0);
   const { turret: chinTurret, guns: chinGuns } = buildChinTurret(materials);
   chinTurret.userData.unmerged = true;
   root.add(assignAssembly(chinTurret, 'chin-turret'));
 
-  addTailGunnerGlazing(airframe, tailHousing, materials, cutouts);
-  const mount = buildTailGunMountGeometry();
-  part(airframe, mount.dome, materials.oliveDrab, 0, 0, 0);
-  part(airframe, mount.slotLips, materials.gunmetal, 0, 0, 0);
-  part(airframe, mount.backing, materials.cowlLiner, 0, 0, 0, { castShadow: false });
+  addTailGunnerGlazing(airframe, tailHousing, materials, cutouts, livery.tailGunPosition);
+  if (stinger) {
+    addStingerGunBoots(airframe, materials);
+  } else {
+    const mount = buildTailGunMountGeometry();
+    part(airframe, mount.dome, materials.upperPaint, 0, 0, 0);
+    part(airframe, mount.slotLips, materials.gunmetal, 0, 0, 0);
+    part(airframe, mount.backing, materials.cowlLiner, 0, 0, 0, { castShadow: false });
+  }
 
   // Astrodome, radio antennas, and the long aerial from the radio-room mast to the fin.
   const astrodome = STATIONS.astrodome;
@@ -1277,7 +1528,7 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   part(airframe, new THREE.CylinderGeometry(0.025, 0.04, 0.82, 8), materials.gunBlack, toX(mastD), mastBase + 0.41, 0);
   const aerial = new THREE.CatmullRomCurve3([new THREE.Vector3(toX(mastD), mastBase + 0.8, 0), new THREE.Vector3(toX(18.1), 3.94, 0)]);
   part(airframe, new THREE.TubeGeometry(aerial, 8, 0.012, 5, false), materials.gunBlack, 0, 0, 0, { castShadow: false });
-  part(airframe, new THREE.SphereGeometry(0.16, 16, 10), materials.oliveDrab, toX(4.55), hullSectionAt(4.55).bottom - 0.08, 0).scale.set(2.2, 0.7, 0.9);
+  part(airframe, new THREE.SphereGeometry(0.16, 16, 10), materials.upperPaint, toX(4.55), hullSectionAt(4.55).bottom - 0.08, 0).scale.set(2.2, 0.7, 0.9);
 
   // Navigation lights: red port wingtip, green starboard, white on the tail.
   const tipEdges = wingEdges(WING_SEMISPAN - 0.08);
@@ -1285,8 +1536,8 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   for (const [span, material] of [[WING_SEMISPAN - 0.06, materials.navGreen], [-(WING_SEMISPAN - 0.06), materials.navRed]] as const) {
     navigationLights.push(assignAssembly(part(root, new THREE.SphereGeometry(0.07, 12, 8), material, toX(tipD), wingChordHeight(Math.abs(span)), span, { castShadow: false }), span > 0 ? 'wing-starboard' : 'wing-port'));
   }
-  // The white tail light sits on the cone's top, where the skin curls in over the gun mount.
-  const tailLightD = STATIONS.tailGunMount.opening;
+  // The white tail light sits on the cone's top: where the skin curls in over the Cheyenne mount, or at the stinger's end.
+  const tailLightD = stinger ? STATIONS.stingerHousing.end : STATIONS.tailGunMount.opening;
   navigationLights.push(part(root, new THREE.SphereGeometry(0.04, 12, 8), materials.navWhite, toX(tailLightD), hullSectionAt(tailLightD).top - 0.01, 0, { castShadow: false }));
 
   const interior = buildInterior({
@@ -1351,15 +1602,17 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
     // The chin turret's belts run up from the nose boxes out of sight, and its cases chute overboard.
     guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null }))],
     cutawayMaterials: [
-      materials.hull, materials.oliveDrab, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
+      materials.hull, materials.upperPaint, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
       materials.noseArt.pinup, materials.noseArt.card, materials.missionTally,
-      materials.neutralGray, ballWindowMaskMaterial(materials.neutralGray), materials.tailHousing, ...interior.clipMaterials,
+      materials.lowerPaint, ballWindowMaskMaterial(materials.lowerPaint), materials.tailHousing, ...interior.clipMaterials,
     ],
     cutawayHidden: starboardWall,
     interiorMeshes,
     cabinFittings,
     noseArt,
     exhaustPorts,
+    battleDamage: { holes, ...hitEngine, burstPoint },
+    landingGear: buildLandingGear(root, materials),
     turboGlow: materials.turboGlow,
     navigationLights,
   };
@@ -1415,7 +1668,7 @@ const BOMB_PROFILE: [number, number][] = [
 ];
 
 function buildBombParts(): THREE.Group {
-  const materials = aircraftMaterials();
+  const materials = aircraftMaterials(LEAD_LIVERY);
   const bomb = new THREE.Group();
   const alongX = (geometry: THREE.BufferGeometry) => geometry.rotateZ(-Math.PI / 2);
   part(bomb, alongX(new THREE.LatheGeometry(BOMB_PROFILE.map(([radius, along]) => new THREE.Vector2(radius, along)), 32)), materials.bomb, 0, 0, 0);

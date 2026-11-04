@@ -102,6 +102,19 @@ body.is-studio .vignette { opacity: 0.18; }
 }
 .callout.is-above span { bottom: var(--leader); }
 .callout.is-below span { top: var(--leader); }
+.callout.is-selectable span { pointer-events: auto; cursor: pointer; }
+.hotspot { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.15s; }
+.hotspot::before {
+  content: ""; position: absolute; left: -7px; top: -7px; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid #ffcf8a; background: #ffcf8a30; pointer-events: auto; cursor: help;
+}
+.hotspot span {
+  display: none; position: absolute; left: 12px; top: -12px; white-space: nowrap; padding: 4px 9px; border-radius: 8px;
+  background: var(--chip); backdrop-filter: blur(6px); border: 1px solid #ffcf8a60; font-size: 11px; font-weight: 600; color: #eef2fa;
+}
+.hotspot span em { margin-left: 8px; font-style: normal; font-weight: 400; color: #ffcf8a; }
+.hotspot:hover span { display: block; }
+.callout.is-selectable span:hover { border-color: #7fe3ff; }
 body.is-studio .callout::after { background: #1d2230; box-shadow: none; }
 body.is-studio .callout i { background: #1d2230a0; }
 body.is-studio .callout span { background: #fffaf2e0; color: #1d2230; border-color: #1d223030; }
@@ -114,3 +127,11 @@ body.is-studio .callout span { background: #fffaf2e0; color: #1d2230; border-col
 body.is-studio .log-status { color: #5d6476; }
 body.is-studio .meter-slot { border-color: #00000014; --fps-line: #1d6f8a; --fps-guide: #0000002a; }
 body.is-studio .fps-readout { color: #5d6476; }
+
+/* Photo mode: the overlays step aside so the frame can be looked at whole; one line says how to leave. */
+body.is-photo #ui-root > *, body.is-photo #callouts { display: none; }
+body.is-photo #ui-root .photo-hint { display: block; }
+.photo-hint {
+  display: none; position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 5px 12px; border-radius: 8px;
+  background: var(--chip); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #eef2fa; pointer-events: none;
+}

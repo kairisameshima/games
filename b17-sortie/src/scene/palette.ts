@@ -20,6 +20,10 @@ export const PALETTE = {
   /** USAAF Olive Drab 41 over Neutral Gray 43, the standard B-17G factory finish until early 1944. */
   oliveDrab: '#5b5843',
   neutralGray: '#8a8e8c',
+  /** Unpainted aluminium skin, the finish from early 1944 (silver paint on the kit). */
+  aluminium: '#b3b7ba',
+  /** Black stencils on bare metal: codes, the tail serial and the group triangle. */
+  stencilBlack: '#1b1c1d',
   insigniaBlue: '#253563',
   insigniaWhite: '#e9e6dc',
   codeGray: '#c5c3b6',

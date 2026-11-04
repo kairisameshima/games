@@ -46,6 +46,8 @@ export class FlakField {
   private readonly bursts: FlakBurst[] = [];
   private spawnAccumulator = 0;
   private random = mulberry(1943);
+  /** Bursts set off since the last `takeBurstCount`, for the foley. */
+  private burstCount = 0;
 
   constructor() {
     const puffGeometry = cottonTuftGeometry(3, { detail: 5, shellDetail: 3, shells: FLAK_COTTON.shells });
@@ -131,8 +133,6 @@ export class FlakField {
   }
 
   private spawn(zone: FlakSpawnZone): void {
-    const burst = this.bursts.find((candidate) => !candidate.active);
-    if (!burst) return;
     const position = new THREE.Vector3();
     for (let attempt = 0; attempt < 12; attempt++) {
       position.set(
@@ -142,6 +142,14 @@ export class FlakField {
       );
       if (position.distanceTo(zone.centre) > zone.minimumDistance) break;
     }
+    this.burstAt(position);
+  }
+
+  /** A burst at a chosen world position: the one that hits the lead. */
+  burstAt(position: THREE.Vector3): void {
+    const burst = this.bursts.find((candidate) => !candidate.active);
+    if (!burst) return;
+    this.burstCount += 1;
     burst.group.position.copy(position);
     burst.group.visible = true;
     burst.wire.scale.set(1, Math.max(RIG_HEIGHT - position.y, 0), 1);
@@ -152,6 +160,13 @@ export class FlakField {
       if (index === 0) offset.set(0, 0, 0);
       else offset.set(this.random() - 0.5, (this.random() - 0.5) * 0.7, this.random() - 0.5).multiplyScalar(0.9 * burst.size);
     });
+  }
+
+  /** How many bursts went off since the last call. */
+  takeBurstCount(): number {
+    const count = this.burstCount;
+    this.burstCount = 0;
+    return count;
   }
 
   reset(): void {
@@ -183,6 +198,15 @@ const CONTRAIL_SCATTER = 0.35;
 /** Boil: how far each tuft turns about the wire between exposures. */
 const CONTRAIL_ROLL_BOIL = 0.18;
 const CONTRAIL_COLOR = { lab: '#e8edf5', studio: '#9aa0a8' } as const;
+export interface TrailLook {
+  colour: { lab: string; studio: string };
+  /** Tuft radius as a multiple of a contrail's. */
+  girth: number;
+}
+
+const CONTRAIL_LOOK: TrailLook = { colour: CONTRAIL_COLOR, girth: 1 };
+/** Oil smoke from a hit engine: the same cotton on its wire, dyed charcoal and pulled out thicker. */
+export const ENGINE_SMOKE_LOOK: TrailLook = { colour: { lab: '#3b3b3d', studio: '#2c2d30' }, girth: 2.6 };
 const ARMATURE_WIRE_RADIUS = 0.003;
 
 interface TrailPoint {
@@ -216,10 +240,10 @@ export class Contrails {
   private readonly offset = new THREE.Vector3();
   private static readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(private readonly emitterCount: number) {
+  constructor(private readonly emitterCount: number, private readonly look: TrailLook = CONTRAIL_LOOK) {
     this.trails = Array.from({ length: emitterCount }, () => []);
     this.spare = Array.from({ length: emitterCount }, (_, emitter) => Array.from({ length: CONTRAIL_POINTS }, (__, slot) => emitter * CONTRAIL_POINTS + slot));
-    this.material = cottonMaterial({ color: CONTRAIL_COLOR.lab, instanced: true, frequency: CONTRAIL_COTTON.frequency, fuzz: CONTRAIL_COTTON.fuzz });
+    this.material = cottonMaterial({ color: look.colour.lab, instanced: true, frequency: CONTRAIL_COTTON.frequency, fuzz: CONTRAIL_COTTON.fuzz });
     const geometry = cottonTuftGeometry(5, { detail: 2, shellDetail: 1, shells: CONTRAIL_COTTON.shells, lumpiness: 0.16 });
     const count = emitterCount * CONTRAIL_POINTS;
     this.wisps = new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
@@ -244,14 +268,15 @@ export class Contrails {
 
   /** Studio is cream, where white cotton vanishes, so the trails go grey there. */
   setStudioMode(studio: boolean): void {
-    this.material.color.set(studio ? CONTRAIL_COLOR.studio : CONTRAIL_COLOR.lab);
+    this.material.color.set(studio ? this.look.colour.studio : this.look.colour.lab);
   }
 
   /**
    * `exposureSec` is the film time an exposure covers this frame (0 between exposures); `emitters` are this frame's
-   * world-space exhaust positions, one per engine, in a fixed order.
+   * world-space exhaust positions, one per engine, in a fixed order. While `emitting` is false no new tufts go on, and
+   * the trail drifts off and is taken down.
    */
-  update(exposureSec: number, driftSpeed: number, emitters: THREE.Vector3[], random: () => number): void {
+  update(exposureSec: number, driftSpeed: number, emitters: THREE.Vector3[], random: () => number, emitting = true): void {
     for (let emitter = 0; emitter < this.emitterCount; emitter++) {
       const trail = this.trails[emitter];
       if (exposureSec > 0) {
@@ -263,13 +288,13 @@ export class Contrails {
         while (trail.length > 0 && (trail[trail.length - 1].age > CONTRAIL_LIFETIME_SECONDS || this.spare[emitter].length === 0)) {
           this.takeOff(emitter, trail.pop() as TrailPoint);
         }
-        trail.unshift({
+        if (emitting) trail.unshift({
           instance: this.spare[emitter].pop() as number, position: emitters[emitter].clone(), age: 0, roll: random() * Math.PI * 2,
           lump: new THREE.Vector2(0.7 + random() * 0.6, 0.7 + random() * 0.6),
           scatter: new THREE.Vector2((random() - 0.5) * 2 * CONTRAIL_SCATTER, (random() - 0.5) * 2 * CONTRAIL_SCATTER),
         });
       }
-      if (trail.length > 0) trail[0].position.copy(emitters[emitter]);
+      if (emitting && trail.length > 0) trail[0].position.copy(emitters[emitter]);
       this.writeTrail(trail);
     }
     this.tufts.instanceMatrix.needsUpdate = true;
@@ -301,7 +326,7 @@ export class Contrails {
       this.up.crossVectors(this.side, this.tangent);
       this.basis.makeBasis(this.tangent, this.up, this.side);
       this.orientation.setFromRotationMatrix(this.basis).multiply(this.roll.setFromAxisAngle(X_AXIS, point.roll));
-      const radius = CONTRAIL_BIRTH_RADIUS + point.age * CONTRAIL_SPREAD_PER_SECOND;
+      const radius = (CONTRAIL_BIRTH_RADIUS + point.age * CONTRAIL_SPREAD_PER_SECOND) * this.look.girth;
       const gap = point.position.distanceTo(older.position);
       this.scale.set(Math.max(radius, gap * CONTRAIL_OVERLAP), radius * point.lump.x, radius * point.lump.y);
       // The tuft at the exhaust sits on the wire; the rest are teased off it as they loosen.
