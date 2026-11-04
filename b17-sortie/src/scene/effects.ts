@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { addVirtualLight, type VirtualLight } from '../render/studio';
+import { addVirtualLight, glassMaterial, matteMaterial, type VirtualLight } from '../render/studio';
 import { cottonMaterial, cottonTuftGeometry, type CottonMaterial } from '../render/miniature';
 import { PALETTE } from './palette';
 import { STOP_MOTION_FPS } from './stop-motion';
+import { handCutFlashTextures } from './textures';
 
 // Flak: an 88 mm burst is a split-second flash, then a black, ragged smoke cluster that hangs where it burst; on the
-// stop-motion set, tufts of cotton dyed near black.
+// stop-motion set, a hand-cut paper flash, then tufts of cotton dyed near black, hung from the rig on a fine wire.
 
 const FLAK_POOL_SIZE = 14;
 const FLAK_PUFFS = 7;
@@ -14,14 +15,19 @@ const FLAK_LIFETIME_SECONDS = 7;
 const FLAK_SMOKE_COLOR = '#17181b';
 /** Filaments per unit tuft and the halo's reach in tuft radii. */
 const FLAK_COTTON = { frequency: 12, fuzz: 0.25, shells: 3 } as const;
+/** World height of the rig the bursts hang from, above the set. */
+const RIG_HEIGHT = 16;
+/** Fishing-line wire: radius in world units, and the smoke density below which the burst is taken down off it. */
+const RIG_WIRE = { radius: 0.0035, takenDownBelow: 0.12 } as const;
 
 interface FlakBurst {
   group: THREE.Group;
   puffs: THREE.Mesh[];
   puffOffsets: THREE.Vector3[];
   smoke: CottonMaterial;
-  flash: THREE.Mesh;
-  flashMaterial: THREE.MeshBasicMaterial;
+  /** One replacement piece per child; an exposure shows one of them. */
+  flash: THREE.Group;
+  wire: THREE.Mesh;
   light: VirtualLight;
   age: number;
   active: boolean;
@@ -39,12 +45,16 @@ export class FlakField {
   readonly root = new THREE.Group();
   private readonly bursts: FlakBurst[] = [];
   private spawnAccumulator = 0;
-  private readonly flashColor = new THREE.Color(PALETTE.flakFlash);
   private random = mulberry(1943);
 
   constructor() {
     const puffGeometry = cottonTuftGeometry(3, { detail: 5, shellDetail: 3, shells: FLAK_COTTON.shells });
-    const flashGeometry = new THREE.IcosahedronGeometry(1, 2);
+    const flashPieces = handCutFlashTextures().map((texture) => new THREE.MeshBasicMaterial({
+      map: texture, color: new THREE.Color(2.4, 2.1, 1.8), alphaTest: 0.5, side: THREE.DoubleSide, fog: false, toneMapped: false,
+    }));
+    const flashCard = new THREE.PlaneGeometry(2, 2);
+    const wireGeometry = new THREE.CylinderGeometry(RIG_WIRE.radius, RIG_WIRE.radius, 1, 5, 1, true).translate(0, 0.5, 0);
+    const wireMaterial = matteMaterial('#c9ccd0', { roughness: 0.3, envMapIntensity: 1.2 });
     for (let index = 0; index < FLAK_POOL_SIZE; index++) {
       const group = new THREE.Group();
       group.visible = false;
@@ -58,12 +68,23 @@ export class FlakField {
         puffs.push(mesh);
         puffOffsets.push(new THREE.Vector3());
       }
-      const flashMaterial = new THREE.MeshBasicMaterial({ color: this.flashColor.clone().multiplyScalar(6), transparent: true, fog: false, depthWrite: false });
-      const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+      // Each paper flash is three cards crossed at right angles, so it reads from any side.
+      const flash = new THREE.Group();
+      for (const material of flashPieces) {
+        const piece = new THREE.Group();
+        for (const [x, y] of [[0, 0], [0, Math.PI / 2], [Math.PI / 2, 0]]) {
+          const card = new THREE.Mesh(flashCard, material);
+          card.rotation.set(x, y, 0);
+          piece.add(card);
+        }
+        flash.add(piece);
+      }
       group.add(flash);
+      const wire = new THREE.Mesh(wireGeometry, wireMaterial);
+      group.add(wire);
       const light = addVirtualLight(new THREE.Vector3(), PALETTE.flakFlash, 3.2, 0);
       this.root.add(group);
-      this.bursts.push({ group, puffs, puffOffsets, smoke, flash, flashMaterial, light, age: 0, active: false, size: 1 });
+      this.bursts.push({ group, puffs, puffOffsets, smoke, flash, wire, light, age: 0, active: false, size: 1 });
     }
   }
 
@@ -88,8 +109,11 @@ export class FlakField {
       burst.group.position.x -= driftSpeed * deltaSec;
       const flashT = Math.min(age / FLAK_FLASH_SECONDS, 1);
       burst.flash.visible = flashT < 1;
-      burst.flash.scale.setScalar(burst.size * (0.25 + flashT * 0.35));
-      burst.flashMaterial.opacity = 1 - flashT;
+      // A bigger piece each exposure while it lasts, a different one each time.
+      const piece = Math.floor(this.random() * burst.flash.children.length);
+      burst.flash.children.forEach((child, index) => { child.visible = index === piece; });
+      burst.flash.scale.setScalar(burst.size * (0.3 + flashT * 0.3));
+      burst.flash.rotation.set(this.random() * Math.PI, this.random() * Math.PI, 0);
       burst.light.position.copy(burst.group.position);
       burst.light.intensity = (1 - flashT) * 3.5;
       // Smoke blooms out fast, then slowly spreads and thins.
@@ -101,6 +125,7 @@ export class FlakField {
       });
       const density = Math.min(1, age * 8) * (1 - THREE.MathUtils.smoothstep(age, FLAK_LIFETIME_SECONDS * 0.45, FLAK_LIFETIME_SECONDS));
       burst.smoke.wisp.value = 1 - density;
+      burst.wire.visible = density > RIG_WIRE.takenDownBelow;
       burst.smoke.color.setScalar(0.04 + age * 0.012);
     }
   }
@@ -119,6 +144,7 @@ export class FlakField {
     }
     burst.group.position.copy(position);
     burst.group.visible = true;
+    burst.wire.scale.set(1, Math.max(RIG_HEIGHT - position.y, 0), 1);
     burst.active = true;
     burst.age = 0;
     burst.size = 0.8 + this.random() * 0.6;
@@ -139,9 +165,10 @@ export class FlakField {
   }
 }
 
-// Contrails: cotton wool pulled out behind each turbosupercharger exhaust, one tuft laid down per stop-motion exposure
-// and left to drift aft with the air. Near the engine the tufts are drawn out thin, the way pulled cotton strings out;
-// further back they fatten and loosen, then thin to wisps.
+// Contrails: cotton wool pulled out behind each turbosupercharger exhaust and threaded on an armature wire, the way a
+// stop-motion trail is built. Each trail is a fixed set of tufts the animator reuses: every exposure he slides each one
+// back along the wire and teases it a little looser, and the one that has thinned out at the tail is pulled off and
+// pressed on again at the exhaust. Near the engine the tufts are drawn out thin; further back they fatten and fray.
 
 const CONTRAIL_LIFETIME_SECONDS = 7;
 const CONTRAIL_POINTS = Math.ceil(CONTRAIL_LIFETIME_SECONDS * STOP_MOTION_FPS) + 2;
@@ -151,24 +178,31 @@ const CONTRAIL_SPREAD_PER_SECOND = 0.07;
 const CONTRAIL_OVERLAP = 0.75;
 /** Filaments per world unit, the halo's reach in tuft radii, and its shells. */
 const CONTRAIL_COTTON = { frequency: 40, fuzz: 0.35, shells: 3 } as const;
-/** Tufts sit off the trail's line by up to this fraction of their radius, so it reads as torn wool, not a rope. */
+/** Tufts sit off the wire by up to this fraction of their radius, more as they are teased loose. */
 const CONTRAIL_SCATTER = 0.35;
-/** Boil: how far each tuft turns about the trail between exposures. */
+/** Boil: how far each tuft turns about the wire between exposures. */
 const CONTRAIL_ROLL_BOIL = 0.18;
 const CONTRAIL_COLOR = { lab: '#e8edf5', studio: '#9aa0a8' } as const;
+const ARMATURE_WIRE_RADIUS = 0.003;
 
 interface TrailPoint {
+  /** The tuft's instance: the same piece of cotton for as long as it is on the wire. */
+  instance: number;
   position: THREE.Vector3;
   age: number;
   roll: number;
-  /** Per-tuft girth across and up, and its offset off the trail's line in its own frame, in radii. */
+  /** Per-tuft girth across and up, and its offset off the wire in its own frame, in radii. */
   lump: THREE.Vector2;
   scatter: THREE.Vector2;
 }
 
 export class Contrails {
-  readonly mesh: THREE.InstancedMesh;
+  readonly root = new THREE.Group();
+  private readonly tufts: THREE.InstancedMesh;
+  private readonly wire: THREE.InstancedMesh;
   private readonly trails: TrailPoint[][];
+  /** Tufts not on a wire, per trail. */
+  private readonly spare: number[][];
   private readonly wisps: THREE.InstancedBufferAttribute;
   private readonly material: CottonMaterial;
   private readonly tangent = new THREE.Vector3();
@@ -184,18 +218,28 @@ export class Contrails {
 
   constructor(private readonly emitterCount: number) {
     this.trails = Array.from({ length: emitterCount }, () => []);
+    this.spare = Array.from({ length: emitterCount }, (_, emitter) => Array.from({ length: CONTRAIL_POINTS }, (__, slot) => emitter * CONTRAIL_POINTS + slot));
     this.material = cottonMaterial({ color: CONTRAIL_COLOR.lab, instanced: true, frequency: CONTRAIL_COTTON.frequency, fuzz: CONTRAIL_COTTON.fuzz });
     const geometry = cottonTuftGeometry(5, { detail: 2, shellDetail: 1, shells: CONTRAIL_COTTON.shells, lumpiness: 0.16 });
     const count = emitterCount * CONTRAIL_POINTS;
     this.wisps = new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aWisp', this.wisps);
-    this.mesh = new THREE.InstancedMesh(geometry, this.material, count);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.frustumCulled = false;
+    this.tufts = new THREE.InstancedMesh(geometry, this.material, count);
+    this.tufts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.tufts.frustumCulled = false;
     // A thousand tufts with their shells would double the shadow pass for shadows lost under the clouds' own.
-    this.mesh.castShadow = false;
-    this.mesh.receiveShadow = true;
-    for (let index = 0; index < count; index++) this.mesh.setMatrixAt(index, Contrails.hidden);
+    this.tufts.castShadow = false;
+    this.tufts.receiveShadow = true;
+    // The armature: one unit length of wire per gap between tufts, along +y.
+    const wireGeometry = new THREE.CylinderGeometry(ARMATURE_WIRE_RADIUS, ARMATURE_WIRE_RADIUS, 1, 5, 1, true).translate(0, 0.5, 0);
+    this.wire = new THREE.InstancedMesh(wireGeometry, matteMaterial('#b9bcc0', { roughness: 0.35, envMapIntensity: 1.2 }), count);
+    this.wire.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.wire.frustumCulled = false;
+    for (let index = 0; index < count; index++) {
+      this.tufts.setMatrixAt(index, Contrails.hidden);
+      this.wire.setMatrixAt(index, Contrails.hidden);
+    }
+    this.root.add(this.tufts, this.wire);
   }
 
   /** Studio is cream, where white cotton vanishes, so the trails go grey there. */
@@ -204,9 +248,8 @@ export class Contrails {
   }
 
   /**
-   * `exposureSec` is the time a stop-motion exposure covers this frame (0 between exposures); `emitters` are this
-   * frame's world-space exhaust positions, one per engine, in a fixed order. The newest tuft stays on its exhaust every
-   * frame, so the trail stays attached to the smoothly flying model.
+   * `exposureSec` is the film time an exposure covers this frame (0 between exposures); `emitters` are this frame's
+   * world-space exhaust positions, one per engine, in a fixed order.
    */
   update(exposureSec: number, driftSpeed: number, emitters: THREE.Vector3[], random: () => number): void {
     for (let emitter = 0; emitter < this.emitterCount; emitter++) {
@@ -217,31 +260,38 @@ export class Contrails {
           point.position.x -= driftSpeed * exposureSec;
           point.roll += (random() - 0.5) * CONTRAIL_ROLL_BOIL;
         }
-        while (trail.length > 0 && trail[trail.length - 1].age > CONTRAIL_LIFETIME_SECONDS) trail.pop();
+        while (trail.length > 0 && (trail[trail.length - 1].age > CONTRAIL_LIFETIME_SECONDS || this.spare[emitter].length === 0)) {
+          this.takeOff(emitter, trail.pop() as TrailPoint);
+        }
         trail.unshift({
-          position: emitters[emitter].clone(), age: 0, roll: random() * Math.PI * 2,
+          instance: this.spare[emitter].pop() as number, position: emitters[emitter].clone(), age: 0, roll: random() * Math.PI * 2,
           lump: new THREE.Vector2(0.7 + random() * 0.6, 0.7 + random() * 0.6),
           scatter: new THREE.Vector2((random() - 0.5) * 2 * CONTRAIL_SCATTER, (random() - 0.5) * 2 * CONTRAIL_SCATTER),
         });
-        if (trail.length > CONTRAIL_POINTS) trail.pop();
       }
       if (trail.length > 0) trail[0].position.copy(emitters[emitter]);
-      this.writeTrail(emitter, trail);
+      this.writeTrail(trail);
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.tufts.instanceMatrix.needsUpdate = true;
+    this.wire.instanceMatrix.needsUpdate = true;
     this.wisps.needsUpdate = true;
   }
 
-  private writeTrail(emitter: number, trail: TrailPoint[]): void {
-    for (let slot = 0; slot < CONTRAIL_POINTS; slot++) {
-      const index = emitter * CONTRAIL_POINTS + slot;
-      const point = trail[slot];
-      if (!point || trail.length < 2) {
-        this.mesh.setMatrixAt(index, Contrails.hidden);
-        continue;
+  private takeOff(emitter: number, point: TrailPoint): void {
+    this.tufts.setMatrixAt(point.instance, Contrails.hidden);
+    this.wire.setMatrixAt(point.instance, Contrails.hidden);
+    this.spare[emitter].push(point.instance);
+  }
+
+  private writeTrail(trail: TrailPoint[]): void {
+    trail.forEach((point, order) => {
+      if (trail.length < 2) {
+        this.tufts.setMatrixAt(point.instance, Contrails.hidden);
+        this.wire.setMatrixAt(point.instance, Contrails.hidden);
+        return;
       }
-      const older = trail[Math.min(slot + 1, trail.length - 1)];
-      const newer = trail[Math.max(slot - 1, 0)];
+      const older = trail[Math.min(order + 1, trail.length - 1)];
+      const newer = trail[Math.max(order - 1, 0)];
       this.tangent.subVectors(newer.position, older.position);
       if (this.tangent.lengthSq() < 1e-8) this.tangent.set(1, 0, 0);
       this.tangent.normalize();
@@ -254,31 +304,51 @@ export class Contrails {
       const radius = CONTRAIL_BIRTH_RADIUS + point.age * CONTRAIL_SPREAD_PER_SECOND;
       const gap = point.position.distanceTo(older.position);
       this.scale.set(Math.max(radius, gap * CONTRAIL_OVERLAP), radius * point.lump.x, radius * point.lump.y);
-      // The newest tuft stays on the exhaust; the rest scatter off the line as they grow.
-      const scatter = slot === 0 ? 0 : radius;
+      // The tuft at the exhaust sits on the wire; the rest are teased off it as they loosen.
+      const scatter = order === 0 ? 0 : radius;
       this.offset.copy(this.up).multiplyScalar(point.scatter.x * scatter).addScaledVector(this.side, point.scatter.y * scatter).add(point.position);
       this.matrix.compose(this.offset, this.orientation, this.scale);
-      this.mesh.setMatrixAt(index, this.matrix);
+      this.tufts.setMatrixAt(point.instance, this.matrix);
       // Condensation forms a short way behind the exhaust, so the newest tufts are only a few strands; old ones fray.
       const forming = 1 - THREE.MathUtils.smoothstep(point.age, 0.02, 0.4);
       const fraying = THREE.MathUtils.smoothstep(point.age, 2.5, CONTRAIL_LIFETIME_SECONDS);
-      this.wisps.setX(index, Math.max(forming * 0.8, fraying));
+      this.wisps.setX(point.instance, Math.max(forming * 0.8, fraying));
+      this.writeWire(point, order === trail.length - 1 ? null : older);
+    });
+  }
+
+  /** The wire from this tuft back to the next older one; the last tuft carries none. */
+  private writeWire(point: TrailPoint, older: TrailPoint | null): void {
+    if (!older) {
+      this.wire.setMatrixAt(point.instance, Contrails.hidden);
+      return;
     }
+    this.offset.subVectors(older.position, point.position);
+    const length = this.offset.length();
+    this.orientation.setFromUnitVectors(WORLD_UP, this.offset.divideScalar(Math.max(length, 1e-6)));
+    this.matrix.compose(point.position, this.orientation, this.scale.set(1, length, 1));
+    this.wire.setMatrixAt(point.instance, this.matrix);
   }
 
   reset(): void {
-    for (const trail of this.trails) trail.length = 0;
+    this.trails.forEach((trail, emitter) => {
+      for (const point of trail) this.takeOff(emitter, point);
+      trail.length = 0;
+    });
   }
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 
-// Falling bombs, released in train from the bay.
+// Falling bombs, released in train from the bay; each rides down a clear acrylic rod stood on the set floor, the rig a
+// stop-motion animator would hold a falling prop on.
 
 const BOMB_GRAVITY = 3.2;
 const BOMB_DRAG = 0.55;
 
-interface FallingBomb { object: THREE.Object3D; velocity: THREE.Vector3; age: number }
+interface FallingBomb { object: THREE.Object3D; rod: THREE.Mesh; velocity: THREE.Vector3; age: number }
+
+const BOMB_ROD_RADIUS = 0.012;
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
@@ -287,15 +357,26 @@ export class BombTrain {
   private readonly pitchAxis = new THREE.Vector3();
   private readonly falling: FallingBomb[] = [];
 
+  private readonly rodGeometry = new THREE.CylinderGeometry(BOMB_ROD_RADIUS, BOMB_ROD_RADIUS, 1, 10, 1).translate(0, 0.5, 0);
+  private readonly rodMaterial = glassMaterial({ opacity: 0.32, roughness: 0.04, envMapIntensity: 1.4 });
+
   constructor(private readonly createBomb: () => THREE.Object3D, private readonly floorClearance: number) {}
+
+  /** The rod runs straight up from the set floor to the bomb's middle. */
+  private standRod(bomb: FallingBomb): void {
+    bomb.rod.position.set(bomb.object.position.x, 0, bomb.object.position.z);
+    bomb.rod.scale.set(1, Math.max(bomb.object.position.y, 0.001), 1);
+  }
 
   release(worldPosition: THREE.Vector3, worldQuaternion: THREE.Quaternion, scale: number): void {
     const object = this.createBomb();
     object.position.copy(worldPosition);
     object.quaternion.copy(worldQuaternion);
     object.scale.setScalar(scale);
-    this.root.add(object);
-    this.falling.push({ object, velocity: new THREE.Vector3(0, -0.15, 0), age: 0 });
+    const rod = new THREE.Mesh(this.rodGeometry, this.rodMaterial);
+    this.root.add(object, rod);
+    this.falling.push({ object, rod, velocity: new THREE.Vector3(0, -0.15, 0), age: 0 });
+    this.standRod(this.falling[this.falling.length - 1]);
   }
 
   update(deltaSec: number): void {
@@ -309,15 +390,16 @@ export class BombTrain {
       // Nose drops as it falls: pitch about the horizontal axis across the bomb, whatever its roll on the rack was.
       const axis = this.pitchAxis.set(1, 0, 0).applyQuaternion(bomb.object.quaternion).cross(WORLD_UP).negate().normalize();
       bomb.object.rotateOnWorldAxis(axis, 0.35 * deltaSec);
+      this.standRod(bomb);
       if (bomb.object.position.y < this.floorClearance) {
-        this.root.remove(bomb.object);
+        this.root.remove(bomb.object, bomb.rod);
         this.falling.splice(index, 1);
       }
     }
   }
 
   reset(): void {
-    for (const bomb of this.falling) this.root.remove(bomb.object);
+    for (const bomb of this.falling) this.root.remove(bomb.object, bomb.rod);
     this.falling.length = 0;
   }
 }

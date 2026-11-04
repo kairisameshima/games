@@ -239,6 +239,7 @@ function waterSlideDecal(art: HTMLCanvasElement, marginPx: number): DecalArt {
   context.drawImage(tinted(filmCanvas, '#efeadb'), 0, 0);
   context.globalAlpha = 1;
   context.drawImage(art, pad, pad);
+  context.drawImage(silvering(filmCanvas, art, pad), 0, 0);
 
   const [bumpCanvas, bump] = createCanvas(width, height);
   bump.fillStyle = '#000000';
@@ -252,6 +253,29 @@ function waterSlideDecal(art: HTMLCanvasElement, marginPx: number): DecalArt {
   const bumpMap = new THREE.CanvasTexture(bumpCanvas);
   bumpMap.anisotropy = 8;
   return { map: finishTexture(canvas), bumpMap, growth: new THREE.Vector2(width / art.width, height / art.height) };
+}
+
+/**
+ * Silvering: air trapped under the clear film where it did not settle onto the paint, flecks of bright silver in the
+ * film's margin round the art, thickest at its outer edge where the decal setting solution never reached.
+ */
+function silvering(film: HTMLCanvasElement, art: HTMLCanvasElement, pad: number): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(film.width, film.height);
+  const random = seededRandom(film.width * 7 + film.height);
+  const flecks = Math.round((film.width + film.height) * 0.9);
+  for (let fleck = 0; fleck < flecks; fleck++) {
+    const x = random() * film.width;
+    const y = random() * film.height;
+    context.fillStyle = `rgba(222,226,230,${0.35 + random() * 0.4})`;
+    context.beginPath();
+    context.ellipse(x, y, 0.8 + random() * 2.6, 0.6 + random() * 1.8, random() * Math.PI, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.globalCompositeOperation = 'destination-in';
+  context.drawImage(film, 0, 0);
+  context.globalCompositeOperation = 'destination-out';
+  context.drawImage(art, pad, pad);
+  return canvas;
 }
 
 /** `source` with every opaque pixel turned `color`, keeping its alpha. */
@@ -332,19 +356,110 @@ export function tailMarkingDecal(serial: string, aircraftLetter: string): DecalA
   return waterSlideDecal(canvas, 12);
 }
 
-/** Motion-blurred propeller disc: faint black blade smear with the yellow tip band as a bright ring. */
-export function propellerDiscTexture(): THREE.CanvasTexture {
-  const size = 512;
+
+/** How many hand-cut flash pieces the props box holds; each shot or burst picks one. */
+export const HAND_CUT_FLASH_PIECES = 4;
+
+let flashPieces: THREE.CanvasTexture[] | null = null;
+
+/**
+ * Flashes for stop motion are replacement pieces cut from painted paper, not glows: a ragged star of flat colour bands,
+ * pale yellow in the middle through orange to a red rim, with the scissor cuts left straight. Each piece is cut
+ * differently.
+ */
+export function handCutFlashTextures(): THREE.CanvasTexture[] {
+  if (flashPieces) return flashPieces;
+  flashPieces = Array.from({ length: HAND_CUT_FLASH_PIECES }, (_, piece) => {
+    const size = 256;
+    const [canvas, context] = createCanvas(size, size);
+    const random = seededRandom(301 + piece * 59);
+    const points = 9 + Math.floor(random() * 5);
+    const tips = Array.from({ length: points }, () => 0.7 + random() * 0.3);
+    const notches = Array.from({ length: points }, () => 0.28 + random() * 0.22);
+    const turn = random() * Math.PI;
+    for (const [scale, colour] of [[1, '#c2301b'], [0.78, '#f07a1e'], [0.52, '#ffc23a'], [0.26, '#fff4c4']] as const) {
+      context.fillStyle = colour;
+      context.beginPath();
+      for (let index = 0; index < points * 2; index++) {
+        const angle = turn + (index / (points * 2)) * Math.PI * 2;
+        const radius = (index % 2 === 0 ? tips[index / 2] : notches[(index - 1) / 2]) * scale * (size / 2 - 4);
+        context.lineTo(size / 2 + Math.cos(angle) * radius, size / 2 + Math.sin(angle) * radius);
+      }
+      context.closePath();
+      context.fill();
+    }
+    return finishTexture(canvas);
+  });
+  return flashPieces;
+}
+
+/**
+ * Polystyrene cement fogging clear plastic: a frosted, milky blotch where a careless brush touched the glazing, crazed
+ * at its heart and creeping out in a ragged edge. White on transparent.
+ */
+export function glueFogTexture(): THREE.CanvasTexture {
+  const size = 256;
   const [canvas, context] = createCanvas(size, size);
-  const centre = size / 2;
-  const gradient = context.createRadialGradient(centre, centre, 0, centre, centre, centre);
-  gradient.addColorStop(0, 'rgba(10,10,12,0)');
-  gradient.addColorStop(0.12, 'rgba(10,10,12,0.22)');
-  gradient.addColorStop(0.88, 'rgba(10,10,12,0.1)');
-  gradient.addColorStop(0.915, 'rgba(232,191,44,0.16)');
-  gradient.addColorStop(0.975, 'rgba(232,191,44,0.12)');
-  gradient.addColorStop(1, 'rgba(232,191,44,0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
+  const random = seededRandom(613);
+  for (let blot = 0; blot < 60; blot++) {
+    const angle = random() * Math.PI * 2;
+    const reach = Math.pow(random(), 0.7) * size * 0.34;
+    const x = size / 2 + Math.cos(angle) * reach;
+    const y = size / 2 + Math.sin(angle) * reach * 0.7;
+    const radius = 10 + random() * 26;
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, `rgba(240,242,236,${0.18 + random() * 0.12})`);
+    gradient.addColorStop(1, 'rgba(240,242,236,0)');
+    context.fillStyle = gradient;
+    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  // Crazing: fine cracks where the solvent bit hardest.
+  context.strokeStyle = 'rgba(255,255,255,0.35)';
+  context.lineWidth = 1;
+  for (let crack = 0; crack < 26; crack++) {
+    let x = size / 2 + (random() - 0.5) * 60;
+    let y = size / 2 + (random() - 0.5) * 40;
+    context.beginPath();
+    context.moveTo(x, y);
+    for (let step = 0; step < 5; step++) {
+      x += (random() - 0.5) * 22;
+      y += (random() - 0.5) * 22;
+      context.lineTo(x, y);
+    }
+    context.stroke();
+  }
+  return finishTexture(canvas);
+}
+
+/**
+ * A thumbprint in skin oil: whorl ridges round an off-centre core, broken where the ridges split, fading to the edge.
+ * Pale grey on transparent; on glass it reads as a greasy smudge that catches the light.
+ */
+export function fingerprintTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const [canvas, context] = createCanvas(size, size);
+  const random = seededRandom(271);
+  const core = { x: size * 0.47, y: size * 0.55 };
+  context.lineWidth = 2.2;
+  for (let ridge = 1; ridge < 34; ridge++) {
+    const radius = ridge * 3.6;
+    const breaks = 2 + Math.floor(random() * 3);
+    for (let arc = 0; arc < breaks; arc++) {
+      const start = (arc / breaks) * Math.PI * 2 + random() * 0.4;
+      const end = ((arc + 1) / breaks) * Math.PI * 2 - random() * 0.35;
+      const fade = 1 - ridge / 34;
+      context.strokeStyle = `rgba(214,214,206,${0.5 * fade})`;
+      context.beginPath();
+      for (let step = 0; step <= 24; step++) {
+        const angle = start + ((end - start) * step) / 24;
+        // Ridges flatten towards the tip of the thumb, as a pressed print does.
+        const x = core.x + Math.cos(angle) * radius * 1.05;
+        const y = core.y + Math.sin(angle) * radius * (Math.sin(angle) < 0 ? 0.82 : 1.15);
+        if (step === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+      context.stroke();
+    }
+  }
   return finishTexture(canvas);
 }

@@ -20,7 +20,8 @@ import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullS
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersDecal, hullPaintTexture, insigniaDecal, propellerDiscTexture, surfacePaintTexture, tailMarkingDecal, type DecalArt,
+  codeLettersDecal, fingerprintTexture, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
+  type DecalArt,
 } from './textures';
 
 const AIRFOIL_POINTS_PER_SIDE = 28;
@@ -79,6 +80,9 @@ interface AircraftMaterials {
   tailHousing: THREE.MeshStandardMaterial;
   neutralGray: THREE.MeshStandardMaterial;
   canopy: THREE.MeshPhysicalMaterial;
+  /** Kit flaws on the glazing: cement fog where glue touched it, and a thumbprint. */
+  glueFog: THREE.MeshStandardMaterial;
+  fingerprint: THREE.MeshStandardMaterial;
   windowPane: THREE.MeshStandardMaterial;
   insignia: THREE.MeshStandardMaterial;
   codes: THREE.MeshStandardMaterial;
@@ -91,7 +95,6 @@ interface AircraftMaterials {
   steel: THREE.MeshStandardMaterial;
   rubber: THREE.MeshStandardMaterial;
   blade: THREE.MeshStandardMaterial;
-  propellerDisc: THREE.MeshBasicMaterial;
   turboGlow: THREE.MeshBasicMaterial;
   navRed: THREE.MeshBasicMaterial;
   navGreen: THREE.MeshBasicMaterial;
@@ -165,9 +168,6 @@ function aircraftMaterials(): AircraftMaterials {
     spanMetres: 4.65, upperColor: PALETTE.oliveDrab, lowerColor: PALETTE.oliveDrab,
     deIcerBoots: [[1.7, 4.3]], controlSurfaces: [[0.9, 4.45]], ribSpacing: 0.45, seed: 13,
   });
-  const propellerDisc = new THREE.MeshBasicMaterial({
-    map: propellerDiscTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide,
-  });
   sharedMaterials = {
     hull: paintMaterial(hullTexture),
     wing: paintMaterial(wingTexture),
@@ -186,6 +186,14 @@ function aircraftMaterials(): AircraftMaterials {
       map: windowPaneTexture(), transparent: true, depthWrite: false, roughness: 0.06, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04,
       envMapIntensity: 1.1, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     })),
+    glueFog: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      map: glueFogTexture(), transparent: true, depthWrite: false, roughness: 0.9, envMapIntensity: 0.4,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+    })),
+    fingerprint: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      map: fingerprintTexture(), transparent: true, depthWrite: false, roughness: 0.45, envMapIntensity: 1.2,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+    })),
     insignia: decalMaterial(insigniaDecal()),
     codes: decalMaterial(codeLettersDecal('LG')),
     aircraftLetter: decalMaterial(codeLettersDecal('K')),
@@ -199,7 +207,6 @@ function aircraftMaterials(): AircraftMaterials {
     blade: applyStudioShading(new THREE.MeshPhysicalMaterial({
       vertexColors: true, roughness: 0.48, metalness: 0.2, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 1.0,
     })),
-    propellerDisc,
     turboGlow: emissiveMaterial(PALETTE.turboGlow, 2.6),
     navRed: emissiveMaterial(PALETTE.navRed, 3.2),
     navGreen: emissiveMaterial(PALETTE.navGreen, 3.2),
@@ -719,6 +726,65 @@ const UP = new THREE.Vector3(0, 1, 0);
 const STARBOARD = new THREE.Vector3(0, 0, 1);
 const PORT = new THREE.Vector3(0, 0, -1);
 
+/** Where a builder's kit shows: the mould's parting line, sprue gates, cement fog and a thumbprint. */
+const KIT_FLAWS = {
+  /** Radius of the ridge the mould's two halves leave along the fuselage's top and bottom centrelines. */
+  seamRadius: 0.006,
+  /** Stretches of centreline with no seam: openings, turrets and glazing (start, end in metres from the nose). */
+  seamGapsTop: [[1.6, 2.35], [4.5, 5.8], [8.9, 10.1], [19.4, FUSELAGE_LENGTH]] as [number, number][],
+  seamGapsBottom: [[0, 2.8], [5.8, 8.45], [10.35, 11.9]] as [number, number][],
+  /** Sprue gates trimmed flush-ish on the fuselage sides: station, side, height up from the bottom (fraction). */
+  sprueGates: [[3.3, 1, 0.3], [11.6, -1, 0.28], [17.9, 1, 0.33], [7.2, -1, 0.35]] as [number, 1 | -1, number][],
+} as const;
+
+function addKitFlaws(airframe: THREE.Object3D, root: THREE.Object3D, noseGlazing: THREE.Mesh, materials: AircraftMaterials): void {
+  for (const [upper, gaps, material] of [[true, KIT_FLAWS.seamGapsTop, materials.oliveDrab], [false, KIT_FLAWS.seamGapsBottom, materials.neutralGray]] as const) {
+    for (const [start, end] of seamRuns(NOSE_GLAZING_END + 0.05, FUSELAGE_LENGTH - 0.15, gaps)) {
+      const points: THREE.Vector3[] = [];
+      for (let d = start; d <= end + 1e-6; d += Math.min(0.15, end - start)) {
+        const section = hullSectionAt(d);
+        points.push(new THREE.Vector3(toX(d), upper ? section.top : section.bottom, 0));
+      }
+      if (points.length < 2) continue;
+      const curve = new THREE.CatmullRomCurve3(points);
+      part(airframe, new THREE.TubeGeometry(curve, points.length * 3, KIT_FLAWS.seamRadius, 5, false), material, 0, 0, 0, { castShadow: false });
+    }
+  }
+  for (const [d, side, fraction] of KIT_FLAWS.sprueGates) {
+    const section = hullSectionAt(d);
+    const y = section.bottom + (section.top - section.bottom) * fraction;
+    const z = side * hullHalfWidthAtHeight(d, y);
+    part(airframe, new THREE.CylinderGeometry(0.018, 0.022, 0.016, 10), materials.neutralGray, toX(d), y, z, { rotation: [Math.PI / 2, 0, 0] });
+  }
+  // Cement that fogged the glazing where it meets the frame, and a thumbprint from setting it in place.
+  noseGlazing.updateMatrixWorld(true);
+  const glueAt = glazingPoint(noseGlazing, NOSE_GLAZING_END - 0.12, 0.35, 0.6);
+  addDecal(root, noseGlazing, materials.glueFog, glueAt.point, glueAt.normal, FORWARD, 0.34, 0.24, 0.2);
+  const printAt = glazingPoint(noseGlazing, 0.45, 0.4, -0.75);
+  addDecal(root, noseGlazing, materials.fingerprint, printAt.point, printAt.normal, UP, 0.2, 0.24, 0.2);
+}
+
+/** The stretches of [start, end] left once the gaps are taken out. */
+function seamRuns(start: number, end: number, gaps: readonly (readonly [number, number])[]): [number, number][] {
+  const runs: [number, number][] = [];
+  let from = start;
+  for (const [gapStart, gapEnd] of [...gaps].sort((a, b) => a[0] - b[0])) {
+    if (gapStart > from) runs.push([from, Math.min(gapStart, end)]);
+    from = Math.max(from, gapEnd);
+  }
+  if (from < end) runs.push([from, end]);
+  return runs.filter(([a, b]) => b - a > 0.2);
+}
+
+/** A point on the nose glazing and its outward normal, found by aiming in from outside at station `d`. */
+function glazingPoint(glazing: THREE.Mesh, d: number, up: number, across: number): { point: THREE.Vector3; normal: THREE.Vector3 } {
+  const origin = new THREE.Vector3(toX(d), up * 3, across * 3);
+  const aim = new THREE.Vector3(toX(d), 0, 0).sub(origin).normalize();
+  const hit = new THREE.Raycaster(origin, aim).intersectObject(glazing, false)[0];
+  if (!hit?.face) throw new Error(`No nose glazing at station ${d}`);
+  return { point: hit.point, normal: hit.face.normal.clone().transformDirection(glazing.matrixWorld) };
+}
+
 /** A glazed pane: the glass decal, plus the matching hole in the skin so the compartment shows through it. */
 function addWindow(
   airframe: THREE.Object3D, target: THREE.Mesh, material: THREE.Material, cutouts: WindowCutouts,
@@ -794,7 +860,8 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   // Hull and nose glazing; the crew and fittings inside come from the interior builder below.
   const hullGeometry = buildHullGeometry();
   const hull = part(airframe, hullGeometry, materials.hull, 0, 0, 0);
-  part(root, buildNoseGlazingGeometry(), materials.canopy, 0, 0, 0, { castShadow: false });
+  const noseGlazing = part(root, buildNoseGlazingGeometry(), materials.canopy, 0, 0, 0, { castShadow: false });
+  addKitFlaws(airframe, root, noseGlazing, materials);
   const glazingFrame = new THREE.TorusGeometry(1, 0.018, 6, 48);
   const frameSection = hullSectionAt(NOSE_GLAZING_END);
   const frame = part(airframe, glazingFrame, materials.oliveDrab, toX(NOSE_GLAZING_END), (frameSection.top + frameSection.bottom) / 2, 0, { rotation: [0, Math.PI / 2, 0] });
@@ -863,9 +930,6 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
         // Clamp ring where the shank leaves the hub barrel.
         part(bladeMesh, new THREE.CylinderGeometry(0.085, 0.09, 0.07, 18), materials.gunmetal, 0, 0.235, 0);
       }
-      const disc = part(propeller, new THREE.CircleGeometry(PROPELLER_RADIUS, 64), materials.propellerDisc, 0, 0, 0, { rotation: [0, Math.PI / 2, 0], castShadow: false });
-      disc.receiveShadow = false;
-      disc.renderOrder = 2;
       assignAssembly(propeller, nacelleId);
       propeller.userData.unmerged = true;
       root.add(propeller);

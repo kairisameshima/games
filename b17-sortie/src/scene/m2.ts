@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyStudioShading, matteMaterial, metalMaterial } from '../render/studio';
 import { mergeStaticMeshes, part, roundedBox } from './kit';
+import { handCutFlashTextures } from './textures';
 
 /**
  * Browning AN/M2 .50 calibre aircraft machine gun, the B-17G's only gun. Real dimensions (TM 9-225): 1.44 m overall,
@@ -165,53 +166,40 @@ function buildBolt(bolt: THREE.Group, materials: M2Materials): void {
   part(bolt, new THREE.CylinderGeometry(0.0075, 0.0075, 0.016, 10), materials.parkerized, BOLT_SLOT.front - 0.02, BOLT_SLOT.y, RECEIVER.halfWidth + 0.006, { rotation: [Math.PI / 2, 0, 0] });
 }
 
-let flashTexture: THREE.CanvasTexture | null = null;
-
-/** Radial falloff for the flash cards: white-hot core, orange fringe, transparent edge. */
-function muzzleFlashTexture(): THREE.CanvasTexture {
-  if (flashTexture) return flashTexture;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 128;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('2D canvas context unavailable');
-  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-  gradient.addColorStop(0, 'rgba(255, 250, 225, 1)');
-  gradient.addColorStop(0.22, 'rgba(255, 205, 110, 0.95)');
-  gradient.addColorStop(0.55, 'rgba(255, 120, 30, 0.45)');
-  gradient.addColorStop(1, 'rgba(255, 80, 10, 0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 128, 128);
-  flashTexture = new THREE.CanvasTexture(canvas);
-  flashTexture.colorSpace = THREE.SRGBColorSpace;
-  return flashTexture;
-}
-
 let flashTemplate: THREE.Group | null = null;
 
 /**
- * Muzzle flash out of the flash hider: three cards crossed along the bore and one facing forward, additive and unlit.
- * A .50's flash through a cone hider is short and broad, about 30 cm long.
+ * Muzzle flash out of the flash hider, as a stop-motion animator would make it: replacement pieces of painted paper,
+ * three crossed along the bore and one facing forward, one set per piece in the props box (`flash.children`, one shown
+ * per shot). A .50's flash through a cone hider is short and broad, about 30 cm long.
  */
 function muzzleFlash(): THREE.Group {
   if (!flashTemplate) {
-    const material = new THREE.MeshBasicMaterial({
-      map: muzzleFlashTexture(), color: new THREE.Color(3.2, 2.6, 1.8), transparent: true, depthWrite: false,
-      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, toneMapped: false,
+    const template = new THREE.Group();
+    handCutFlashTextures().forEach((texture, index) => {
+      const material = new THREE.MeshBasicMaterial({
+        map: texture, color: new THREE.Color(1.9, 1.7, 1.5), alphaTest: 0.5, side: THREE.DoubleSide, fog: false, toneMapped: false,
+      });
+      // Each piece is cut a little longer or broader than the last.
+      const length = 0.26 + (index % 2) * 0.08;
+      const width = 0.15 + ((index >> 1) % 2) * 0.05;
+      const piece = new THREE.Group();
+      const card = new THREE.PlaneGeometry(length, width).translate(length * 0.42, 0, 0);
+      for (let cardIndex = 0; cardIndex < 3; cardIndex++) {
+        const mesh = new THREE.Mesh(card, material);
+        mesh.rotation.x = (cardIndex * Math.PI) / 3 + index * 0.4;
+        piece.add(mesh);
+      }
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.2, width * 1.2), material);
+      face.rotation.y = Math.PI / 2;
+      face.position.x = 0.02;
+      piece.add(face);
+      template.add(piece);
     });
-    flashTemplate = new THREE.Group();
-    const card = new THREE.PlaneGeometry(0.3, 0.16).translate(0.13, 0, 0);
-    for (let index = 0; index < 3; index++) {
-      const mesh = new THREE.Mesh(card, material);
-      mesh.rotation.x = (index * Math.PI) / 3;
-      flashTemplate.add(mesh);
-    }
-    const face = new THREE.Mesh(new THREE.CircleGeometry(0.09, 20), material);
-    face.rotation.y = Math.PI / 2;
-    face.position.x = 0.02;
-    flashTemplate.add(face);
-    flashTemplate.traverse((object) => {
+    template.traverse((object) => {
       if (object instanceof THREE.Mesh) object.castShadow = false;
     });
+    flashTemplate = template;
   }
   return flashTemplate.clone();
 }

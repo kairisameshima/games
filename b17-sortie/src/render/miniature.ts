@@ -109,7 +109,16 @@ const BRUSHWORK_FRAGMENT = /* glsl */ `
     normal = miniatureBump(-vViewPosition, normal, height * BRUSH_RELIEF, faceDirection);
     diffuseColor.rgb *= 0.92 + paint.x * 0.14 + (paint.y - 0.5) * 0.1;
     roughnessFactor = clamp(roughnessFactor - paint.x * 0.1 + (0.5 - paint.y) * 0.06, 0.04, 1.0);
+    // A model left on the shelf between shots: dust settles on what faces up, in drifts and specks, and dulls the paint.
+    float upward = smoothstep(0.3, 0.9, normalize(vBrushNormal).y);
+    float drift = miniatureNoise(vBrushPosition * 3.1) * 0.45 + miniatureNoise4(vBrushPosition * 170.0).g * 0.55;
+    float dust = smoothstep(0.5, 0.82, drift) * upward * DUST_AMOUNT;
+    diffuseColor.rgb = mix(diffuseColor.rgb, DUST_COLOR, dust);
+    roughnessFactor = mix(roughnessFactor, 1.0, dust);
   }`;
+
+/** Shelf dust on upward faces: how far it covers the paint at its thickest, and its colour (linear RGB). */
+const DUST = { amount: 0.16, color: [0.62, 0.6, 0.56] } as const;
 
 /** Relief of the brush marks, in world units (the model is 0.32 scale, so this is a fraction of a millimetre of kit). */
 const BRUSH_RELIEF = 0.0035;
@@ -125,7 +134,8 @@ export function applyBrushwork<T extends THREE.MeshStandardMaterial>(material: T
       .replace('#include <common>', `#include <common>\n${BRUSHWORK_FUNCTIONS}`)
       // roughnessFactor is declared in roughnessmap_fragment, before the normal maps; the patch adjusts it there.
       .replace('#include <normal_fragment_maps>', BRUSHWORK_FRAGMENT);
-    shader.fragmentShader = `#define BRUSH_RELIEF ${BRUSH_RELIEF.toFixed(5)}\n${shader.fragmentShader}`;
+    shader.fragmentShader = `#define BRUSH_RELIEF ${BRUSH_RELIEF.toFixed(5)}\n#define DUST_AMOUNT ${DUST.amount.toFixed(2)}\n`
+      + `#define DUST_COLOR vec3(${DUST.color.map((value) => value.toFixed(2)).join(', ')})\n${shader.fragmentShader}`;
   });
   return material;
 }

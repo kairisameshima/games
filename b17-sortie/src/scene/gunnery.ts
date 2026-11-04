@@ -14,6 +14,23 @@ export interface MountedGun {
   caseFloorY: number | null;
 }
 
+/**
+ * A unit strip of cellophane along +y, head at the origin and tail below it: narrowing towards the tail and twisted half
+ * a turn along its length, the way a cut strip curls.
+ */
+function cellophaneStrip(): THREE.BufferGeometry {
+  const geometry = new THREE.PlaneGeometry(1, 1, 1, 12).translate(0, -0.5, 0);
+  const position = geometry.getAttribute('position');
+  for (let index = 0; index < position.count; index++) {
+    const along = -position.getY(index);
+    const width = position.getX(index) * (0.026 - along * 0.016);
+    const twist = along * Math.PI;
+    position.setXYZ(index, Math.cos(twist) * width, -along, Math.sin(twist) * width);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /** Every fifth round in the belt is a tracer (see the belt order in `interior/ammunition.ts`). */
 const TRACER_EVERY = 5;
 /** Spent cases stay this long, on a floor or in the air, then go. */
@@ -48,7 +65,8 @@ interface GunState {
 
 /** `space`: for a case inside the aircraft, the assembly whose (model-space) frame its position is in. */
 interface Case { position: THREE.Vector3; velocity: THREE.Vector3; spinAxis: THREE.Vector3; spin: number; orientation: THREE.Quaternion; age: number; resting: boolean; floorY: number; space: THREE.Object3D | null }
-interface Tracer { position: THREE.Vector3; direction: THREE.Vector3; age: number }
+/** `roll`: how the strip was turned about its length when it was rigged, so no two read alike. */
+interface Tracer { position: THREE.Vector3; direction: THREE.Vector3; age: number; roll: number }
 
 interface ShipGuns {
   root: THREE.Object3D;
@@ -97,18 +115,18 @@ export class Gunnery {
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly scratch = new THREE.Vector3();
   private readonly scratchQuaternion = new THREE.Quaternion();
+  private readonly roll = new THREE.Quaternion();
 
   constructor(private readonly modelScale: number) {
     this.overboardMesh = new THREE.InstancedMesh(caseGeometry(), brassMaterial(), MAX_OVERBOARD_CASES);
     this.overboardMesh.count = 0;
     this.overboardMesh.frustumCulled = false;
     this.overboardMesh.castShadow = true;
+    // A tracer on a stop-motion set is a strip of orange cellophane, bright enough to bloom, translucent at its tail.
     const tracerMaterial = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(4.2, 1.1, 0.35), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false,
+      color: new THREE.Color(3.4, 1.0, 0.3), transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false,
     });
-    // Unit streak along +y, head at the origin and tail below it.
-    const streak = new THREE.CylinderGeometry(0.012, 0.004, 1, 6, 1).translate(0, -0.5, 0);
-    this.tracerMesh = new THREE.InstancedMesh(streak, tracerMaterial, MAX_TRACERS);
+    this.tracerMesh = new THREE.InstancedMesh(cellophaneStrip(), tracerMaterial, MAX_TRACERS);
     this.tracerMesh.count = 0;
     this.tracerMesh.frustumCulled = false;
     this.root.add(this.overboardMesh, this.tracerMesh);
@@ -183,8 +201,10 @@ export class Gunnery {
   private fire(ship: ShipGuns, state: GunState, shotIndex: number, age: number): void {
     const { gun } = state.mounted;
     state.flashTimer = FLASH_SECONDS;
+    // A replacement piece from the props box, set at whatever roll the animator's fingers left it.
+    const piece = Math.floor(hash(state.seed, shotIndex, 4) * gun.flash.children.length);
+    gun.flash.children.forEach((child, index) => { child.visible = index === piece; });
     gun.flash.rotation.x = hash(state.seed, shotIndex, 3) * Math.PI;
-    gun.flash.scale.setScalar(0.75 + hash(state.seed, shotIndex, 4) * 0.6);
     gun.barrel.updateMatrixWorld(true);
     if ((shotIndex + state.seed) % TRACER_EVERY === 0) this.spawnTracer(gun, state.seed + shotIndex, age);
     this.ejectCase(ship, state, shotIndex);
@@ -198,7 +218,7 @@ export class Gunnery {
     direction.x += (hash(seed, 1, 5) - 0.5) * 0.008;
     direction.y += (hash(seed, 1, 6) - 0.5) * 0.008;
     direction.z += (hash(seed, 1, 7) - 0.5) * 0.008;
-    this.tracers.push({ position, direction: direction.normalize(), age: Math.max(age, 0) });
+    this.tracers.push({ position, direction: direction.normalize(), age: Math.max(age, 0), roll: hash(seed, 1, 8) * Math.PI });
   }
 
   private ejectCase(ship: ShipGuns, state: GunState, shotIndex: number): void {
@@ -330,7 +350,7 @@ export class Gunnery {
     this.tracers.forEach((tracer, index) => {
       const travelled = tracer.age * TRACER_SPEED_WORLD;
       const head = this.scratch.copy(tracer.position).addScaledVector(tracer.direction, travelled);
-      this.scratchQuaternion.setFromUnitVectors(this.up, tracer.direction);
+      this.scratchQuaternion.setFromUnitVectors(this.up, tracer.direction).multiply(this.roll.setFromAxisAngle(this.up, tracer.roll));
       this.scaleVector.set(1, Math.min(TRACER_LENGTH_WORLD, travelled), 1);
       this.tracerMesh.setMatrixAt(index, this.matrix.compose(head, this.scratchQuaternion, this.scaleVector));
     });

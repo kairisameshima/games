@@ -29,4 +29,7 @@ export const PALETTE = {
   flakFlash: '#ffcf8a',
   navRed: '#ff4b4b',
   navGreen: '#5dff8a',
+  maskingTape: '#d9c99a',
+  gafferTape: '#1d1e20',
+  cuttingMat: '#2f5a49',
 } as const;

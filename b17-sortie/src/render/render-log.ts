@@ -88,6 +88,7 @@ export class RenderLog {
   private segmentIndex = -1;
   private segmentStartedAt = 0;
   private settling = false;
+  private awaitingFirstFrame = false;
   private frameStartedAt = 0;
   private lastFrameAt = 0;
   private sinceContext = 0;
@@ -189,11 +190,18 @@ export class RenderLog {
     if (index === 1) this.hooks.pinQuality(true);
     if (index > 0) this.hooks.probes[index - 1].apply();
     this.settling = index > 0;
+    this.awaitingFirstFrame = index > 0;
     this.segments.push({ label: this.segmentLabel(index), context: this.hooks.context(), passes: new Map() });
     this.reportStatus();
   }
 
   private advanceSegment(now: number): void {
+    // A probe's first frame can stall (a driver compiling for what it changed); its settle time starts once it is done.
+    if (this.awaitingFirstFrame) {
+      this.awaitingFirstFrame = false;
+      this.segmentStartedAt = performance.now();
+      return;
+    }
     const inSegment = (now - this.segmentStartedAt) / 1000;
     if (this.segmentIndex === 0) {
       if (inSegment >= LIVE_SECONDS) this.enterSegment(1);

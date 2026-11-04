@@ -2,7 +2,19 @@
 
 A B-17G of the 91st Bomb Group flying the middle of a mission, built as a scale model and photographed in the studio-lab look from `../reference/sael-guide.md` (three.js). Three ships hold a combat box on display stands over a cloud deck while the lead runs from the initial point through flak to bombs away and the rally turn.
 
-The aircraft is a hand-painted plastic kit come to life on a stop-motion set. The whole film runs at 12 exposures a second and holds between them; only the orbit camera answers the mouse at once. The clouds, contrails and flak are cotton wool that boils slightly between exposures as if handled.
+The aircraft is a hand-painted plastic kit come to life on a stop-motion set. The whole film runs at 12 exposures a second and holds between them; only the orbit camera answers the mouse at once. Everything moves the way an animator moves it:
+
+| Stop-motion touch | What it does |
+|---|---|
+| Hand spacing | Each exposure moves the film 80–120 % of the time owed, and about one in fourteen is a held frame the next one catches up |
+| Handled models | Every moved frame leaves each aircraft a fraction of a millimetre and of a degree off its pose |
+| Propellers | Crisp blades at a new angle each frame, strobing rather than blurring |
+| Replacement pieces | Muzzle and flak flashes are hand-cut paper stars, a different piece each shot; tracers are twisted strips of orange cellophane |
+| Rigging in view | Flak hangs on fishing line from the rig, contrail cotton is threaded on an armature wire, falling bombs ride clear acrylic rods, and the stands carry tape, a clamp and a tape cross on the plinth |
+| Reused cotton | Each contrail is a fixed set of tufts slid back along its wire and teased looser; the thinned one at the tail goes back on at the exhaust |
+| Camera and film | Lamps drift up to 1.5 % in brightness and colour per frame, the tripod jolts and settles when a camera move begins, and the film adds fresh grain, gate weave, a shallow macro depth of field and a vignette |
+| The kit | A mould seam along the fuselage's top and bottom, trimmed sprue gates, cement fog and a thumbprint on the nose glazing, silvering round the decals, and shelf dust on everything facing up |
+| The set | Taped seams in the backdrop, a cutting mat and steel rule on the floor, and a lamp on a light stand aimed in at the box |
 
 The airframe comes from a traced 3-view and wartime photographs, not by eye. `reference/README.md` lists the sources and the measuring method, and `reference/overlay-*.png` show the finished model's silhouette over the drawing.
 
@@ -11,7 +23,7 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Fuselage | Loft through 42 measured stations, windscreen step included |
 | Wing, tailplane, fin | NACA sections lofted along the traced planform (0018 root to 0010 tip on the wing) |
 | Nacelles | Cowl, cowl flaps and nacelle body lofted per engine and tucked into the wing surface |
-| Propellers | Three twisted Hamilton Standard blades with yellow tips, plus a motion-blur disc |
+| Propellers | Three twisted Hamilton Standard blades with yellow tips |
 | Paint | Olive Drab 41 over Neutral Gray 43 with panel lines, rivets, fade, de-icer boots and exhaust soot, brushed on: strokes along each part with bristle grooves and paint built up at their edges |
 | Markings | Water-slide decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial, each printed on a glossy carrier film that stands off the paint with a lip and a hairline of shadow |
 | Clouds, contrails, flak | Cotton wool: lumpy tufts with a halo of tangled fibres; contrails are tufts pulled out thin behind each turbo and fattening aft, flak is wool dyed near black |
@@ -66,6 +78,6 @@ Under the controls, a frame-rate readout (average of the last second, and the wo
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
 - `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
-- `src/scene/effects.ts` runs flak bursts, contrails and falling bombs, `src/scene/stop-motion.ts` times the set's exposures; `src/scene/gunnery.ts` fires the guns.
+- `src/scene/effects.ts` runs flak bursts, contrails and falling bombs with their rigs, `src/scene/stop-motion.ts` times the exposures and their hand spacing; `src/scene/gunnery.ts` fires the guns. `src/scene/set.ts` also builds the workshop props.
 - `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.
-- `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view. `src/render/miniature.ts` adds the brushwork and the cotton wool, `src/render/render-log.ts` records the render log.
+- `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view. `src/render/miniature.ts` adds the brushwork, shelf dust and the cotton wool, `src/render/film-gate.ts` the grain, gate weave and vignette, `src/render/render-log.ts` records the render log.

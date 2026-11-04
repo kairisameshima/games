@@ -12,7 +12,8 @@ import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { STOP_MOTION_FPS, StopMotionClock } from './scene/stop-motion';
 import { RenderLog } from './render/render-log';
-import { buildDisplayStand, buildStudioSet, driftClouds, type DisplayStand } from './scene/set';
+import { FilmGatePass } from './render/film-gate';
+import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, type DisplayStand } from './scene/set';
 import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
@@ -27,8 +28,11 @@ const AIR_DRIFT_SPEED = 2.4;
 /** The stand rod meets the belly just aft of the ball turret, clear of the bomb bay and the falling bombs. */
 const STAND_MOUNT_D = 12.7;
 const MAX_FRAME_SEC = 0.1;
-/** Propeller speed as the eye reads it under a fast shutter: a strobed, slow turn over the blurred disc. */
-const PROPELLER_DISPLAY_RATE = Math.PI * 2 * 0.85;
+/**
+ * How far an animator's hand leaves a model off its pose between exposures (world units, radians): the fraction of a
+ * millimetre and of a degree that makes a handled model shiver where a computer-animated one glides.
+ */
+const HANDLING = { offset: 0.006, turn: 0.0025 } as const;
 const ADAPTIVE_WINDOW_SECONDS = 1.6;
 /** Drawn frames a second below which quality steps down: the machine is missing exposures. */
 const ADAPTIVE_LOW_FPS = STOP_MOTION_FPS - 1;
@@ -89,7 +93,7 @@ await Promise.all([document.fonts.load('700 40px Outfit'), document.fonts.load('
 
 const floorReflection = new PlanarReflection(0);
 const set = buildStudioSet(floorReflection);
-scene.add(set.lab, set.sweep, set.clouds);
+scene.add(set.lab, set.sweep, set.clouds, buildWorkshop());
 floorReflection.hiddenDuringReflection.push(set.floor);
 
 // The formation: lead ship in front, two wingmen stepped up and down behind it, each on its own display stand.
@@ -104,6 +108,8 @@ interface FormationShip {
   turboLights: VirtualLight[];
   /** World-space turbo exhaust positions, refreshed every frame; the contrail ribbons start here. */
   exhaustWorld: THREE.Vector3[];
+  /** Where the animator's hand left the model off its true pose this exposure. */
+  handling: { offset: THREE.Vector3; turn: THREE.Euler };
 }
 
 const formationSlots = [
@@ -126,7 +132,7 @@ const formation: FormationShip[] = formationSlots.map((slot, index) => {
     ? aircraft.exhaustPorts.map(() => addVirtualLight(new THREE.Vector3(), PALETTE.turboGlow, 1.1, 0.85))
     : [];
   const exhaustWorld = aircraft.exhaustPorts.map((port) => port.getWorldPosition(new THREE.Vector3()));
-  return { aircraft, holder, base, stand, lag: slot.lag, bombsDropped: 0, turboLights, exhaustWorld };
+  return { aircraft, holder, base, stand, lag: slot.lag, bombsDropped: 0, turboLights, exhaustWorld, handling: { offset: new THREE.Vector3(), turn: new THREE.Euler() } };
 });
 const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
 const flak = new FlakField();
@@ -135,7 +141,7 @@ const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.mesh, bombs.root, gunnery.root);
+scene.add(flak.root, contrails.root, bombs.root, gunnery.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -175,13 +181,16 @@ const CUTAWAY_SHOT = { target: new THREE.Vector3(0.2, 3.65, 0), spherical: new T
 /** Three-quarter view from ahead and above, wide enough for the spread-out assemblies. */
 const EXPLODED_SHOT = { target: new THREE.Vector3(-0.2, 3.5, 0), spherical: new THREE.Spherical(19, 0.98, 0.5) };
 const CAMERA_TWEEN_SECONDS = 1.3;
-const FOCUS_RANGE = { exterior: 4.2, cutaway: 6.0 } as const;
+/** In-focus depth either side of the target: shallow, as a macro lens close to a tabletop set gives. */
+const FOCUS_RANGE = { exterior: 2.6, cutaway: 5.0 } as const;
 
 const focusPoint = new THREE.Vector3();
 const pipeline = createStudioPipeline(renderer, scene, camera, focusPoint);
 const depthOfField = pipeline.depthOfField.uniforms;
 depthOfField.uFocusRange.value = FOCUS_RANGE.exterior;
-(depthOfField.uCocScale.value as THREE.Vector2).set(2.2, 1.1);
+(depthOfField.uCocScale.value as THREE.Vector2).set(4.4, 2.4);
+const filmGate = new FilmGatePass();
+pipeline.composer.addPass(filmGate);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -195,7 +204,38 @@ controls.update();
 
 interface CameraTween { fromTarget: THREE.Vector3; toTarget: THREE.Vector3; fromPosition: THREE.Vector3; toPosition: THREE.Vector3; progress: number }
 let cameraTween: CameraTween | null = null;
-controls.addEventListener('start', () => { cameraTween = null; });
+controls.addEventListener('start', () => {
+  cameraTween = null;
+  bumpTripod();
+});
+
+/**
+ * A tripod knocked as a camera move begins: over the next exposures the camera jolts off and settles back, each step a
+ * fraction of its distance to the target, the way a hand on the head shakes a set camera.
+ */
+const TRIPOD_BUMP_STEPS = [0.006, -0.003, 0.0012, 0];
+const tripodBump = { step: TRIPOD_BUMP_STEPS.length, direction: new THREE.Vector3(), applied: new THREE.Vector3() };
+
+function bumpTripod(): void {
+  tripodBump.step = 0;
+  const random = stopMotion.random;
+  tripodBump.direction.set(random() - 0.5, -0.6 - random() * 0.4, random() - 0.5).normalize();
+}
+
+/** Takes the bump off before the orbit controls integrate the camera, so it never accumulates into the shot. */
+function liftTripodBump(): void {
+  camera.position.sub(tripodBump.applied);
+}
+
+/** Puts the bump back after the controls; a new exposure moves it to its next step. */
+function applyTripodBump(exposed: boolean): void {
+  if (exposed && tripodBump.step < TRIPOD_BUMP_STEPS.length) {
+    const distance = camera.position.distanceTo(controls.target);
+    tripodBump.applied.copy(tripodBump.direction).multiplyScalar(TRIPOD_BUMP_STEPS[tripodBump.step] * distance);
+    tripodBump.step += 1;
+  }
+  camera.position.add(tripodBump.applied);
+}
 
 function stepCameraTween(deltaSec: number): void {
   if (!cameraTween) return;
@@ -270,6 +310,8 @@ function applyView(next: ViewMode): void {
   keyLight.position.copy(preset.key[2]).normalize().multiplyScalar(30).add(keyLight.target.position);
   rimLight.intensity = preset.rim;
   secondaryKeyLight.intensity = preset.secondary;
+  Object.assign(lampBase, { key: preset.key[1], rim: preset.rim, secondary: preset.secondary, hemisphere: preset.hemisphere[2] });
+  lampBase.keyColor.copy(keyLight.color);
   setSaturation(preset.saturation);
   set.lab.visible = next === 'lab';
   set.sweep.visible = next === 'studio';
@@ -277,6 +319,25 @@ function applyView(next: ViewMode): void {
   contrails.setStudioMode(next === 'studio');
   document.body.classList.toggle('is-studio', next === 'studio');
   ui.setView(next);
+}
+
+/**
+ * Hand-set lamps and a stopped-down lens never quite repeat: each exposure the lamps come out up to 1.5 % brighter or
+ * dimmer and a shade warmer or cooler.
+ */
+const LAMP_FLICKER = { intensity: 0.015, warmth: 0.02 } as const;
+const lampBase = { key: 0, rim: 0, secondary: 0, hemisphere: 0, keyColor: new THREE.Color() };
+const lampTint = new THREE.Color();
+
+function flickerLamps(): void {
+  const random = stopMotion.random;
+  const vary = () => 1 + (random() - 0.5) * 2 * LAMP_FLICKER.intensity;
+  keyLight.intensity = lampBase.key * vary();
+  rimLight.intensity = lampBase.rim * vary();
+  secondaryKeyLight.intensity = lampBase.secondary * vary();
+  hemisphereLight.intensity = lampBase.hemisphere * vary();
+  const warmth = (random() - 0.5) * 2 * LAMP_FLICKER.warmth;
+  keyLight.color.copy(lampBase.keyColor).multiply(lampTint.setRGB(1 + warmth, 1, 1 - warmth));
 }
 
 let veilTimer = 0;
@@ -327,6 +388,7 @@ function setShow(mode: ShowMode): void {
     toPosition: new THREE.Vector3().setFromSpherical(shot.spherical).add(shot.target),
     progress: 0,
   };
+  bumpTripod();
 }
 
 const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start() });
@@ -356,7 +418,7 @@ addEventListener('keydown', (event) => {
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.mesh, flak.root];
+const cottonSet = [set.clouds, contrails.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -407,8 +469,20 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
     'YZX',
   );
   holder.position.y = formationSlots[shipIndex].position.y + Math.sin(elapsed * 0.6 + wander) * 0.04;
-
-  for (const propeller of aircraft.propellers) propeller.rotation.x += PROPELLER_DISPLAY_RATE * deltaSec;
+  // A held frame is the same pose exactly; only a frame the animator moved picks up his hand's error and a new
+  // propeller angle (a stop-motion prop strobes from pose to pose, it never blurs).
+  if (deltaSec > 0) {
+    const random = stopMotion.random;
+    ship.handling.offset.set(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(2 * HANDLING.offset);
+    ship.handling.turn.set((random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn);
+    for (const propeller of aircraft.propellers) propeller.rotation.x = random() * Math.PI * 2;
+  }
+  holder.position.x = formationSlots[shipIndex].position.x + ship.handling.offset.x;
+  holder.position.y += ship.handling.offset.y;
+  holder.position.z = formationSlots[shipIndex].position.z + ship.handling.offset.z;
+  holder.rotation.x += ship.handling.turn.x;
+  holder.rotation.y += ship.handling.turn.y;
+  holder.rotation.z += ship.handling.turn.z;
 
   const onRun = state.phase.id === 'bomb-run' || state.phase.id === 'bombs-away';
   aircraft.topTurret.yaw.rotation.y = Math.sin(elapsed * 0.31 + wander) * (onRun ? 0.6 : 1.4) + Math.sin(elapsed * 0.83) * 0.2;
@@ -563,6 +637,8 @@ const flakZone = {
 const timer = new THREE.Timer();
 timer.connect(document);
 
+/** The film's own clock: it stops while paused and on held frames, so everything posed from it holds with them. */
+let filmTime = 0;
 /** The camera moved since the last drawn frame: a drag or a scroll draws at once, between exposures. */
 let cameraMoved = true;
 controls.addEventListener('change', () => { cameraMoved = true; });
@@ -574,8 +650,8 @@ let lastDrawnAt = 0;
  * exploded view still move, as an animator would move them).
  */
 function exposeFrame(exposureSec: number): void {
-  const deltaSec = playing ? exposureSec : 0;
-  const elapsed = timer.getElapsed();
+  const deltaSec = playing ? stopMotion.space(exposureSec) : 0;
+  filmTime += deltaSec;
   const previousTime = sortieTime;
   sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
   if (sortieTime < previousTime) resetEffects();
@@ -585,7 +661,7 @@ function exposeFrame(exposureSec: number): void {
   formation.forEach((ship, index) => {
     const state = index === 0 ? leadState : sortieStateAt(Math.max(sortieTime - ship.lag, 0));
     if (state.bombsReleased < ship.bombsDropped) ship.bombsDropped = state.bombsReleased;
-    animateShip(ship, state, playing ? elapsed : 0, deltaSec, index);
+    animateShip(ship, state, filmTime, deltaSec, index);
     gunnery.updateShip(index, state.time, state.gunfire, deltaSec);
   });
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
@@ -600,6 +676,10 @@ function exposeFrame(exposureSec: number): void {
   cutaway.update(exposureSec);
   updateLeadCabinShadows();
   contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random);
+  if (deltaSec > 0) {
+    flickerLamps();
+    filmGate.advance(stopMotion.random);
+  }
   renderer.shadowMap.needsUpdate = !shadowMapHeld;
 }
 
@@ -612,7 +692,9 @@ function frame(timestamp: number): void {
   timer.update(timestamp);
   const exposureSec = stopMotion.advance(Math.min(timer.getDelta(), MAX_FRAME_SEC));
   if (exposureSec > 0) stepCameraTween(exposureSec);
+  liftTripodBump();
   controls.update();
+  applyTripodBump(exposureSec > 0);
   if (exposureSec === 0 && !cameraMoved) return;
   cameraMoved = false;
 
