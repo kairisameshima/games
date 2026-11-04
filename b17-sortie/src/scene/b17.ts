@@ -753,8 +753,17 @@ export interface B17 {
   navigationLights: THREE.Mesh[];
 }
 
-/** `crewDetail`: the lead ship's crew is meshed finely for close-ups; wingmen only show through their glazing. */
-export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
+export interface B17Options {
+  /** The lead ship's crew is meshed finely for close-ups; wingmen only show through their glazing. */
+  crewDetail: FigureDetail;
+  /**
+   * Whether the cutaway and the exploded view open this ship up. Only then do its assemblies and its starboard wall stay
+   * apart; a ship that never opens merges its fixed parts across them, a fraction of the draw calls.
+   */
+  opensUp: boolean;
+}
+
+export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   const materials = aircraftMaterials();
   const root = new THREE.Group();
   root.name = 'B-17G';
@@ -1002,7 +1011,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   assemblies.adoptRootChildren();
   // The cutaway hides the whole starboard wall at once, so each assembly's share of it is one group, kept apart.
   const starboardWall: THREE.Object3D[] = [];
-  for (const group of assemblies.groups.values()) {
+  for (const group of opensUp ? assemblies.groups.values() : []) {
     const items = group.children.filter((child) => child.userData.hiddenInCutaway);
     if (items.length === 0) continue;
     const wall = new THREE.Group();
@@ -1011,8 +1020,9 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     group.add(wall);
     starboardWall.push(wall);
   }
-  // Everything that holds still in an assembly becomes one mesh per material; each moving part the same in its own space.
-  for (const group of assemblies.groups.values()) mergeRigidMeshes(group);
+  // Everything that holds still in an assembly, or in the whole ship if it never opens up, becomes one mesh per material;
+  // each moving part the same in its own space.
+  for (const group of opensUp ? assemblies.groups.values() : [root]) mergeRigidMeshes(group);
   // Callouts ride with the assembly their man is in: the engineer with the top turret, the gunners with their sections.
   const crewStations = interior.stations.map((station) => {
     const man = interior.crew.find((entry) => entry.station.label === station.role);
