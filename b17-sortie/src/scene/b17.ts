@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { applyBrushwork } from '../render/miniature';
 import { applyStudioShading, emissiveMaterial, matteMaterial, metalMaterial } from '../render/studio';
 import {
@@ -9,6 +10,7 @@ import {
 import { mergeRigidMeshes, mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
+import { CRAWLWAY, TAIL } from './interior/layout';
 import { interiorMaterials } from './interior/materials';
 import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt } from './assemblies';
 import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
@@ -20,7 +22,7 @@ import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullS
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersDecal, fingerprintTexture, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
+  codeLettersDecal, fingerprintTexture, hatchOutlineTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
   type DecalArt,
 } from './textures';
 
@@ -88,6 +90,10 @@ interface AircraftMaterials {
   codes: THREE.MeshStandardMaterial;
   aircraftLetter: THREE.MeshStandardMaterial;
   tailMarking: THREE.MeshStandardMaterial;
+  noseArt: Record<NoseArtChoice, THREE.MeshStandardMaterial>;
+  missionTally: THREE.MeshStandardMaterial;
+  /** Outline of the forward entrance hatch in the belly. */
+  hatchOutline: THREE.MeshStandardMaterial;
   bayDoor: THREE.MeshStandardMaterial;
   cowlLiner: THREE.MeshStandardMaterial;
   gunmetal: THREE.MeshStandardMaterial;
@@ -198,6 +204,12 @@ function aircraftMaterials(): AircraftMaterials {
     codes: decalMaterial(codeLettersDecal('LG')),
     aircraftLetter: decalMaterial(codeLettersDecal('K')),
     tailMarking: decalMaterial(tailMarkingDecal('238107', 'K')),
+    noseArt: { pinup: decalMaterial(noseArtDecal('pinup')), card: decalMaterial(noseArtDecal('card')) },
+    missionTally: decalMaterial(missionTallyDecal(MISSIONS_FLOWN)),
+    hatchOutline: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      map: hatchOutlineTexture(), transparent: true, depthWrite: false, roughness: 0.7,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    })),
     bayDoor: Object.assign(paintMaterial(null, PALETTE.neutralGray), { side: THREE.DoubleSide }),
     cowlLiner: matteMaterial('#1c1e1f', { roughness: 0.8, side: THREE.DoubleSide }),
     gunmetal: metalMaterial(PALETTE.gunmetal, { roughness: 0.36 }),
@@ -259,11 +271,109 @@ function cutHullOpenings(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   return geometry;
 }
 
+/**
+ * The hull to the gun mount's opening, where the skin curls in round the mount: rings of the last section, each a
+ * little further aft and drawn in towards its centre. Both ends stay open: the nose shows through the glazing, the tail
+ * is closed by the mount.
+ */
 function buildHullGeometry(): THREE.BufferGeometry {
-  const stations = hullStations();
-  // The front end stays open so the nose compartment shows through the glazing.
-  return cutHullOpenings(loftGeometry(stations.map((d) => hullRing(d)), stations.map((d) => d / FUSELAGE_LENGTH), false, true));
+  const mount = STATIONS.tailGunMount;
+  const stations = hullStations().filter((d) => d < mount.opening - 0.02);
+  stations.push(mount.opening);
+  const rings = stations.map((d) => hullRing(d));
+  const params = stations.map((d) => d / FUSELAGE_LENGTH);
+  for (const [fraction, scale] of TAIL_LIP_CURL) {
+    rings.push(scaledRing(hullRing(mount.opening), THREE.MathUtils.lerp(1, mount.rimScale, scale), toX(THREE.MathUtils.lerp(mount.opening, mount.rim, fraction))));
+    params.push(mount.opening / FUSELAGE_LENGTH);
+  }
+  return cutHullOpenings(loftGeometry(rings, params, false, false));
 }
+
+/** The lip's profile from the opening to the rim: (fraction of the way aft, fraction of the way in), a quarter round. */
+const TAIL_LIP_CURL: [number, number][] = [[0.45, 0.12], [0.8, 0.45], [1, 1]];
+
+/** `ring` drawn in by `scale` towards its own centre and moved to model x `x`. */
+function scaledRing(ring: THREE.Vector3[], scale: number, x: number): THREE.Vector3[] {
+  const centre = ring.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(ring.length);
+  return ring.map((point) => point.clone().sub(centre).multiplyScalar(scale).add(centre).setX(x));
+}
+
+/**
+ * The Cheyenne mount's armoured dome, set in the curled-in rim of the tail cone and bulging aft to the tail's end: an
+ * ellipsoidal cap on the rim's outline, with a vertical slot for each gun, edged with a lip. Behind the slots, a dark
+ * plate closes the mount so the cone's inside never shows through them.
+ */
+function buildTailGunMountGeometry(): { dome: THREE.BufferGeometry; slotLips: THREE.BufferGeometry; backing: THREE.BufferGeometry } {
+  const mount = STATIONS.tailGunMount;
+  const section = hullSectionAt(mount.opening);
+  const rimX = toX(mount.rim) + 0.004;
+  // The rim, finer than the hull's rings so the slots' edges come out clean.
+  const rim = scaledRing(ellipseRing(new THREE.Vector3(rimX, 0, 0), section.top, section.bottom, section.halfWidth, TAIL_DOME.points, HULL_EXPONENT), mount.rimScale, rimX);
+  const centre = rim.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(rim.length);
+  const radii = { y: ((section.top - section.bottom) / 2) * mount.rimScale, z: section.halfWidth * mount.rimScale };
+  // Model x runs nose-ward, so aft of the rim is lower x.
+  const aftReach = FUSELAGE_LENGTH - mount.rim;
+  const domeX = (y: number, z: number) => {
+    const reach = Math.min(((Math.abs(y - centre.y) / radii.y) ** HULL_EXPONENT + (Math.abs(z) / radii.z) ** HULL_EXPONENT) ** (1 / HULL_EXPONENT), 1);
+    return centre.x - aftReach * Math.sqrt(1 - reach * reach);
+  };
+  const positions: number[] = [];
+  for (let row = 0; row <= TAIL_DOME.rows; row++) {
+    const s = row / TAIL_DOME.rows;
+    const reach = Math.sin((s * Math.PI) / 2);
+    const x = centre.x - aftReach * Math.cos((s * Math.PI) / 2);
+    for (const point of rim) {
+      positions.push(x, centre.y + (point.y - centre.y) * reach, centre.z + (point.z - centre.z) * reach);
+    }
+  }
+  const count = rim.length;
+  const indices: number[] = [];
+  const slot = { bottom: TAIL.gunY - mount.slotBelow, top: TAIL.gunY + mount.slotAbove };
+  const inSlot = (y: number, z: number) => TAIL.gunSpacing.some((gunZ) => Math.abs(z - gunZ) < mount.slotHalfWidth && y > slot.bottom && y < slot.top);
+  for (let row = 0; row < TAIL_DOME.rows; row++) {
+    for (let point = 0; point < count; point++) {
+      const a = row * count + point;
+      const b = row * count + ((point + 1) % count);
+      const c = a + count;
+      const d = b + count;
+      if (inSlot((positions[a * 3 + 1] + positions[d * 3 + 1]) / 2, (positions[a * 3 + 2] + positions[d * 3 + 2]) / 2)) continue;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const dome = new THREE.BufferGeometry();
+  dome.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  dome.setIndex(indices);
+  dome.computeVertexNormals();
+
+  // Each slot's lip: a round-ended loop on the dome's surface round the opening.
+  const lips = TAIL.gunSpacing.map((gunZ) => {
+    const half = mount.slotHalfWidth;
+    const outline: THREE.Vector3[] = [];
+    const onDome = (y: number, z: number) => new THREE.Vector3(domeX(y, z) - TAIL_DOME.lipStandOff, y, z);
+    for (let step = 0; step <= 8; step++) {
+      const angle = Math.PI + (step / 8) * Math.PI;
+      outline.push(onDome(slot.bottom + half + Math.sin(angle) * half, gunZ + Math.cos(angle) * half));
+    }
+    for (let step = 0; step <= 8; step++) {
+      const angle = (step / 8) * Math.PI;
+      outline.push(onDome(slot.top - half + Math.sin(angle) * half, gunZ + Math.cos(angle) * half));
+    }
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(outline, true), 48, TAIL_DOME.lipRadius, 6, true);
+  });
+  const slotLips = mergeGeometries(lips);
+  if (!slotLips) throw new Error('Cannot merge the gun slots\' lips');
+
+  const backing = new THREE.BufferGeometry().setFromPoints([centre, ...rim]);
+  const fan: number[] = [];
+  for (let point = 0; point < count; point++) fan.push(0, 1 + ((point + 1) % count), 1 + point);
+  backing.setIndex(fan);
+  backing.translate(0.03, 0, 0);
+  backing.computeVertexNormals();
+  return { dome, slotLips, backing };
+}
+
+/** The dome's mesh (points round the rim, rows from its crown to the rim) and its slot lips (tube radius, stand-off). */
+const TAIL_DOME = { points: 192, rows: 32, lipRadius: 0.009, lipStandOff: 0.003 } as const;
 
 /** One bomb bay door as a patch of the hull skin from the keel seam out to its hinge, relative to the hinge line. */
 function buildBayDoorGeometry(side: 1 | -1): THREE.BufferGeometry {
@@ -423,13 +533,18 @@ function buildFinGeometry(): THREE.BufferGeometry {
 }
 
 /** Superellipse exponent of the Cheyenne housing's sections: flatter-sided than the hull. */
-const TAIL_HOUSING_EXPONENT = 3.2;
+/** Flat sides and roof with tight rounded corners, as the Cheyenne cab's sheet metal and glazing frames make. */
+const TAIL_HOUSING_EXPONENT = 4.5;
 
 /** The housing's lofted sections: top, bottom and half-width at each station. */
+/**
+ * The housing rises out of the cone under the fin, runs flat-roofed to the rear window and stops there square: its end
+ * is the window, so the loft is capped flat at the last station.
+ */
 function tailHousingSections(): NacelleProfile[] {
   const { start, end, top } = STATIONS.tailTurretHousing;
-  const stations = [start, start + 0.3, start + 0.8, end - 0.6, end - 0.3, end];
-  const tops = [hullSectionAt(start).top - 0.02, top - 0.12, top, top, top - 0.14, hullSectionAt(end).top];
+  const stations = [start, start + 0.3, start + 0.7, end - 0.12, end];
+  const tops = [hullSectionAt(start).top - 0.02, top - 0.1, top, top, top - 0.025];
   return stations.map((d, index) => {
     const hull = hullSectionAt(d);
     return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(hull.halfWidth + 0.015, 0.4) };
@@ -699,6 +814,12 @@ function decalOrientation(normal: THREE.Vector3, along: THREE.Vector3): THREE.Eu
   return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
 }
 
+/** Depth of the nose art's projector box, deep enough to reach the skin where the nose curves in under it. */
+const NOSE_ART_PROJECTOR_DEPTH = 1.4;
+
+/** How far a decal stands off the skin it was projected onto, in model metres. */
+const DECAL_STANDOFF = 0.004;
+
 function addDecal(
   parent: THREE.Object3D,
   target: THREE.Mesh,
@@ -714,6 +835,17 @@ function addDecal(
   const growth = material.userData.decalGrowth instanceof THREE.Vector2 ? material.userData.decalGrowth : new THREE.Vector2(1, 1);
   const geometry = new DecalGeometry(target, position, decalOrientation(normal, along), new THREE.Vector3(width * growth.x, height * growth.y, depth));
   if (geometry.getAttribute('position').count === 0) throw new Error(`Decal at ${position.toArray().map((value) => value.toFixed(2)).join(', ')} missed its target surface`);
+  // Lifted off the skin along its normals: at a grazing view the depth offset alone loses to the skin in patches.
+  const positions = geometry.getAttribute('position');
+  const normals = geometry.getAttribute('normal');
+  for (let index = 0; index < positions.count; index++) {
+    positions.setXYZ(
+      index,
+      positions.getX(index) + normals.getX(index) * DECAL_STANDOFF,
+      positions.getY(index) + normals.getY(index) * DECAL_STANDOFF,
+      positions.getZ(index) + normals.getZ(index) * DECAL_STANDOFF,
+    );
+  }
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
   mesh.receiveShadow = true;
@@ -724,6 +856,7 @@ function addDecal(
 const FORWARD = new THREE.Vector3(1, 0, 0);
 const UP = new THREE.Vector3(0, 1, 0);
 const STARBOARD = new THREE.Vector3(0, 0, 1);
+const AFT = new THREE.Vector3(-1, 0, 0);
 const PORT = new THREE.Vector3(0, 0, -1);
 
 /** Where a builder's kit shows: the mould's parting line, sprue gates, cement fog and a thumbprint. */
@@ -739,7 +872,7 @@ const KIT_FLAWS = {
 
 function addKitFlaws(airframe: THREE.Object3D, root: THREE.Object3D, noseGlazing: THREE.Mesh, materials: AircraftMaterials): void {
   for (const [upper, gaps, material] of [[true, KIT_FLAWS.seamGapsTop, materials.oliveDrab], [false, KIT_FLAWS.seamGapsBottom, materials.neutralGray]] as const) {
-    for (const [start, end] of seamRuns(NOSE_GLAZING_END + 0.05, FUSELAGE_LENGTH - 0.15, gaps)) {
+    for (const [start, end] of seamRuns(NOSE_GLAZING_END + 0.05, STATIONS.tailGunMount.opening - 0.05, gaps)) {
       const points: THREE.Vector3[] = [];
       for (let d = start; d <= end + 1e-6; d += Math.min(0.15, end - start)) {
         const section = hullSectionAt(d);
@@ -795,6 +928,66 @@ function addWindow(
 }
 
 /** Window panes on both hull sides between two stations and heights. */
+/**
+ * The Cheyenne cab's glazing: two panes in each flat side and the rear window in its square end, each in a raised
+ * frame, with the hole cut in the housing behind it so the gunner shows through.
+ */
+function addTailGunnerGlazing(airframe: THREE.Object3D, housing: THREE.Mesh, materials: AircraftMaterials, cutouts: WindowCutouts): void {
+  const windows = STATIONS.tailTurretWindows;
+  const sill = windows.bottom;
+  const head = windows.top;
+  const middleY = (sill + head) / 2;
+  for (const [start, end] of windows.panes) {
+    for (const side of [1, -1] as const) {
+      const at = (d: number, y: number) => new THREE.Vector3(toX(d), y, side * tailHousingHalfWidthAt(d, y));
+      const middle = (start + end) / 2;
+      const outward = side > 0 ? STARBOARD : PORT;
+      addWindow(airframe, housing, materials.windowPane, cutouts, at(middle, middleY), outward, side > 0 ? FORWARD : FORWARD.clone().negate(), end - start, head - sill, 0.3);
+      const corners = [at(start, sill), at(end, sill), at(end, head), at(start, head)];
+      corners.forEach((corner, index) => frameStrip(airframe, materials.oliveDrab, corner, corners[(index + 1) % 4], outward));
+    }
+  }
+  const { end } = STATIONS.tailTurretHousing;
+  const rear = windows.rear;
+  const aftFace = toX(end);
+  const centre = new THREE.Vector3(aftFace, (rear.top + rear.bottom) / 2, 0);
+  addWindow(airframe, housing, materials.windowPane, cutouts, centre, AFT, STARBOARD, rear.width, rear.top - rear.bottom, 0.16);
+  const halfWidth = rear.width / 2;
+  const corners = [
+    new THREE.Vector3(aftFace, rear.bottom, -halfWidth), new THREE.Vector3(aftFace, rear.bottom, halfWidth),
+    new THREE.Vector3(aftFace, rear.top, halfWidth), new THREE.Vector3(aftFace, rear.top, -halfWidth),
+  ];
+  corners.forEach((corner, index) => frameStrip(airframe, materials.oliveDrab, corner, corners[(index + 1) % 4], AFT));
+}
+
+/** Half-width of the housing's wall at a station and height, on the same superellipse its loft uses. */
+function tailHousingHalfWidthAt(d: number, y: number): number {
+  const sections = tailHousingSections();
+  const after = Math.max(1, sections.findIndex((section) => section.d >= d));
+  const a = sections[after - 1], b = sections[after];
+  const t = THREE.MathUtils.clamp((d - a.d) / (b.d - a.d), 0, 1);
+  const top = THREE.MathUtils.lerp(a.top, b.top, t);
+  const bottom = THREE.MathUtils.lerp(a.bottom, b.bottom, t);
+  const halfWidth = THREE.MathUtils.lerp(a.halfWidth, b.halfWidth, t);
+  const vertical = Math.min(Math.abs(y - (top + bottom) / 2) / ((top - bottom) / 2), 0.999);
+  return halfWidth * (1 - vertical ** TAIL_HOUSING_EXPONENT) ** (1 / TAIL_HOUSING_EXPONENT);
+}
+
+/** Window frame section: width on the skin, and how far it stands proud. */
+const WINDOW_FRAME = { width: 0.03, proud: 0.012 } as const;
+
+/** One straight frame member from `a` to `b` on a wall facing `outward`, standing proud of it. */
+function frameStrip(parent: THREE.Object3D, material: THREE.Material, a: THREE.Vector3, b: THREE.Vector3, outward: THREE.Vector3): void {
+  const along = b.clone().sub(a);
+  const length = along.length() + WINDOW_FRAME.width;
+  along.normalize();
+  const normal = outward.clone().addScaledVector(along, -outward.dot(along)).normalize();
+  const across = new THREE.Vector3().crossVectors(normal, along);
+  const strip = part(parent, new THREE.BoxGeometry(length, WINDOW_FRAME.width, WINDOW_FRAME.proud * 2), material, 0, 0, 0);
+  strip.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, across, normal));
+  strip.position.copy(a).add(b).multiplyScalar(0.5);
+}
+
 function addSideWindows(airframe: THREE.Object3D, hull: THREE.Mesh, material: THREE.Material, cutouts: WindowCutouts, start: number, end: number, top: number, bottom: number, sides: (1 | -1)[]): void {
   const d = (start + end) / 2;
   const h = (top + bottom) / 2;
@@ -834,6 +1027,8 @@ export interface B17 {
    * cast shadows or show in the floor's reflection, which saves most of each ship's triangles in those passes.
    */
   interiorMeshes: THREE.Mesh[];
+  /** The nose art the ship carries, each artwork its own decal; show one. */
+  noseArt: Record<NoseArtChoice, THREE.Mesh>;
   /**
    * The part of `interiorMeshes` a distant viewer cannot make out through the glazing: everything but the crew and the
    * insulated skin, which closes the hull from inside (the outer skin is single-sided).
@@ -983,6 +1178,26 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
     // Shallow projector so the marking lands on one face of the thin fin only, not mirrored through to the other.
     assignAssembly(addDecal(airframe, fin, materials.tailMarking, new THREE.Vector3(toX(19.75), 2.75, side * 0.12), normal, along, 1.3, 1.93, 0.2), 'fin');
   }
+  // Nose art on the port side below the navigator's windows, and the mission tally under the pilot's window.
+  // Both artworks are on the ship, one shown at a time; kept out of the merge so either can be switched on.
+  const noseArtSpot = STATIONS.noseArt;
+  const noseArtCentre = new THREE.Vector3(toX(noseArtSpot.d), noseArtSpot.h, -hullHalfWidthAtHeight(noseArtSpot.d, noseArtSpot.h));
+  const noseArt = Object.fromEntries((['pinup', 'card'] as const).map((choice) => {
+    const { width, height } = noseArtSpot.sizes[choice];
+    // A deep projector: the nose curves away fast below the art's middle, and a shallow one would clip its foot.
+    const decal = addDecal(airframe, hull, materials.noseArt[choice], noseArtCentre, PORT, FORWARD.clone().negate(), width, height, NOSE_ART_PROJECTOR_DEPTH);
+    // Tagged whole to the nose, or the bake would cut the wider card at the joint behind it into new meshes.
+    assignAssembly(decal, 'nose');
+    decal.userData.unmerged = true;
+    return [choice, decal];
+  })) as Record<NoseArtChoice, THREE.Mesh>;
+  const tally = STATIONS.missionTally;
+  addDecal(airframe, hull, materials.missionTally, new THREE.Vector3(toX(tally.d), tally.h, -hullHalfWidthAtHeight(tally.d, tally.h)), PORT, FORWARD.clone().negate(), tally.width, tally.height, 0.4);
+  // The forward entrance hatch in the belly under the crawlway, port of the centreline.
+  const hatch = CRAWLWAY.forwardHatch;
+  const hatchD = (hatch.start + hatch.end) / 2;
+  const hatchZ = (hatch.inner + hatch.outer) / 2;
+  addDecal(airframe, hull, materials.hatchOutline, new THREE.Vector3(toX(hatchD), hullSurfaceHeight(hatchD, hatchZ, false), hatchZ), UP.clone().negate(), FORWARD, hatch.end - hatch.start, hatch.inner - hatch.outer, 0.3);
   const wingInsigniaSpan = 11.4;
   const wingInsigniaEdges = wingEdges(wingInsigniaSpan);
   const wingInsigniaD = (wingInsigniaEdges.leading + wingInsigniaEdges.trailing) / 2;
@@ -1043,9 +1258,11 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   chinTurret.userData.unmerged = true;
   root.add(assignAssembly(chinTurret, 'chin-turret'));
 
-  const tailWindows = STATIONS.tailTurretWindows;
-  // The tail gunner's windows sit in the housing, which forms the roof of his compartment.
-  addSideWindows(airframe, tailHousing, materials.windowPane, cutouts, tailWindows.start, tailWindows.end, tailWindows.top, tailWindows.bottom, [1, -1]);
+  addTailGunnerGlazing(airframe, tailHousing, materials, cutouts);
+  const mount = buildTailGunMountGeometry();
+  part(airframe, mount.dome, materials.oliveDrab, 0, 0, 0);
+  part(airframe, mount.slotLips, materials.gunmetal, 0, 0, 0);
+  part(airframe, mount.backing, materials.cowlLiner, 0, 0, 0, { castShadow: false });
 
   // Astrodome, radio antennas, and the long aerial from the radio-room mast to the fin.
   const astrodome = STATIONS.astrodome;
@@ -1068,7 +1285,9 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   for (const [span, material] of [[WING_SEMISPAN - 0.06, materials.navGreen], [-(WING_SEMISPAN - 0.06), materials.navRed]] as const) {
     navigationLights.push(assignAssembly(part(root, new THREE.SphereGeometry(0.07, 12, 8), material, toX(tipD), wingChordHeight(Math.abs(span)), span, { castShadow: false }), span > 0 ? 'wing-starboard' : 'wing-port'));
   }
-  navigationLights.push(part(root, new THREE.SphereGeometry(0.05, 12, 8), materials.navWhite, toX(FUSELAGE_LENGTH - 0.05), 0.2, 0, { castShadow: false }));
+  // The white tail light sits on the cone's top, where the skin curls in over the gun mount.
+  const tailLightD = STATIONS.tailGunMount.opening;
+  navigationLights.push(part(root, new THREE.SphereGeometry(0.04, 12, 8), materials.navWhite, toX(tailLightD), hullSectionAt(tailLightD).top - 0.01, 0, { castShadow: false }));
 
   const interior = buildInterior({
     airframe,
@@ -1133,11 +1352,13 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
     guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null }))],
     cutawayMaterials: [
       materials.hull, materials.oliveDrab, materials.canopy, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
+      materials.noseArt.pinup, materials.noseArt.card, materials.missionTally,
       materials.neutralGray, ballWindowMaskMaterial(materials.neutralGray), materials.tailHousing, ...interior.clipMaterials,
     ],
     cutawayHidden: starboardWall,
     interiorMeshes,
     cabinFittings,
+    noseArt,
     exhaustPorts,
     turboGlow: materials.turboGlow,
     navigationLights,

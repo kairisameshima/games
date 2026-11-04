@@ -1,3 +1,4 @@
+import type { NoseArtChoice } from '../scene/textures';
 import { BOMB_COUNT, PHASES, type SortieState } from '../sortie';
 
 export type ViewMode = 'lab' | 'studio';
@@ -9,6 +10,7 @@ export interface UiCallbacks {
   onViewChange: (view: ViewMode) => void;
   onShowChange: (mode: ShowMode) => void;
   onRecordLog: () => void;
+  onNoseArtChange: (choice: NoseArtChoice) => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -32,6 +34,7 @@ export class Ui {
   private readonly detail: HTMLElement;
   private readonly viewButtons: Record<ViewMode, HTMLButtonElement>;
   private readonly showButtons: Record<ShowMode, HTMLButtonElement>;
+  private readonly noseArtButtons: Record<NoseArtChoice, HTMLButtonElement>;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -90,6 +93,7 @@ export class Ui {
     hintRow('V', 'lab / studio');
     hintRow('C', 'cutaway');
     hintRow('E', 'exploded');
+    hintRow('N', 'nose art');
     hintRow('L', 'record render log');
     hintRow('Drag', 'orbit · scroll to zoom');
     const makeToggleButton = (toggle: HTMLElement, label: string, onClick: () => void) => {
@@ -110,13 +114,18 @@ export class Ui {
       cutaway: makeToggleButton(showToggle, 'Cutaway', () => callbacks.onShowChange('cutaway')),
       exploded: makeToggleButton(showToggle, 'Exploded', () => callbacks.onShowChange('exploded')),
     };
+    const noseArtToggle = element('div', 'view-toggle');
+    this.noseArtButtons = {
+      pinup: makeToggleButton(noseArtToggle, 'Pin-up', () => callbacks.onNoseArtChange('pinup')),
+      card: makeToggleButton(noseArtToggle, 'Card', () => callbacks.onNoseArtChange('card')),
+    };
     this.meterSlot = element('div', 'meter-slot');
     const logRow = element('div', 'log-row');
     const logToggle = element('div', 'view-toggle');
     makeToggleButton(logToggle, 'Record render log', callbacks.onRecordLog);
     this.logStatus = element('div', 'log-status', 'about 40 s, then saves a .json');
     logRow.append(logToggle, this.logStatus);
-    hints.append(viewToggle, showToggle, this.meterSlot, logRow);
+    hints.append(viewToggle, showToggle, noseArtToggle, this.meterSlot, logRow);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading);
@@ -155,6 +164,10 @@ export class Ui {
 
   setShow(mode: ShowMode): void {
     for (const [button, element] of Object.entries(this.showButtons)) element.classList.toggle('is-active', button === mode);
+  }
+
+  setNoseArt(choice: NoseArtChoice): void {
+    for (const [button, element] of Object.entries(this.noseArtButtons)) element.classList.toggle('is-active', button === choice);
   }
 
   setLogStatus(text: string): void {

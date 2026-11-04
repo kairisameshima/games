@@ -30,7 +30,8 @@ export const FLOORS = {
   nose: { start: 0.72, end: 2.85, y: -0.66 },
   /** Crawlway from the nose under the cockpit floor up to the flight deck. */
   crawlway: { start: 2.85, end: 4.75, y: -0.66 },
-  cockpit: { start: 3.05, end: 4.75, y: 0.0 },
+  /** From bulkhead 4 (no gap for the crawlway to see up into) to the flight deck. */
+  cockpit: { start: 2.87, end: 4.75, y: 0.0 },
   /** Behind the pilots, round the top turret, up to the bomb bay bulkhead. */
   flightDeck: { start: 4.75, end: 5.76, y: -0.04 },
   radioRoom: { start: 8.49, end: 10.6, y: -0.82 },
@@ -39,6 +40,21 @@ export const FLOORS = {
 /** Waist and tail floors follow the hull bottom up toward the tail at this clearance. */
 export const WAIST_FLOOR_CLEARANCE = 0.22;
 export const TAIL_FLOOR_CLEARANCE = 0.08;
+
+/**
+ * The way between the nose and the rest of the ship (EAA B-17G manual, "Nose section"; Pilot's Manual, "Description"):
+ * the crawlway under the pilots' floor, coming up through an opening in that floor behind the pilots' seats, where a
+ * step halves the climb; and the forward entrance hatch in the bottom of the fuselage on the crawlway's left side,
+ * covered in flight by a hinged metal guard, with a red emergency release that pulls the hinge pins.
+ */
+export const CRAWLWAY = {
+  /** Round-cornered opening in the pilots' floor, centred behind the seats' armour, clear of the turret's platform. */
+  exit: { d: 4.42, radius: 0.31 },
+  /** The step up out of the crawlway, at the opening's aft edge. */
+  step: { d: 4.58, topY: -0.34, width: 0.4 },
+  /** Forward entrance hatch (along the fuselage, and across from the centreline to port). */
+  forwardHatch: { start: 3.3, end: 3.95, inner: -0.02, outer: -0.44 },
+} as const;
 
 export const NOSE = {
   /** Norden M-9 bombsight on its mount over the optically flat panel low in the nose glazing. */

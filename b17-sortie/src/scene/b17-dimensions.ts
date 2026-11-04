@@ -163,7 +163,25 @@ export const STATIONS = {
   waistWindowPort: { start: 13.6, end: 14.7 },
   waistWindowBand: { top: 0.49, bottom: -0.25 },
   fuselageInsignia: { d: 15.7, h: -0.12 },
-  tailTurretHousing: { start: 19.45, end: 21.9, top: 0.86 },
-  tailTurretWindows: { start: 20.6, end: 21.6, top: 0.78, bottom: 0.39 },
+  /**
+   * Nose art on the port side, below the navigator's windows and ahead of the inboard propeller's arc: its centre, and
+   * the size of each artwork the ship can carry.
+   */
+  noseArt: { d: 2.3, h: -0.44, sizes: { pinup: { width: 0.78, height: 0.95 }, card: { width: 1.15, height: 0.85 } } },
+  /** Mission tally on the port side under the pilot's window. */
+  missionTally: { d: 4.15, h: 0.74, width: 0.82, height: 0.12 },
+  /**
+   * Cheyenne gunner's housing (photographs of 44-85734 "Liberty Belle"): a glazed cab on the tail cone under the
+   * rudder, flat-roofed and flat-sided, ending in a near-vertical rear window over the gun mount.
+   */
+  tailTurretHousing: { start: 19.45, end: 21.92, top: 0.86 },
+  /** Side panes per side (fore and aft, between stations), their sill and head, and the rear window on the housing's end. */
+  tailTurretWindows: { panes: [[20.24, 20.56], [20.68, 21.72]] as [number, number][], top: 0.8, bottom: 0.44, rear: { width: 0.54, top: 0.8, bottom: 0.42 } },
+  /**
+   * The Cheyenne gun mount closing the tail cone: the skin curls in round an opening from `opening` to `rim`, closing
+   * to `rimScale` of the cone's section, and an armoured dome stands in it, reaching the tail's end, its two vertical
+   * slots carrying the guns.
+   */
+  tailGunMount: { opening: 22.36, rim: 22.4, rimScale: 0.86, slotHalfWidth: 0.028, slotBelow: 0.16, slotAbove: 0.2 },
   antennaMast: { d: 4.1 },
 } as const;

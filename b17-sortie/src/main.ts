@@ -11,6 +11,7 @@ import { BombTrain, Contrails, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { STOP_MOTION_FPS, StopMotionClock } from './scene/stop-motion';
+import { loadNoseArt, type NoseArtChoice } from './scene/textures';
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, type DisplayStand } from './scene/set';
@@ -90,6 +91,7 @@ scene.add(hemisphereLight, keyLight, keyLight.target, rimLight, secondaryKeyLigh
 
 await Promise.all([document.fonts.load('700 40px Outfit'), document.fonts.load('500 20px "DM Mono"')])
   .catch((error: unknown) => console.warn('UI fonts unavailable; markings fall back to system fonts', error));
+await loadNoseArt();
 
 const floorReflection = new PlanarReflection(0);
 const set = buildStudioSet(floorReflection);
@@ -352,6 +354,18 @@ function switchView(next: ViewMode): void {
   }, VEIL_MS);
 }
 
+// Nose art: every ship in the box carries the same artwork, switched together.
+
+let noseArt: NoseArtChoice = 'pinup';
+
+function setNoseArt(choice: NoseArtChoice): void {
+  noseArt = choice;
+  for (const ship of formation) {
+    for (const [option, decal] of Object.entries(ship.aircraft.noseArt)) decal.visible = option === choice;
+  }
+  ui.setNoseArt(choice);
+}
+
 // Playback.
 
 let sortieTime = 0;
@@ -391,9 +405,12 @@ function setShow(mode: ShowMode): void {
   bumpTripod();
 }
 
-const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start() });
+const ui = new Ui(uiRoot, {
+  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt,
+});
 const fpsMeter = new FpsMeter(ui.meterSlot);
 ui.setShow('exterior');
+setNoseArt('pinup');
 applyView('lab');
 
 addEventListener('keydown', (event) => {
@@ -412,6 +429,8 @@ addEventListener('keydown', (event) => {
     setShow(show === 'cutaway' ? 'exterior' : 'cutaway');
   } else if (event.key === 'e' || event.key === 'E') {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
+  } else if (event.key === 'n' || event.key === 'N') {
+    setNoseArt(noseArt === 'pinup' ? 'card' : 'pinup');
   } else if (event.key === 'l' || event.key === 'L') {
     renderLog.start();
   }

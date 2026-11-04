@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import hallucinatinHattieUrl from '../assets/nose-art-hallucinatin-hattie.png';
 import { PALETTE } from './palette';
 
 function createCanvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -208,22 +209,30 @@ export interface DecalArt {
 const DECAL_FILM_ALPHA = 0.07;
 
 /**
- * Lays printed art on its carrier film: a clear, faintly ivory film trimmed `marginPx` round the art, with the soft
- * shadow its lip throws on the paint; the bump map stands the film off the paint and the ink off the film.
+ * Lays printed art on its carrier film: a clear, faintly ivory film trimmed `marginPx` round the art (or, `sheet`, left
+ * as one rounded rectangle round art too fiddly to cut round, like a row of tally marks), with the soft shadow its lip
+ * throws on the paint; the bump map stands the film off the paint and the ink off the film.
  */
-function waterSlideDecal(art: HTMLCanvasElement, marginPx: number): DecalArt {
+function waterSlideDecal(art: HTMLCanvasElement, marginPx: number, film: 'trimmed' | 'sheet' = 'trimmed'): DecalArt {
   const pad = marginPx + 8;
   const width = art.width + pad * 2;
   const height = art.height + pad * 2;
-  const [filmCanvas, film] = createCanvas(width, height);
-  for (let step = 0; step < 32; step++) {
-    const angle = (step / 16) * Math.PI;
-    const reach = step < 16 ? marginPx : marginPx * 0.55;
-    film.drawImage(art, pad + Math.cos(angle) * reach, pad + Math.sin(angle) * reach);
+  const [filmCanvas, filmContext] = createCanvas(width, height);
+  if (film === 'sheet') {
+    filmContext.fillStyle = '#ffffff';
+    filmContext.beginPath();
+    filmContext.roundRect(pad - marginPx, pad - marginPx, art.width + marginPx * 2, art.height + marginPx * 2, marginPx * 0.6);
+    filmContext.fill();
+  } else {
+    for (let step = 0; step < 32; step++) {
+      const angle = (step / 16) * Math.PI;
+      const reach = step < 16 ? marginPx : marginPx * 0.55;
+      filmContext.drawImage(art, pad + Math.cos(angle) * reach, pad + Math.sin(angle) * reach);
+    }
+    filmContext.globalCompositeOperation = 'source-in';
+    filmContext.fillStyle = '#ffffff';
+    filmContext.fillRect(0, 0, width, height);
   }
-  film.globalCompositeOperation = 'source-in';
-  film.fillStyle = '#ffffff';
-  film.fillRect(0, 0, width, height);
 
   const [canvas, context] = createCanvas(width, height);
   // The film's edge stands a fraction of a millimetre proud and throws a soft line of shadow just outside it.
@@ -275,6 +284,23 @@ function silvering(film: HTMLCanvasElement, art: HTMLCanvasElement, pad: number)
   context.drawImage(film, 0, 0);
   context.globalCompositeOperation = 'destination-out';
   context.drawImage(art, pad, pad);
+  // Only along the film's edge: further in, the setting solution pulled the film down.
+  context.drawImage(eroded(film, SILVERING_BAND_PX), 0, 0);
+  return canvas;
+}
+
+/** How far in from the film's edge silvering reaches, in texture pixels. */
+const SILVERING_BAND_PX = 7;
+
+/** `mask` shrunk by `radius` pixels: what stays opaque under every shifted copy. */
+function eroded(mask: HTMLCanvasElement, radius: number): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(mask.width, mask.height);
+  context.drawImage(mask, 0, 0);
+  context.globalCompositeOperation = 'destination-in';
+  for (let step = 0; step < 12; step++) {
+    const angle = (step / 12) * Math.PI * 2;
+    context.drawImage(mask, Math.cos(angle) * radius, Math.sin(angle) * radius);
+  }
   return canvas;
 }
 
@@ -391,6 +417,208 @@ export function handCutFlashTextures(): THREE.CanvasTexture[] {
     return finishTexture(canvas);
   });
   return flashPieces;
+}
+
+/** Missions the lead ship has flown, one bomb each in the tally under the pilot's window. */
+export const MISSIONS_FLOWN = 24;
+
+/** The nose art the lead ship can carry: Hattie, or the playing card. */
+export type NoseArtChoice = 'pinup' | 'card';
+
+let noseArtPainting: HTMLImageElement | null = null;
+
+/**
+ * Loads the pin-up, "Hallucinatin' Hattie": a 1944-style calendar girl on a typewriter, its ticker tape curling into
+ * her name banner. `noseArtDecal('pinup')` needs it loaded first.
+ */
+export async function loadNoseArt(): Promise<void> {
+  const image = new Image();
+  image.src = hallucinatinHattieUrl;
+  await image.decode();
+  noseArtPainting = image;
+}
+
+/** The chosen nose art as a kit decal, its film trimmed round the art. */
+export function noseArtDecal(choice: NoseArtChoice): DecalArt {
+  if (choice === 'card') return waterSlideDecal(kingOfHeartsArt(), 10);
+  if (!noseArtPainting) throw new Error('Nose art not loaded: await loadNoseArt() before building the aircraft');
+  const [canvas, context] = createCanvas(noseArtPainting.naturalWidth, noseArtPainting.naturalHeight);
+  context.drawImage(noseArtPainting, 0, 0);
+  return waterSlideDecal(canvas, 10);
+}
+
+/**
+ * "King of Hearts" in the 1944 manner: a playing card tilted as if tossed on the table, crowned and with a big red
+ * heart, over a banner with the name in sign-painter's script. Black keylines round everything, as the group's
+ * painters outlined their work to stand off the Olive Drab.
+ */
+function kingOfHeartsArt(): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(1024, 760);
+  const keyline = (width: number) => {
+    context.lineJoin = 'round';
+    context.lineWidth = width;
+    context.strokeStyle = '#111111';
+    context.stroke();
+  };
+
+  // The card.
+  context.save();
+  context.translate(470, 330);
+  context.rotate(-0.16);
+  const cardWidth = 400;
+  const cardHeight = 560;
+  context.beginPath();
+  context.roundRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 34);
+  context.fillStyle = '#efe6cf';
+  context.fill();
+  keyline(12);
+  context.beginPath();
+  context.roundRect(-cardWidth / 2 + 22, -cardHeight / 2 + 22, cardWidth - 44, cardHeight - 44, 20);
+  context.lineWidth = 6;
+  context.strokeStyle = '#b3241d';
+  context.stroke();
+  // Corner indices: K over a small heart, and the same turned round in the opposite corner.
+  for (const turn of [0, Math.PI]) {
+    context.save();
+    context.rotate(turn);
+    context.fillStyle = '#b3241d';
+    context.font = '800 76px Outfit, Arial, sans-serif';
+    context.textAlign = 'center';
+    context.fillText('K', -cardWidth / 2 + 62, -cardHeight / 2 + 104);
+    heartPath(context, -cardWidth / 2 + 62, -cardHeight / 2 + 136, 26);
+    context.fill();
+    context.restore();
+  }
+  // The heart, with a crown resting on it.
+  heartPath(context, 0, 40, 132);
+  context.fillStyle = '#c7271e';
+  context.fill();
+  keyline(9);
+  heartPath(context, -34, 0, 34);
+  context.fillStyle = 'rgba(255,255,255,0.32)';
+  context.fill();
+  crownPath(context, 0, -110, 190, 120);
+  context.fillStyle = '#e2b13a';
+  context.fill();
+  keyline(8);
+  for (const [x, y, colour] of [[-62, -104, '#2a58b0'], [0, -96, '#c7271e'], [62, -104, '#2a58b0']] as const) {
+    context.beginPath();
+    context.arc(x, y, 13, 0, Math.PI * 2);
+    context.fillStyle = colour;
+    context.fill();
+    keyline(4);
+  }
+  context.restore();
+
+  // The banner across the card's foot, its tails folded behind.
+  const bannerY = 600;
+  for (const side of [-1, 1]) {
+    context.beginPath();
+    context.moveTo(512 + side * 360, bannerY - 50);
+    context.lineTo(512 + side * 490, bannerY - 40);
+    context.lineTo(512 + side * 445, bannerY + 10);
+    context.lineTo(512 + side * 495, bannerY + 62);
+    context.lineTo(512 + side * 360, bannerY + 58);
+    context.closePath();
+    context.fillStyle = '#1b2f63';
+    context.fill();
+    keyline(8);
+  }
+  context.beginPath();
+  context.moveTo(512 - 400, bannerY - 72);
+  context.quadraticCurveTo(512, bannerY - 112, 512 + 400, bannerY - 72);
+  context.lineTo(512 + 400, bannerY + 38);
+  context.quadraticCurveTo(512, bannerY - 2, 512 - 400, bannerY + 38);
+  context.closePath();
+  context.fillStyle = '#25417f';
+  context.fill();
+  keyline(9);
+  context.save();
+  context.translate(512, bannerY - 2);
+  context.rotate(-0.015);
+  context.font = 'italic 700 104px "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.lineJoin = 'round';
+  context.lineWidth = 12;
+  context.strokeStyle = '#111111';
+  context.strokeText('King of Hearts', 0, -18);
+  context.fillStyle = '#f2c544';
+  context.fillText('King of Hearts', 0, -18);
+  context.restore();
+  return canvas;
+}
+
+/** A heart `size` wide, its notch at (x, y - size / 4) and its point below. */
+function heartPath(context: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  const half = size / 2;
+  context.beginPath();
+  context.moveTo(x, y + size * 0.62);
+  context.bezierCurveTo(x - size * 0.9, y + size * 0.05, x - half * 0.95, y - size * 0.55, x, y - size * 0.22);
+  context.bezierCurveTo(x + half * 0.95, y - size * 0.55, x + size * 0.9, y + size * 0.05, x, y + size * 0.62);
+  context.closePath();
+}
+
+/** A five-pointed crown `width` by `height`, centred on (x, y). */
+function crownPath(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number): void {
+  const left = x - width / 2;
+  const bottom = y + height / 2;
+  const top = y - height / 2;
+  context.beginPath();
+  context.moveTo(left, bottom);
+  context.lineTo(left, top + height * 0.3);
+  for (let point = 0; point < 5; point++) {
+    context.lineTo(left + (width * point) / 4, point % 2 === 0 ? top : top + height * 0.12);
+    if (point < 4) context.lineTo(left + (width * (point + 0.5)) / 4, top + height * 0.45);
+  }
+  context.lineTo(left + width, bottom);
+  context.closePath();
+}
+
+/**
+ * A door's outline in the skin: the panel line all round it, the hinge line along its forward edge, and the flush
+ * handle recess at its aft edge. Dark lines on transparent; the door itself is the skin.
+ */
+export function hatchOutlineTexture(): THREE.CanvasTexture {
+  const [canvas, context] = createCanvas(520, 340);
+  context.strokeStyle = 'rgba(14,14,10,0.85)';
+  context.lineWidth = 7;
+  context.beginPath();
+  context.roundRect(12, 12, 496, 316, 18);
+  context.stroke();
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(34, 30);
+  context.lineTo(34, 310);
+  context.stroke();
+  context.fillStyle = 'rgba(14,14,10,0.7)';
+  context.beginPath();
+  context.roundRect(450, 140, 34, 60, 8);
+  context.fill();
+  return finishTexture(canvas);
+}
+
+/** The mission tally under the pilot's window: one small yellow bomb per mission, in rows of twelve. */
+export function missionTallyDecal(missions: number): DecalArt {
+  const perRow = 12;
+  const rows = Math.ceil(missions / perRow);
+  const [canvas, context] = createCanvas(perRow * 64 + 16, rows * 40 + 16);
+  for (let mission = 0; mission < missions; mission++) {
+    const x = 8 + (mission % perRow) * 64;
+    const y = 8 + Math.floor(mission / perRow) * 40 + 16;
+    // Noses towards the canvas's left, which is the aircraft's nose on the port side, where the tally sits.
+    context.fillStyle = PALETTE.tailYellow;
+    context.beginPath();
+    context.ellipse(x + 26, y, 20, 9, 0, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.moveTo(x + 44, y);
+    context.lineTo(x + 54, y - 11);
+    context.lineTo(x + 54, y + 11);
+    context.closePath();
+    context.fill();
+  }
+  return waterSlideDecal(canvas, 8, 'sheet');
 }
 
 /**

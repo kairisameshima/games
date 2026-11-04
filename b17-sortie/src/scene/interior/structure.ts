@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FUSELAGE_LENGTH, STATIONS } from '../b17-dimensions';
 import { HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
-import { BULKHEADS, FLOORS, TAIL_FLOOR_CLEARANCE, WAIST_FLOOR_CLEARANCE } from './layout';
+import { BULKHEADS, CRAWLWAY, FLOORS, TAIL_FLOOR_CLEARANCE, WAIST_FLOOR_CLEARANCE } from './layout';
 import type { InteriorMaterials } from './materials';
 
 const FRAME_SPACING = 0.5;
@@ -107,7 +107,13 @@ export function addFloor(
     const length = Math.min(step, end - d);
     const middle = d + length / 2;
     const y = heightAt(middle);
-    const halfWidth = Math.min(hullHalfWidthAtHeight(d, y), hullHalfWidthAtHeight(d + length, y), maxHalfWidth) - 0.03;
+    // Measured at the panel's underside too: low in the tail the hull narrows fast, and a width taken at the top
+    // surface alone would push the panel's lower corners out through the skin.
+    const bottom = y - FLOOR_THICKNESS;
+    const halfWidth = Math.min(
+      hullHalfWidthAtHeight(d, y), hullHalfWidthAtHeight(d + length, y),
+      hullHalfWidthAtHeight(d, bottom), hullHalfWidthAtHeight(d + length, bottom), maxHalfWidth,
+    ) - 0.03;
     d += length;
     if (halfWidth < 0.12) continue;
     // Where the strip crosses the hole, the floor runs only outboard of it.
@@ -132,17 +138,69 @@ export const tailFloorHeight = (d: number) => hullSectionAt(d).bottom + TAIL_FLO
 
 export function addFloors(parent: THREE.Object3D, materials: InteriorMaterials): void {
   addFloor(parent, materials, FLOORS.nose.start, FLOORS.nose.end, () => FLOORS.nose.y);
-  addFloor(parent, materials, FLOORS.crawlway.start, FLOORS.crawlway.end, () => FLOORS.crawlway.y, 0.32);
-  addFloor(parent, materials, FLOORS.cockpit.start, FLOORS.cockpit.end, () => FLOORS.cockpit.y);
+  addCrawlway(parent, materials);
+  addFloor(parent, materials, FLOORS.cockpit.start, FLOORS.cockpit.end, () => FLOORS.cockpit.y, 2, CRAWLWAY.exit);
   addFloor(parent, materials, FLOORS.flightDeck.start, FLOORS.flightDeck.end, () => FLOORS.flightDeck.y);
   addFloor(parent, materials, FLOORS.radioRoom.start, FLOORS.radioRoom.end, () => FLOORS.radioRoom.y);
   addFloor(parent, materials, BULKHEADS.radioToWaist, BULKHEADS.waistToTail, waistFloorHeight, 2, { d: STATIONS.ballTurret.d, radius: BALL_WELL_RADIUS });
   addFloor(parent, materials, BULKHEADS.waistToTail, 21.75, tailFloorHeight, 0.32);
-  // Cockpit floor bearers either side of the crawlway, closing the space under the floor at its sides.
-  for (const side of [-1, 1]) {
-    part(parent, roundedBox(FLOORS.cockpit.end - FLOORS.cockpit.start, FLOORS.cockpit.y - FLOORS.crawlway.y, 0.03, 0.008), materials.cockpitGreen,
-      toX((FLOORS.cockpit.start + FLOORS.cockpit.end) / 2), (FLOORS.cockpit.y + FLOORS.crawlway.y) / 2, side * 0.34);
+}
+
+/** Half-width of the crawlway's floor, and where its side bearers stand. */
+const CRAWLWAY_HALF_WIDTH = 0.32;
+const CRAWLWAY_BEARER_Z = 0.34;
+
+/**
+ * The crawlway from bulkhead 4 to the opening behind the pilots' seats: its floor, which over the forward entrance
+ * hatch is the hatch's hinged metal guard on the port half; the bearers either side under the pilots' floor; the step
+ * up into the opening; and the panel that closes the crawlway's aft end, so it stops at the opening and does not run
+ * on into the space under the flight deck.
+ */
+function addCrawlway(parent: THREE.Object3D, materials: InteriorMaterials): void {
+  const y = FLOORS.crawlway.y;
+  const hatch = CRAWLWAY.forwardHatch;
+  addFloor(parent, materials, FLOORS.crawlway.start, hatch.start, () => y, CRAWLWAY_HALF_WIDTH);
+  addFloor(parent, materials, hatch.end, FLOORS.crawlway.end, () => y, CRAWLWAY_HALF_WIDTH);
+  const hatchLength = hatch.end - hatch.start;
+  const hatchMiddle = toX((hatch.start + hatch.end) / 2);
+  // Starboard half over the hatch is plain floor; the port half is the guard, ribbed aluminium on its hinge.
+  part(parent, roundedBox(hatchLength - 0.008, FLOOR_THICKNESS, CRAWLWAY_HALF_WIDTH, 0.008), materials.plywood, hatchMiddle, y - FLOOR_THICKNESS / 2, CRAWLWAY_HALF_WIDTH / 2);
+  part(parent, roundedBox(hatchLength - 0.01, 0.012, CRAWLWAY_HALF_WIDTH - 0.01, 0.004), materials.aluminium, hatchMiddle, y - 0.006, -CRAWLWAY_HALF_WIDTH / 2);
+  for (let rib = 1; rib < 6; rib++) {
+    part(parent, new THREE.BoxGeometry(hatchLength - 0.06, 0.008, 0.012), materials.aluminium, hatchMiddle, y + 0.004, -rib * (CRAWLWAY_HALF_WIDTH / 6));
   }
+  part(parent, new THREE.CylinderGeometry(0.012, 0.012, CRAWLWAY_HALF_WIDTH - 0.04, 10), materials.frame, toX(hatch.start) + 0.01, y + 0.01, -CRAWLWAY_HALF_WIDTH / 2, { rotation: [Math.PI / 2, 0, 0] });
+  // The red emergency release handle that withdraws the hinge pins, at the hatch's aft port corner.
+  part(parent, roundedBox(0.03, 0.03, 0.12, 0.008), materials.extinguisher, toX(hatch.end) - 0.04, y + 0.03, -CRAWLWAY_HALF_WIDTH + 0.08);
+  part(parent, new THREE.CylinderGeometry(0.008, 0.008, 0.05, 8), materials.extinguisher, toX(hatch.end) - 0.04, y + 0.01, -CRAWLWAY_HALF_WIDTH + 0.03);
+
+  // Bearers under the pilots' floor either side of the crawlway, closing the space under it at its sides.
+  for (const side of [-1, 1]) {
+    part(parent, roundedBox(FLOORS.cockpit.end - FLOORS.cockpit.start, FLOORS.cockpit.y - y, 0.03, 0.008), materials.cockpitGreen,
+      toX((FLOORS.cockpit.start + FLOORS.cockpit.end) / 2), (FLOORS.cockpit.y + y) / 2, side * CRAWLWAY_BEARER_Z);
+  }
+  // The step: a plank across between the bearers on two angle brackets.
+  const step = CRAWLWAY.step;
+  part(parent, roundedBox(0.2, 0.03, step.width, 0.008), materials.plywood, toX(step.d), step.topY - 0.015, 0);
+  for (const side of [-1, 1]) {
+    part(parent, new THREE.BoxGeometry(0.03, step.topY - y, 0.03), materials.aluminium, toX(step.d), (step.topY + y) / 2, side * (step.width / 2 - 0.03));
+  }
+  addCrawlwayEndPanel(parent, materials.frameGreen, FLOORS.crawlway.end);
+}
+
+/** A panel across the hull at `d` from the keel up to the flight deck floor, closing the crawlway's aft end (`material` two-sided). */
+function addCrawlwayEndPanel(parent: THREE.Object3D, material: THREE.Material, d: number): void {
+  const top = FLOORS.flightDeck.y - 0.01;
+  const below = hullRing(d, -0.012).filter((point) => point.y < top).map((point) => new THREE.Vector2(-point.z, point.y)).sort((a, b) => a.x - b.x);
+  const outline = new THREE.Shape();
+  const halfWidth = hullHalfWidthAtHeight(d, top) - 0.012;
+  outline.moveTo(-halfWidth, top);
+  for (const point of below) outline.lineTo(point.x, point.y);
+  outline.lineTo(halfWidth, top);
+  outline.closePath();
+  const geometry = new THREE.ShapeGeometry(outline, 8);
+  geometry.rotateY(Math.PI / 2);
+  part(parent, geometry, material, toX(d) - 0.01, 0, 0);
 }
 
 /** Bulkhead sheet with a round-topped door. */

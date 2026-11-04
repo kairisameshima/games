@@ -10,6 +10,7 @@
 | `photo-schweinfurt-formation.jpg` | [B-17F formation over Schweinfurt, 17 August 1943](https://commons.wikimedia.org/wiki/File:B-17F_formation_over_Schweinfurt,_Germany,_August_17,_1943.jpg), USAAF | Public domain |
 | `ball-turret-installation.png` | [AN 11-45G-1, Handbook of Instructions, Lower Ball Turrets Types A-2, A-2A and A-13](http://hangarthirteen.org/wp-content/uploads/2020/08/11-45G-1-Handbook-for-Sperry-Lower-Ball-Turrets-A-2-A-2A-A-13.pdf), figure 47 (installation outline drawing), USAAF | Public domain |
 | `photo-b17-schweinfurt.jpg` | [B-17 Schweinfurt](https://commons.wikimedia.org/wiki/File:B-17_Schweinfurt.jpg), USAAF | Public domain |
+| `photo-liberty-belle-cheyenne-tail.jpg` | [Liberty Belle 04](https://commons.wikimedia.org/wiki/File:Liberty_Belle_04.jpg), the Cheyenne tail of B-17G 44-85734, Danleo | CC BY 2.5 |
 
 ## How the model was measured
 
