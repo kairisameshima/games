@@ -177,6 +177,10 @@ const COTTON_FUNCTIONS = /* glsl */ `
   varying float vWisp;
   varying float vShell;
   uniform float uCottonFrame;
+  #ifdef COTTON_GLOW
+    uniform float uGlow;
+    uniform vec3 uGlowColor;
+  #endif
   ${NOISE_FUNCTIONS}
   // x: clumping of the wool, y: filament strength.
   vec2 cottonFibres(vec3 p) {
@@ -213,7 +217,13 @@ const COTTON_SHADING = /* glsl */ `
 // for a sheen lobe.
 const COTTON_RIM = /* glsl */ `
   #include <emissivemap_fragment>
-  totalEmissiveRadiance += diffuseColor.rgb * pow(1.0 - cottonFacing, 3.0) * COTTON_RIM_STRENGTH;`;
+  totalEmissiveRadiance += diffuseColor.rgb * pow(1.0 - cottonFacing, 3.0) * COTTON_RIM_STRENGTH;
+  #ifdef COTTON_GLOW
+    // A bulb inside the tuft: it shines through the wool where the tuft faces the eye, the thin skin straight over it,
+    // and dies away toward the silhouette, where the light crosses the most wool; the outer fibres stand dark against it,
+    // and the clumps let more through than the gaps.
+    totalEmissiveRadiance += uGlowColor * uGlow * pow(cottonFacing, 1.6) * (1.0 - vShell * 0.85) * (0.45 + fibres.x * 0.9);
+  #endif`;
 
 export interface CottonOptions {
   color: THREE.ColorRepresentation;
@@ -226,9 +236,11 @@ export interface CottonOptions {
   frequency: number;
   /** How far the outermost fibre shell stands off the body, in the geometry's own units. */
   fuzz: number;
+  /** A light inside the tuft, in this colour: `glow` on the material sets how bright it burns. */
+  glowColor?: THREE.ColorRepresentation;
 }
 
-export type CottonMaterial = THREE.MeshStandardMaterial & { wisp: { value: number } };
+export type CottonMaterial = THREE.MeshStandardMaterial & { wisp: { value: number }; glow: { value: number } };
 
 /** Relief of the fibres on a tuft's body, in world units. */
 const COTTON_RELIEF = 0.004;
@@ -241,15 +253,18 @@ export function cottonMaterial(options: CottonOptions): CottonMaterial {
     color: options.color, roughness: 1, metalness: 0, envMapIntensity: 0.6, alphaTest: 0.5, alphaToCoverage: true,
   }));
   const wisp = { value: 0 };
+  const glow = { value: 0 };
+  const glowColor = { value: new THREE.Color(options.glowColor ?? '#000000') };
+  const glowing = options.glowColor !== undefined;
   const instanced = options.instanced === true;
   const frequency = options.frequency.toFixed(2);
   const fuzz = options.fuzz.toFixed(4);
-  extendShader(material, `cotton-${instanced ? 'instanced' : 'single'}-${frequency}-${fuzz}`, (shader) => {
-    Object.assign(shader.uniforms, miniatureUniforms, cottonUniforms, { uWisp: wisp });
+  extendShader(material, `cotton-${instanced ? 'instanced' : 'single'}-${frequency}-${fuzz}${glowing ? '-glow' : ''}`, (shader) => {
+    Object.assign(shader.uniforms, miniatureUniforms, cottonUniforms, { uWisp: wisp, uGlow: glow, uGlowColor: glowColor });
     const defines = [
       `#define COTTON_FREQUENCY ${frequency}`, `#define COTTON_FUZZ ${fuzz}`, `#define COTTON_RELIEF ${COTTON_RELIEF.toFixed(4)}`,
       `#define COTTON_SHELL_FACING ${COTTON_SHELL_FACING.toFixed(2)}`, `#define COTTON_RIM_STRENGTH ${COTTON_RIM_STRENGTH.toFixed(2)}`,
-      instanced ? '#define COTTON_INSTANCED' : '', '',
+      instanced ? '#define COTTON_INSTANCED' : '', glowing ? '#define COTTON_GLOW' : '', '',
     ].join('\n');
     shader.vertexShader = defines + shader.vertexShader
       .replace('#include <common>', `#include <common>\n${COTTON_VERTEX_DECLARATIONS}`)
@@ -260,7 +275,7 @@ export function cottonMaterial(options: CottonOptions): CottonMaterial {
       .replace('#include <normal_fragment_maps>', COTTON_SHADING)
       .replace('#include <emissivemap_fragment>', COTTON_RIM);
   });
-  return Object.assign(material, { wisp });
+  return Object.assign(material, { wisp, glow });
 }
 
 /** Advances the shared cotton fibres one stop-motion frame. */

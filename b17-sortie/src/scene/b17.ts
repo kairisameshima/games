@@ -1199,7 +1199,7 @@ export interface BattleDamage {
   holes: THREE.Mesh[];
   /** No. 3 engine's propeller: the one feathered. */
   propeller: THREE.Object3D;
-  /** Where its oil smoke streams from, behind the cowl. */
+  /** Where its fire and smoke break out, through the cowl flaps on the nacelle's upper outboard quarter. */
   smokePort: THREE.Object3D;
   burstPoint: THREE.Object3D;
 }
@@ -1333,7 +1333,8 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
       exhaustPorts.push(exhaust);
       if (spec === NACELLES[0] && side > 0) {
         damagedEngine = { nacelle, smokePort: new THREE.Object3D() };
-        damagedEngine.smokePort.position.set(toX(spec.cowlRearD + 0.1), spec.thrustLineH - COWL_RADIUS * 0.6, span);
+        // Just aft of the cowl flaps, on the nacelle's upper outboard quarter where the fire breaks out through them.
+        damagedEngine.smokePort.position.set(toX(spec.cowlRearD + 0.12), spec.thrustLineH + COWL_RADIUS * 0.74, span + side * COWL_RADIUS * 0.74);
         damagedEngine.smokePort.userData.unmerged = true;
         nacelle.add(damagedEngine.smokePort);
       }

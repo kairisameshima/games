@@ -206,7 +206,7 @@ export interface TrailLook {
 
 const CONTRAIL_LOOK: TrailLook = { colour: CONTRAIL_COLOR, girth: 1 };
 /** Oil smoke from a hit engine: the same cotton on its wire, dyed charcoal and pulled out thicker. */
-export const ENGINE_SMOKE_LOOK: TrailLook = { colour: { lab: '#3b3b3d', studio: '#2c2d30' }, girth: 2.6 };
+export const ENGINE_SMOKE_LOOK: TrailLook = { colour: { lab: '#1e1e20', studio: '#19191b' }, girth: 3.0 };
 const ARMATURE_WIRE_RADIUS = 0.003;
 
 interface TrailPoint {
@@ -364,6 +364,96 @@ export class Contrails {
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+
+// A burning engine, as a stop-motion fire is built: cotton tufts dyed orange with a grain-of-wheat bulb buried in each,
+// so the wool glows from inside, pulled out aft of the cowl and darkening into black-dyed cotton smoke that runs into the
+// smoke trail. Every exposure the animator re-teases the tufts, so the flames boil from frame to frame, and the bulbs
+// flicker on a dimmer.
+
+interface FireTuft {
+  mesh: THREE.Mesh;
+  /** Rest place aft of the engine, world units: along the airflow, then up. */
+  along: number;
+  rise: number;
+  radius: number;
+}
+
+/** The tufts: flame cores lit brightest, outer flames dimmer, then black smoke, each aft of the last. */
+const FIRE_TUFTS = [
+  { kind: 'core', along: 0.0, rise: 0.0, radius: 0.06 }, { kind: 'core', along: 0.08, rise: 0.01, radius: 0.075 },
+  { kind: 'flame', along: 0.17, rise: 0.02, radius: 0.085 }, { kind: 'flame', along: 0.27, rise: 0.035, radius: 0.09 },
+  { kind: 'smoke', along: 0.38, rise: 0.05, radius: 0.1 }, { kind: 'smoke', along: 0.5, rise: 0.07, radius: 0.12 },
+  { kind: 'smoke', along: 0.64, rise: 0.09, radius: 0.14 }, { kind: 'smoke', along: 0.8, rise: 0.11, radius: 0.16 },
+] as const;
+type FireKind = (typeof FIRE_TUFTS)[number]['kind'];
+
+const FIRE_COLOURS: Record<FireKind, { wool: string; bulb: string | null; glow: number }> = {
+  core: { wool: '#ffc061', bulb: '#ff9a35', glow: 3.2 },
+  flame: { wool: '#d4581f', bulb: '#ff5c18', glow: 1.8 },
+  smoke: { wool: '#141415', bulb: null, glow: 0 },
+};
+/** How far a tuft strays from its rest place and size each exposure, as a fraction of its radius, and how the bulbs flicker. */
+const FIRE_BOIL = { place: 0.35, size: 0.25, flicker: 0.45 } as const;
+/** The orange light the fire throws on the nacelle and wing. */
+const FIRE_LIGHT = { colour: '#ff7a2a', radius: 1.3, intensity: 1.6 } as const;
+
+export class EngineFire {
+  readonly root = new THREE.Group();
+  private readonly tufts: FireTuft[];
+  private readonly materials: Record<FireKind, CottonMaterial>;
+  private readonly light: VirtualLight;
+
+  constructor() {
+    this.materials = {
+      core: cottonMaterial({ color: FIRE_COLOURS.core.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.core.bulb ?? undefined }),
+      flame: cottonMaterial({ color: FIRE_COLOURS.flame.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.flame.bulb ?? undefined }),
+      smoke: cottonMaterial({ color: FIRE_COLOURS.smoke.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz }),
+    };
+    this.tufts = FIRE_TUFTS.map((spec, index) => {
+      const mesh = new THREE.Mesh(cottonTuftGeometry(31 + index * 7, { detail: 4, shellDetail: 2, shells: FIRE_COTTON.shells }), this.materials[spec.kind]);
+      mesh.castShadow = false;
+      this.root.add(mesh);
+      return { mesh, along: spec.along, rise: spec.rise, radius: spec.radius };
+    });
+    this.light = addVirtualLight(new THREE.Vector3(), FIRE_LIGHT.colour, FIRE_LIGHT.radius, 0);
+    this.root.visible = false;
+  }
+
+  /**
+   * `fire` is how hard it burns (0 out); `source` where the flames leave the nacelle, in world space. Re-teases the
+   * tufts and flickers the bulbs only on an exposure that moves the film (`exposureSec` > 0), so held frames hold.
+   */
+  update(exposureSec: number, fire: number, source: THREE.Vector3, random: () => number): void {
+    const burning = fire > 0.02;
+    const lighting = burning && !this.root.visible;
+    this.root.visible = burning;
+    if (!burning) {
+      this.light.intensity = 0;
+      return;
+    }
+    this.light.position.copy(source).add(new THREE.Vector3(-0.15, 0.02, 0));
+    // A fire first shown on a held frame (a phase jumped to while paused) is still set up once.
+    if (exposureSec <= 0 && !lighting) return;
+    const boil = () => (random() - 0.5) * 2;
+    for (const tuft of this.tufts) {
+      const radius = tuft.radius * (0.35 + fire * 0.65);
+      tuft.mesh.position.set(
+        source.x - tuft.along * fire + boil() * radius * FIRE_BOIL.place,
+        source.y + tuft.rise * fire + boil() * radius * FIRE_BOIL.place,
+        source.z + boil() * radius * FIRE_BOIL.place,
+      );
+      tuft.mesh.scale.set(radius * (1.2 + boil() * FIRE_BOIL.size), radius * (1 + boil() * FIRE_BOIL.size), radius * (1 + boil() * FIRE_BOIL.size));
+      tuft.mesh.rotation.set(random() * Math.PI * 2, random() * Math.PI * 2, random() * Math.PI * 2);
+    }
+    for (const kind of ['core', 'flame'] as const) {
+      this.materials[kind].glow.value = FIRE_COLOURS[kind].glow * fire * (1 + boil() * FIRE_BOIL.flicker);
+    }
+    this.light.intensity = FIRE_LIGHT.intensity * fire * (1 + boil() * FIRE_BOIL.flicker);
+  }
+}
+
+/** Filaments per unit tuft, the halo's reach in tuft radii, and its shells. */
+const FIRE_COTTON = { frequency: 9, fuzz: 0.28, shells: 3 } as const;
 
 // Falling bombs, released in train from the bay; each rides down a clear acrylic rod stood on the set floor, the rig a
 // stop-motion animator would hold a falling prop on.

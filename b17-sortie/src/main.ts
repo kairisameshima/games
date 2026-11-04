@@ -15,7 +15,7 @@ import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
-import { BombTrain, Contrails, ENGINE_SMOKE_LOOK, FlakField } from './scene/effects';
+import { BombTrain, Contrails, ENGINE_SMOKE_LOOK, EngineFire, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
@@ -151,11 +151,13 @@ const contrails = new Contrails(contrailEmitters.length);
 /** Oil smoke from the lead's hit engine. */
 const engineSmoke = new Contrails(1, ENGINE_SMOKE_LOOK);
 const engineSmokeEmitter = [new THREE.Vector3()];
+/** The lead's No. 3 on fire after the flak hit. */
+const engineFire = new EngineFire();
 const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, engineSmoke.root, bombs.root, gunnery.root);
+scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, bombs.root, gunnery.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -611,7 +613,7 @@ addEventListener('keydown', (event) => {
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.root, engineSmoke.root, flak.root];
+const cottonSet = [set.clouds, contrails.root, engineSmoke.root, engineFire.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -939,6 +941,7 @@ function exposeFrame(exposureSec: number): void {
   const damage = formation[0].aircraft.battleDamage;
   damage.smokePort.getWorldPosition(engineSmokeEmitter[0]);
   engineSmoke.update(deltaSec, AIR_DRIFT_SPEED, engineSmokeEmitter, stopMotion.random, leadState.engineSmoking);
+  engineFire.update(deltaSec, leadState.engineFire, engineSmokeEmitter[0], stopMotion.random);
   if (previousTime < FLAK_HIT_SECONDS && sortieTime >= FLAK_HIT_SECONDS) flak.burstAt(damage.burstPoint.getWorldPosition(scratchPosition));
   if (deltaSec > 0) {
     flickerLamps();
