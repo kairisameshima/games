@@ -63,6 +63,8 @@ export function buildBombBay(context: CompartmentContext): BombBayResult {
     bomb.position.set(toX(middle), bay.lowestTierY + (index >> 1) * bay.tierSpacing, side * bay.rackZ);
     // Lugs (the bomb's +y) turned inboard to the rack.
     bomb.rotation.x = (-side * Math.PI) / 2;
+    // Hidden one by one as the bombs drop, so no merge may fold it in.
+    bomb.userData.unmerged = true;
     root.add(bomb);
     rackedBombs.push(bomb);
   }

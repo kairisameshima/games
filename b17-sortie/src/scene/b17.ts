@@ -836,6 +836,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
       disc.receiveShadow = false;
       disc.renderOrder = 2;
       assignAssembly(propeller, nacelleId);
+      propeller.userData.unmerged = true;
       root.add(propeller);
       propellers.push(propeller);
     }
@@ -902,6 +903,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   for (const side of [1, -1] as const) {
     const hingeZ = side * bay.halfWidth;
     const hinge = assignAssembly(new THREE.Group(), 'bomb-doors');
+    hinge.userData.unmerged = true;
     hinge.position.set(toX(bayMid), hullSurfaceHeight(bayMid, hingeZ, false), hingeZ);
     part(hinge, buildBayDoorGeometry(side), materials.bayDoor, 0, 0, 0);
     root.add(hinge);
@@ -911,6 +913,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   // Top turret: Sperry A-1 behind the cockpit.
   const topTurretSpec = STATIONS.topTurret;
   const topTurretYaw = assignAssembly(new THREE.Group(), 'top-turret');
+  topTurretYaw.userData.unmerged = true;
   topTurretYaw.position.set(toX(topTurretSpec.d), hullSectionAt(topTurretSpec.d).top - 0.03, 0);
   part(topTurretYaw, new THREE.CylinderGeometry(topTurretSpec.radius + 0.04, topTurretSpec.radius + 0.06, 0.12, 32, 1, true), materials.gunmetal, 0, 0.04, 0);
   const dome = part(topTurretYaw, new THREE.SphereGeometry(topTurretSpec.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), materials.canopy, 0, 0.08, 0, { castShadow: false });
@@ -929,6 +932,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
 
   // Sperry ball turret, hanging from its trunnion ring support in the hole in the belly behind the radio room.
   const ballYaw = assignAssembly(new THREE.Group(), 'ball-turret');
+  ballYaw.userData.unmerged = true;
   ballYaw.position.copy(ballTurretCentre());
   addBallTurretMount(ballYaw, { structure: materials.neutralGray, steel: materials.gunmetal });
   const ballPitch = new THREE.Group();
@@ -941,6 +945,7 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   // Bendix chin turret on its fixed fairing.
   part(airframe, buildChinFairingGeometry(), materials.oliveDrab, 0, 0, 0);
   const { turret: chinTurret, guns: chinGuns } = buildChinTurret(materials);
+  chinTurret.userData.unmerged = true;
   root.add(assignAssembly(chinTurret, 'chin-turret'));
 
   const tailWindows = STATIONS.tailTurretWindows;
@@ -995,12 +1000,19 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
   }
   interior.starboardWall.removeFromParent();
   assemblies.adoptRootChildren();
-  // The turrets and every other moving part were left whole by the bake; merge each one's fixed pieces in its own space.
-  const movingParts: THREE.Object3D[] = [topTurretYaw, ballYaw, chinTurret];
-  root.traverse((object) => { if (object.userData.unmerged) movingParts.push(object); });
-  for (const moving of movingParts) mergeRigidMeshes(moving);
+  // The cutaway hides the whole starboard wall at once, so each assembly's share of it is one group, kept apart.
   const starboardWall: THREE.Object3D[] = [];
-  root.traverse((object) => { if (object.userData.hiddenInCutaway) starboardWall.push(object); });
+  for (const group of assemblies.groups.values()) {
+    const items = group.children.filter((child) => child.userData.hiddenInCutaway);
+    if (items.length === 0) continue;
+    const wall = new THREE.Group();
+    wall.userData.unmerged = true;
+    wall.add(...items);
+    group.add(wall);
+    starboardWall.push(wall);
+  }
+  // Everything that holds still in an assembly becomes one mesh per material; each moving part the same in its own space.
+  for (const group of assemblies.groups.values()) mergeRigidMeshes(group);
   // Callouts ride with the assembly their man is in: the engineer with the top turret, the gunners with their sections.
   const crewStations = interior.stations.map((station) => {
     const man = interior.crew.find((entry) => entry.station.label === station.role);
