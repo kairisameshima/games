@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { setCottonFrame } from './render/miniature';
 import {
   addVirtualLight, bakeEnvironments, createStudioPipeline, initialPixelRatio, metalMaterial, PlanarReflection, setSaturation,
   type VirtualLight,
@@ -9,6 +10,8 @@ import { Cutaway } from './scene/cutaway';
 import { BombTrain, Contrails, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
+import { STOP_MOTION_FPS, StopMotionClock } from './scene/stop-motion';
+import { RenderLog } from './render/render-log';
 import { buildDisplayStand, buildStudioSet, driftClouds, type DisplayStand } from './scene/set';
 import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
@@ -27,10 +30,10 @@ const MAX_FRAME_SEC = 0.1;
 /** Propeller speed as the eye reads it under a fast shutter: a strobed, slow turn over the blurred disc. */
 const PROPELLER_DISPLAY_RATE = Math.PI * 2 * 0.85;
 const ADAPTIVE_WINDOW_SECONDS = 1.6;
-const ADAPTIVE_LOW_FPS = 50;
-const ADAPTIVE_LOW_RATIO = 0.74;
-const ADAPTIVE_HIGH_FPS = 58;
-const ADAPTIVE_PROBE_FAIL_FPS = 55;
+/** Drawn frames a second below which quality steps down: the machine is missing exposures. */
+const ADAPTIVE_LOW_FPS = STOP_MOTION_FPS - 1;
+const ADAPTIVE_HIGH_FPS = STOP_MOTION_FPS - 0.5;
+const ADAPTIVE_PROBE_FAIL_FPS = STOP_MOTION_FPS - 1;
 const PIXEL_RATIO_STEP = 0.25;
 const VEIL_MS = 200;
 
@@ -128,6 +131,7 @@ const formation: FormationShip[] = formationSlots.map((slot, index) => {
 const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
 const flak = new FlakField();
 const contrails = new Contrails(contrailEmitters.length);
+const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
@@ -138,6 +142,34 @@ const cutaway = new Cutaway(formation[0].aircraft);
 const callouts = new Callouts(calloutRoot, formation[0].aircraft.root, formation[0].aircraft.crewStations);
 // Exploded view of the lead ship: compartments, wings, engines, tail surfaces and turrets pulled apart and named.
 const exploded = new ExplodedView(formation[0].aircraft.assemblies);
+
+// A closed ship's cabin shows only through its glazing, so it casts no shadows and stays out of the floor's
+// reflection; the lead's cabin casts again while the cutaway or the exploded view has it open.
+const leadCabinShadowCasters = formation[0].aircraft.interiorMeshes.filter((mesh) => mesh.castShadow);
+for (const ship of formation) {
+  floorReflection.hiddenDuringReflection.push(...ship.aircraft.interiorMeshes);
+  for (const mesh of ship.aircraft.interiorMeshes) mesh.castShadow = false;
+}
+let leadCabinOpen = false;
+/** A wingman's cabin fittings are drawn only with the camera this close (world units); farther, the glazing hides them. */
+const WINGMAN_CABIN_DETAIL_DISTANCE = 7;
+const wingmanCabins = formation.slice(1).map((ship) => ({ holder: ship.holder, fittings: ship.aircraft.cabinFittings, shown: true }));
+
+function updateWingmanCabins(): void {
+  for (const cabin of wingmanCabins) {
+    const shown = camera.position.distanceTo(cabin.holder.position) < WINGMAN_CABIN_DETAIL_DISTANCE;
+    if (shown === cabin.shown) continue;
+    cabin.shown = shown;
+    for (const mesh of cabin.fittings) mesh.visible = shown;
+  }
+}
+
+function updateLeadCabinShadows(): void {
+  const open = cutaway.amount > 0 || exploded.amount > 0;
+  if (open === leadCabinOpen) return;
+  leadCabinOpen = open;
+  for (const mesh of leadCabinShadowCasters) mesh.castShadow = open;
+}
 const assemblyCallouts = new Callouts(calloutRoot, formation[0].aircraft.root, exploded.labels(formation[0].aircraft.root), false);
 const CUTAWAY_SHOT = { target: new THREE.Vector3(0.2, 3.65, 0), spherical: new THREE.Spherical(11.5, 1.0, 0.2) };
 /** Three-quarter view from ahead and above, wide enough for the spread-out assemblies. */
@@ -297,7 +329,7 @@ function setShow(mode: ShowMode): void {
   };
 }
 
-const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow });
+const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start() });
 const fpsMeter = new FpsMeter(ui.meterSlot);
 ui.setShow('exterior');
 applyView('lab');
@@ -318,7 +350,44 @@ addEventListener('keydown', (event) => {
     setShow(show === 'cutaway' ? 'exterior' : 'cutaway');
   } else if (event.key === 'e' || event.key === 'E') {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
+  } else if (event.key === 'l' || event.key === 'L') {
+    renderLog.start();
   }
+});
+
+// Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
+const cottonSet = [set.clouds, contrails.mesh, flak.root];
+const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
+const renderLog = new RenderLog(renderer, {
+  context: () => ({
+    view, show, phase: sortieStateAt(sortieTime).phase.label, playing, pixelRatio,
+    featuresShed: SHEDDABLE_FEATURES.slice(0, featuresShed), qualityPinned,
+  }),
+  pinQuality,
+  probes: [
+    { label: 'full quality', apply: () => {}, restore: () => {} },
+    {
+      label: 'cotton hidden (clouds, contrails, flak)',
+      apply: () => cottonSet.forEach((object) => { object.visible = false; }),
+      restore: () => cottonSet.forEach((object) => { object.visible = true; }),
+    },
+    {
+      label: 'wingmen hidden',
+      apply: () => wingmen.forEach((object) => { object.visible = false; }),
+      restore: () => wingmen.forEach((object) => { object.visible = true; }),
+    },
+    { label: 'shadow map held', apply: () => { shadowMapHeld = true; }, restore: () => { shadowMapHeld = false; } },
+    {
+      label: 'pixel ratio 1, no reflection, MSAA or AO',
+      apply: () => {
+        pixelRatio = 1;
+        resize();
+        applyFeaturesShed(SHEDDABLE_FEATURES.length);
+      },
+      restore: () => pinQuality(true),
+    },
+  ],
+  onStatus: (text) => ui.setLogStatus(text),
 });
 
 // Per-ship animation.
@@ -386,12 +455,14 @@ const pixelRatioCeiling = Math.min(devicePixelRatio, 2);
 let featuresShed = 0;
 let adaptiveElapsed = 0;
 let adaptiveFrames = 0;
-let bestFps = 0;
 let warmupWindows = 2;
 let highWindows = 0;
 let probeWindows = ADAPTIVE_PROBE_WINDOWS;
 let probing = false;
 let qualityPinned = false;
+let lastAdaptiveFps = 0;
+/** Holds the shadow map still for the render log's shadow probe. */
+let shadowMapHeld = false;
 
 function resize(): void {
   camera.aspect = innerWidth / innerHeight;
@@ -417,6 +488,7 @@ function applyFeaturesShed(count: number): void {
 }
 
 function lowerQuality(): void {
+  renderLog.note('quality lowered', { fps: Math.round(lastAdaptiveFps), pixelRatio, featuresShed });
   if (pixelRatio > 1) {
     pixelRatio = Math.max(1, pixelRatio - PIXEL_RATIO_STEP);
     resize();
@@ -429,11 +501,13 @@ function lowerQuality(): void {
 function raiseQuality(): boolean {
   if (featuresShed > 0) {
     applyFeaturesShed(featuresShed - 1);
-    return true;
+  } else if (pixelRatio < pixelRatioCeiling) {
+    pixelRatio = Math.min(pixelRatioCeiling, pixelRatio + PIXEL_RATIO_STEP);
+    resize();
+  } else {
+    return false;
   }
-  if (pixelRatio >= pixelRatioCeiling) return false;
-  pixelRatio = Math.min(pixelRatioCeiling, pixelRatio + PIXEL_RATIO_STEP);
-  resize();
+  renderLog.note('quality raised', { fps: Math.round(lastAdaptiveFps), pixelRatio, featuresShed });
   return true;
 }
 
@@ -452,6 +526,7 @@ function stepAdaptiveQuality(deltaSec: number): void {
   adaptiveFrames += 1;
   if (adaptiveElapsed < ADAPTIVE_WINDOW_SECONDS) return;
   const fps = adaptiveFrames / adaptiveElapsed;
+  lastAdaptiveFps = fps;
   adaptiveElapsed = 0;
   adaptiveFrames = 0;
   if (warmupWindows > 0) {
@@ -467,8 +542,7 @@ function stepAdaptiveQuality(deltaSec: number): void {
     }
     probeWindows = ADAPTIVE_PROBE_WINDOWS;
   }
-  bestFps = Math.max(bestFps, fps);
-  if (fps < bestFps * ADAPTIVE_LOW_RATIO && fps < ADAPTIVE_LOW_FPS) {
+  if (fps < ADAPTIVE_LOW_FPS) {
     highWindows = 0;
     lowerQuality();
     return;
@@ -489,20 +563,24 @@ const flakZone = {
 const timer = new THREE.Timer();
 timer.connect(document);
 
-function frame(timestamp: number): void {
-  requestAnimationFrame(frame);
-  timer.update(timestamp);
-  const frameDelta = timer.getDelta();
-  fpsMeter.record(frameDelta);
-  const realDelta = Math.min(frameDelta, MAX_FRAME_SEC);
-  const deltaSec = playing ? realDelta : 0;
-  const elapsed = timer.getElapsed();
+/** The camera moved since the last drawn frame: a drag or a scroll draws at once, between exposures. */
+let cameraMoved = true;
+controls.addEventListener('change', () => { cameraMoved = true; });
+let lastDrawnAt = 0;
 
+/**
+ * One stop-motion exposure of the whole film: the sortie, the formation, the guns and the cotton set all advance by
+ * the exposure's time, `deltaSec` while playing, nothing while paused (the shot holds, but the cutaway and the
+ * exploded view still move, as an animator would move them).
+ */
+function exposeFrame(exposureSec: number): void {
+  const deltaSec = playing ? exposureSec : 0;
+  const elapsed = timer.getElapsed();
   const previousTime = sortieTime;
   sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
   if (sortieTime < previousTime) resetEffects();
   const leadState = sortieStateAt(sortieTime);
-  exploded.update(realDelta);
+  exploded.update(exposureSec);
 
   formation.forEach((ship, index) => {
     const state = index === 0 ? leadState : sortieStateAt(Math.max(sortieTime - ship.lag, 0));
@@ -512,27 +590,50 @@ function frame(timestamp: number): void {
   });
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
 
-  driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45);
+  if (deltaSec > 0) setCottonFrame(stopMotion.frame);
+  driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45, stopMotion.random);
   flak.update(deltaSec, leadState.flakRate, AIR_DRIFT_SPEED, flakZone);
   bombs.update(deltaSec);
   ui.update(leadState);
 
-  stepCameraTween(realDelta);
+  formation[0].holder.updateMatrixWorld(true);
+  cutaway.update(exposureSec);
+  updateLeadCabinShadows();
+  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random);
+  renderer.shadowMap.needsUpdate = !shadowMapHeld;
+}
+
+/**
+ * The film runs at the stop-motion rate: a frame is drawn on each exposure and held between them. Only the viewer's
+ * own camera is live, so a drag never waits for the next exposure.
+ */
+function frame(timestamp: number): void {
+  requestAnimationFrame(frame);
+  timer.update(timestamp);
+  const exposureSec = stopMotion.advance(Math.min(timer.getDelta(), MAX_FRAME_SEC));
+  if (exposureSec > 0) stepCameraTween(exposureSec);
   controls.update();
+  if (exposureSec === 0 && !cameraMoved) return;
+  cameraMoved = false;
+
+  renderLog.beginFrame();
+  const drawnSec = lastDrawnAt === 0 ? exposureSec : (timestamp - lastDrawnAt) / 1000;
+  lastDrawnAt = timestamp;
+  fpsMeter.record(drawnSec);
+  if (exposureSec > 0) exposeFrame(exposureSec);
+
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   focusPoint.copy(controls.target);
-  formation[0].holder.updateMatrixWorld(true);
-  cutaway.update(realDelta);
+  updateWingmanCabins();
   depthOfField.uFocusRange.value = THREE.MathUtils.lerp(FOCUS_RANGE.exterior, FOCUS_RANGE.cutaway, Math.max(cutaway.amount, exploded.amount));
   depthOfField.uFocusDistance.value = camera.position.distanceTo(controls.target);
   callouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(cutaway.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
   assemblyCallouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(exploded.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
-  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, camera.position);
 
-  renderer.shadowMap.needsUpdate = true;
-  stepAdaptiveQuality(realDelta);
+  stepAdaptiveQuality(drawnSec);
   floorReflection.render(renderer, scene, camera, focusPoint);
-  pipeline.composer.render(realDelta);
+  pipeline.composer.render(drawnSec);
+  renderLog.endFrame(drawnSec);
 }
 
 if (import.meta.env.DEV) {

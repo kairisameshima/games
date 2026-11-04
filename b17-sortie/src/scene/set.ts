@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   addVirtualLight, applyStudioShading, emissiveMaterial, matteMaterial, metalMaterial, type PlanarReflection, type VirtualLight,
 } from '../render/studio';
+import { cottonMaterial, cottonTuftLayers } from '../render/miniature';
 import { mergeStaticMeshes, part, roundedBox, textPlateTexture } from './kit';
 import { PALETTE } from './palette';
 
@@ -168,55 +169,81 @@ function buildSweep(): THREE.Group {
   return sweep;
 }
 
-/** Low-poly cumulus built from flat-shaded spheres, the guide's pale-prop treatment. */
-function buildCloud(seed: number): THREE.Mesh {
+/** Cotton filaments per cloud unit (a tuft is half to one unit across), and how far its fibre halo reaches. */
+const CLOUD_COTTON = { frequency: 22, fuzz: 0.09, shells: 3 } as const;
+/** Stop-motion boil: how far an animator's hands shift a cloud between frames. */
+const CLOUD_BOIL = { turn: 0.012, scale: 0.012, lift: 0.006 } as const;
+
+/**
+ * A cumulus of cotton wool: a handful of tufts pressed together, flattened a little where it sits. The fibre shells are
+ * a child mesh that casts no shadow, since the body's shadow already covers theirs.
+ */
+function buildCloud(seed: number, material: THREE.Material): THREE.Mesh {
   let state = seed;
   const random = () => {
     state = (state * 16807) % 2147483647;
     return state / 2147483647;
   };
-  const puffs: THREE.BufferGeometry[] = [];
-  const puffCount = 6 + Math.floor(random() * 6);
+  const bodies: THREE.BufferGeometry[] = [];
+  const shells: THREE.BufferGeometry[] = [];
+  const tuftCount = 6 + Math.floor(random() * 6);
   const length = 2.2 + random() * 2.4;
-  for (let puff = 0; puff < puffCount; puff++) {
+  const placement = new THREE.Matrix4();
+  for (let tuft = 0; tuft < tuftCount; tuft++) {
     const radius = 0.45 + random() * 0.55;
-    const geometry = new THREE.IcosahedronGeometry(radius, 1);
-    const t = puff / (puffCount - 1);
-    geometry.scale(1.25, 0.8 + random() * 0.3, 1);
-    geometry.translate((t - 0.5) * length, radius * 0.45 + Math.sin(t * Math.PI) * 0.35 * random(), (random() - 0.5) * 1.1);
-    puffs.push(geometry);
+    const layers = cottonTuftLayers(seed + tuft * 13, { detail: 6, shellDetail: 4, shells: CLOUD_COTTON.shells });
+    const t = tuft / (tuftCount - 1);
+    placement.compose(
+      new THREE.Vector3((t - 0.5) * length, 0, (random() - 0.5) * 1.1),
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), random() * Math.PI * 2),
+      new THREE.Vector3(radius * 1.25, radius * (0.8 + random() * 0.3), radius),
+    );
+    placement.elements[13] = radius * 0.45 + Math.sin(t * Math.PI) * 0.35 * random();
+    bodies.push(layers.body.applyMatrix4(placement));
+    shells.push(layers.shells.applyMatrix4(placement));
   }
-  const merged = mergeGeometries(puffs);
-  merged.computeVertexNormals();
-  const cloud = new THREE.Mesh(merged, matteMaterial(PALETTE.paleProp, { flatShading: true, roughness: 0.55, envMapIntensity: 0.7 }));
+  const cloud = new THREE.Mesh(mergeGeometries(bodies), material);
   cloud.castShadow = true;
   cloud.receiveShadow = true;
+  const fuzz = new THREE.Mesh(mergeGeometries(shells), material);
+  fuzz.receiveShadow = true;
+  cloud.add(fuzz);
   return cloud;
 }
 
 function buildCloudDeck(): THREE.Group {
   const clouds = new THREE.Group();
+  const material = cottonMaterial({ color: PALETTE.paleProp, frequency: CLOUD_COTTON.frequency, fuzz: CLOUD_COTTON.fuzz });
   let seed = 41;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
     return seed / 2147483647;
   };
   for (let index = 0; index < 16; index++) {
-    const cloud = buildCloud(1000 + index * 97);
+    const cloud = buildCloud(1000 + index * 97, material);
     cloud.position.set((random() - 0.5) * CLOUD_DECK_LENGTH, 0.05 + random() * 0.35, -12 + random() * 15);
     cloud.rotation.y = (random() - 0.5) * 0.6;
     const scale = 0.55 + random() * 0.5;
     cloud.scale.setScalar(scale);
+    cloud.userData.rest = { y: cloud.position.y, turn: cloud.rotation.y, scale };
     clouds.add(cloud);
   }
   return clouds;
 }
 
-/** Moves the cloud deck aft at the formation's ground speed and wraps it round. */
-export function driftClouds(clouds: THREE.Group, deltaSec: number, speed: number): void {
+/**
+ * One stop-motion frame of the cloud deck: it moves aft by the frame's worth of the formation's ground speed, wrapping
+ * round, and every cloud is nudged a hair off its rest pose, the boil of cotton re-handled between exposures.
+ */
+export function driftClouds(clouds: THREE.Group, frameSec: number, speed: number, random: () => number): void {
+  if (frameSec <= 0) return;
   for (const cloud of clouds.children) {
-    cloud.position.x -= speed * deltaSec;
+    cloud.position.x -= speed * frameSec;
     if (cloud.position.x < -CLOUD_DECK_LENGTH / 2) cloud.position.x += CLOUD_DECK_LENGTH;
+    const rest = cloud.userData.rest as { y: number; turn: number; scale: number };
+    cloud.rotation.y = rest.turn + (random() - 0.5) * CLOUD_BOIL.turn;
+    cloud.scale.setScalar(rest.scale * (1 + (random() - 0.5) * CLOUD_BOIL.scale));
+    cloud.position.y = rest.y + (random() - 0.5) * CLOUD_BOIL.lift;
   }
 }
 

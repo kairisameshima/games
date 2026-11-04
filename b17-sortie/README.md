@@ -2,6 +2,8 @@
 
 A B-17G of the 91st Bomb Group flying the middle of a mission, built as a scale model and photographed in the studio-lab look from `../reference/sael-guide.md` (three.js). Three ships hold a combat box on display stands over a cloud deck while the lead runs from the initial point through flak to bombs away and the rally turn.
 
+The aircraft is a hand-painted plastic kit come to life on a stop-motion set. The whole film runs at 12 exposures a second and holds between them; only the orbit camera answers the mouse at once. The clouds, contrails and flak are cotton wool that boils slightly between exposures as if handled.
+
 The airframe comes from a traced 3-view and wartime photographs, not by eye. `reference/README.md` lists the sources and the measuring method, and `reference/overlay-*.png` show the finished model's silhouette over the drawing.
 
 | Part | How it is built |
@@ -10,8 +12,9 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Wing, tailplane, fin | NACA sections lofted along the traced planform (0018 root to 0010 tip on the wing) |
 | Nacelles | Cowl, cowl flaps and nacelle body lofted per engine and tucked into the wing surface |
 | Propellers | Three twisted Hamilton Standard blades with yellow tips, plus a motion-blur disc |
-| Paint | Olive Drab 41 over Neutral Gray 43 with panel lines, rivets, fade, de-icer boots and exhaust soot |
-| Markings | Projected decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial |
+| Paint | Olive Drab 41 over Neutral Gray 43 with panel lines, rivets, fade, de-icer boots and exhaust soot, brushed on: strokes along each part with bristle grooves and paint built up at their edges |
+| Markings | Water-slide decals: star-and-bar, `LG` codes, Triangle A and an illustrative serial, each printed on a glossy carrier film that stands off the paint with a lip and a hairline of shadow |
+| Clouds, contrails, flak | Cotton wool: lumpy tufts with a halo of tangled fibres; contrails are tufts pulled out thin behind each turbo and fattening aft, flak is wool dyed near black |
 | Turrets | Sperry top turret; Sperry ball turret to its handbook's installation drawing (glazed end bells, sighting window, ring gear, hanger, gunner folded as figure 39 shows); Bendix chin turret, Cheyenne tail guns, cheek, waist and radio-hatch guns |
 | Guns | Thirteen Browning AN/M2 .50s at true size (1.44 m, TM 9-225): receiver with feed cover, feedways and slide handle, perforated cooling jacket, flash hider; hand-held guns add spade grips, butterfly trigger and ring-and-bead sight |
 | Ammunition | Riveted boxes (tall bare-metal boxes at the waist windows and either side of the tail gunner, as in Pilot's Manual figures 76 and 78), articulated feed chutes routed to each gun's feedway, and linked .50 BMG belts at true size in a 1944 AP, incendiary, API, AP, tracer order |
@@ -53,15 +56,16 @@ npm run build      # typecheck + production build into dist/
 | V | switch Lab and Studio |
 | C | cutaway of the lead ship |
 | E | exploded view of the lead ship |
+| L | record a render log: about 40 s, then saves a `.json` with this machine's GPU, frame timings and what each cost adds |
 | Drag, scroll | orbit and zoom |
 
-Under the controls, a frame-rate readout (average of the last half second, and the worst frame of the last four seconds) sits over a frame-time chart with guides at the 60 and 30 fps budgets.
+Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the 12 fps the film is locked to.
 
 ## Layout
 
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
 - `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
-- `src/scene/effects.ts` runs flak bursts, contrail ribbons and falling bombs; `src/scene/gunnery.ts` fires the guns.
+- `src/scene/effects.ts` runs flak bursts, contrails and falling bombs, `src/scene/stop-motion.ts` times the set's exposures; `src/scene/gunnery.ts` fires the guns.
 - `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.
-- `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view.
+- `src/render/studio.ts` is the shared studio renderer from `../mise`, with a light-steel environment added for the Studio view. `src/render/miniature.ts` adds the brushwork and the cotton wool, `src/render/render-log.ts` records the render log.

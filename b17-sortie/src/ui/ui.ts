@@ -8,6 +8,7 @@ export interface UiCallbacks {
   onJumpToPhase: (index: number) => void;
   onViewChange: (view: ViewMode) => void;
   onShowChange: (mode: ShowMode) => void;
+  onRecordLog: () => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -35,6 +36,7 @@ export class Ui {
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
   readonly meterSlot: HTMLElement;
+  private readonly logStatus: HTMLElement;
   private shownPhase = -1;
 
   constructor(root: HTMLElement, callbacks: UiCallbacks) {
@@ -88,6 +90,7 @@ export class Ui {
     hintRow('V', 'lab / studio');
     hintRow('C', 'cutaway');
     hintRow('E', 'exploded');
+    hintRow('L', 'record render log');
     hintRow('Drag', 'orbit · scroll to zoom');
     const makeToggleButton = (toggle: HTMLElement, label: string, onClick: () => void) => {
       const button = element('button', '', label);
@@ -108,7 +111,12 @@ export class Ui {
       exploded: makeToggleButton(showToggle, 'Exploded', () => callbacks.onShowChange('exploded')),
     };
     this.meterSlot = element('div', 'meter-slot');
-    hints.append(viewToggle, showToggle, this.meterSlot);
+    const logRow = element('div', 'log-row');
+    const logToggle = element('div', 'view-toggle');
+    makeToggleButton(logToggle, 'Record render log', callbacks.onRecordLog);
+    this.logStatus = element('div', 'log-status', 'about 40 s, then saves a .json');
+    logRow.append(logToggle, this.logStatus);
+    hints.append(viewToggle, showToggle, this.meterSlot, logRow);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading);
@@ -147,6 +155,10 @@ export class Ui {
 
   setShow(mode: ShowMode): void {
     for (const [button, element] of Object.entries(this.showButtons)) element.classList.toggle('is-active', button === mode);
+  }
+
+  setLogStatus(text: string): void {
+    this.logStatus.textContent = text;
   }
 
   hideLoading(): void {

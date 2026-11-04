@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+import { applyBrushwork } from '../render/miniature';
 import { applyStudioShading, emissiveMaterial, matteMaterial, metalMaterial } from '../render/studio';
 import {
   COWL_RADIUS, FIN_OUTLINE, FUSELAGE_LENGTH, NACELLES, NOSE_GLAZING_END, PROPELLER_RADIUS, STATIONS,
@@ -8,6 +9,7 @@ import {
 import { mergeRigidMeshes, mergeStaticMeshes, part, roundedBox } from './kit';
 import type { FigureDetail } from './crew/figure';
 import { buildInterior, type B17Interior, type CrewStation } from './interior';
+import { interiorMaterials } from './interior/materials';
 import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt } from './assemblies';
 import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
 import type { MountedGun } from './gunnery';
@@ -18,7 +20,7 @@ import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullS
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersTexture, hullPaintTexture, insigniaTexture, propellerDiscTexture, surfacePaintTexture, tailMarkingTexture,
+  codeLettersDecal, hullPaintTexture, insigniaDecal, propellerDiscTexture, surfacePaintTexture, tailMarkingDecal, type DecalArt,
 } from './textures';
 
 const AIRFOIL_POINTS_PER_SIDE = 28;
@@ -101,17 +103,25 @@ interface AircraftMaterials {
 let sharedMaterials: AircraftMaterials | null = null;
 
 /** Flat, sun-faded lacquer with a thin clearcoat, so softbox streaks still run along the hull. */
+/** Brush-painted enamel, the way a kit is finished by hand. */
 function paintMaterial(map: THREE.Texture | null, color: THREE.ColorRepresentation = '#ffffff'): THREE.MeshStandardMaterial {
-  return applyStudioShading(new THREE.MeshPhysicalMaterial({
+  return applyBrushwork(applyStudioShading(new THREE.MeshPhysicalMaterial({
     color, map, roughness: 0.66, metalness: 0, clearcoat: 0.18, clearcoatRoughness: 0.5, envMapIntensity: 0.72,
-  }));
+  })));
 }
 
-function decalMaterial(map: THREE.Texture, roughness = 0.6): THREE.MeshStandardMaterial {
-  return applyStudioShading(new THREE.MeshPhysicalMaterial({
-    map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-    roughness, clearcoat: 0.32, clearcoatRoughness: 0.38, envMapIntensity: 0.9,
+/** Bump of a decal's film and ink over the paint, in the bump map's 0–1 height. */
+const DECAL_RELIEF = 6;
+
+/** A water-slide decal: glossier than the paint, standing off it by its film. `addDecal` widens it to take the film in. */
+function decalMaterial(art: DecalArt): THREE.MeshStandardMaterial {
+  const material = applyStudioShading(new THREE.MeshPhysicalMaterial({
+    map: art.map, bumpMap: art.bumpMap, bumpScale: DECAL_RELIEF, transparent: true, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    roughness: 0.5, clearcoat: 0.75, clearcoatRoughness: 0.18, envMapIntensity: 0.9,
   }));
+  material.userData.decalGrowth = art.growth;
+  return material;
 }
 
 /** Glazing: faintly tinted, mostly clear glass in an olive-drab frame strip; the alpha carries the transparency. */
@@ -176,10 +186,10 @@ function aircraftMaterials(): AircraftMaterials {
       map: windowPaneTexture(), transparent: true, depthWrite: false, roughness: 0.06, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04,
       envMapIntensity: 1.1, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     })),
-    insignia: decalMaterial(insigniaTexture()),
-    codes: decalMaterial(codeLettersTexture('LG')),
-    aircraftLetter: decalMaterial(codeLettersTexture('K')),
-    tailMarking: decalMaterial(tailMarkingTexture('238107', 'K')),
+    insignia: decalMaterial(insigniaDecal()),
+    codes: decalMaterial(codeLettersDecal('LG')),
+    aircraftLetter: decalMaterial(codeLettersDecal('K')),
+    tailMarking: decalMaterial(tailMarkingDecal('238107', 'K')),
     bayDoor: Object.assign(paintMaterial(null, PALETTE.neutralGray), { side: THREE.DoubleSide }),
     cowlLiner: matteMaterial('#1c1e1f', { roughness: 0.8, side: THREE.DoubleSide }),
     gunmetal: metalMaterial(PALETTE.gunmetal, { roughness: 0.36 }),
@@ -693,7 +703,9 @@ function addDecal(
   height: number,
   depth: number,
 ): THREE.Mesh {
-  const geometry = new DecalGeometry(target, position, decalOrientation(normal, along), new THREE.Vector3(width, height, depth));
+  // A water-slide decal is printed with film round its art; `width` and `height` are the art's.
+  const growth = material.userData.decalGrowth instanceof THREE.Vector2 ? material.userData.decalGrowth : new THREE.Vector2(1, 1);
+  const geometry = new DecalGeometry(target, position, decalOrientation(normal, along), new THREE.Vector3(width * growth.x, height * growth.y, depth));
   if (geometry.getAttribute('position').count === 0) throw new Error(`Decal at ${position.toArray().map((value) => value.toFixed(2)).join(', ')} missed its target surface`);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
@@ -751,6 +763,16 @@ export interface B17 {
   assemblies: Assemblies;
   turboGlow: THREE.MeshBasicMaterial;
   navigationLights: THREE.Mesh[];
+  /**
+   * Fittings and crew, seen only through the glazing until the ship is opened up: while it is closed they need not
+   * cast shadows or show in the floor's reflection, which saves most of each ship's triangles in those passes.
+   */
+  interiorMeshes: THREE.Mesh[];
+  /**
+   * The part of `interiorMeshes` a distant viewer cannot make out through the glazing: everything but the crew and the
+   * insulated skin, which closes the hull from inside (the outer skin is single-sided).
+   */
+  cabinFittings: THREE.Mesh[];
 }
 
 export interface B17Options {
@@ -1024,6 +1046,9 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
   // each moving part the same in its own space.
   for (const group of opensUp ? assemblies.groups.values() : [root]) mergeRigidMeshes(group);
   // Callouts ride with the assembly their man is in: the engineer with the top turret, the gunners with their sections.
+  const interiorMeshes = collectInteriorMeshes(root);
+  const crewMeshes = new Set<THREE.Object3D>(interior.crew.map((man) => man.mesh));
+  const cabinFittings = interiorMeshes.filter((mesh) => !crewMeshes.has(mesh) && mesh.material !== interiorMaterials().skin);
   const crewStations = interior.stations.map((station) => {
     const man = interior.crew.find((entry) => entry.station.label === station.role);
     return { ...station, space: man ? assemblies.of(man.mesh) : assemblies.get(fuselageSectionAt(toX(station.anchor.x))) };
@@ -1047,10 +1072,28 @@ export function buildB17({ crewDetail, opensUp }: B17Options): B17 {
       materials.neutralGray, ballWindowMaskMaterial(materials.neutralGray), materials.tailHousing, ...interior.clipMaterials,
     ],
     cutawayHidden: starboardWall,
+    interiorMeshes,
+    cabinFittings,
     exhaustPorts,
     turboGlow: materials.turboGlow,
     navigationLights,
   };
+}
+
+/**
+ * The meshes in the cabin's own materials, and the crew. The guns' black is left out: the barrels stand out of the
+ * windows and turrets, where their shadows show.
+ */
+function collectInteriorMeshes(root: THREE.Object3D): THREE.Mesh[] {
+  const cabinMaterials = new Set<THREE.Material>(Object.entries(interiorMaterials()).filter(([name]) => name !== 'gunBlack').map(([, material]) => material));
+  const meshes: THREE.Mesh[] = [];
+  const visit = (object: THREE.Object3D, inCrew: boolean): void => {
+    const crew = inCrew || object.userData.stationX !== undefined;
+    if (object instanceof THREE.Mesh && !Array.isArray(object.material) && (crew || cabinMaterials.has(object.material))) meshes.push(object);
+    for (const child of object.children) visit(child, crew);
+  };
+  visit(root, false);
+  return meshes;
 }
 
 let bombTemplate: THREE.Group | null = null;

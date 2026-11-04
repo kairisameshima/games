@@ -545,7 +545,7 @@ export function createStudioPipeline(
 ): StudioPipeline {
   const multisampleCount = webglRenderer.getPixelRatio() >= 1.5 ? 2 : 4;
   const composer = new EffectComposer(webglRenderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }));
-  composer.setPixelRatio(webglRenderer.getPixelRatio());
+  composer.setPixelRatio(1);
 
   const scenePass = new MultisampledScenePass(renderScene, viewCamera, focusPoint, multisampleCount);
   composer.addPass(scenePass);
@@ -578,8 +578,10 @@ export function createStudioPipeline(
   const resize = (width: number, height: number, pixelRatio: number) => {
     webglRenderer.setPixelRatio(pixelRatio);
     webglRenderer.setSize(width, height);
-    composer.setPixelRatio(pixelRatio);
-    composer.setSize(width, height);
+    // Sized in whole drawing-buffer pixels: at a fractional pixel ratio the composer would size its targets in
+    // fractions of a pixel, and every pass would sample them a fraction off the canvas.
+    const drawingBuffer = webglRenderer.getDrawingBufferSize(new THREE.Vector2());
+    composer.setSize(drawingBuffer.x, drawingBuffer.y);
   };
   return { composer, depthOfField, bloom, ambientOcclusion, sceneTarget: scenePass.sceneTarget, resize };
 }

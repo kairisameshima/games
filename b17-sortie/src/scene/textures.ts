@@ -197,8 +197,75 @@ export function surfacePaintTexture(options: SurfacePaintOptions): THREE.CanvasT
   return finishTexture(canvas);
 }
 
+/** A kit's water-slide decal: the printed art, and the height its film and ink stand off the paint. */
+export interface DecalArt {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  /** How much larger than the art the decal must be projected, per axis, to take in the film's margin. */
+  growth: THREE.Vector2;
+}
+
+const DECAL_FILM_ALPHA = 0.07;
+
+/**
+ * Lays printed art on its carrier film: a clear, faintly ivory film trimmed `marginPx` round the art, with the soft
+ * shadow its lip throws on the paint; the bump map stands the film off the paint and the ink off the film.
+ */
+function waterSlideDecal(art: HTMLCanvasElement, marginPx: number): DecalArt {
+  const pad = marginPx + 8;
+  const width = art.width + pad * 2;
+  const height = art.height + pad * 2;
+  const [filmCanvas, film] = createCanvas(width, height);
+  for (let step = 0; step < 32; step++) {
+    const angle = (step / 16) * Math.PI;
+    const reach = step < 16 ? marginPx : marginPx * 0.55;
+    film.drawImage(art, pad + Math.cos(angle) * reach, pad + Math.sin(angle) * reach);
+  }
+  film.globalCompositeOperation = 'source-in';
+  film.fillStyle = '#ffffff';
+  film.fillRect(0, 0, width, height);
+
+  const [canvas, context] = createCanvas(width, height);
+  // The film's edge stands a fraction of a millimetre proud and throws a soft line of shadow just outside it.
+  context.filter = 'blur(2px)';
+  context.globalAlpha = 0.5;
+  context.drawImage(tinted(filmCanvas, '#000000'), 1.5, 2.5);
+  context.globalAlpha = 1;
+  context.filter = 'none';
+  context.globalCompositeOperation = 'destination-out';
+  context.drawImage(filmCanvas, 0, 0);
+  context.globalCompositeOperation = 'source-over';
+  context.globalAlpha = DECAL_FILM_ALPHA;
+  context.drawImage(tinted(filmCanvas, '#efeadb'), 0, 0);
+  context.globalAlpha = 1;
+  context.drawImage(art, pad, pad);
+
+  const [bumpCanvas, bump] = createCanvas(width, height);
+  bump.fillStyle = '#000000';
+  bump.fillRect(0, 0, width, height);
+  bump.filter = 'blur(1.5px)';
+  bump.globalAlpha = 0.5;
+  bump.drawImage(filmCanvas, 0, 0);
+  bump.globalAlpha = 1;
+  bump.filter = 'blur(1px)';
+  bump.drawImage(tinted(art, '#ffffff'), pad, pad);
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.anisotropy = 8;
+  return { map: finishTexture(canvas), bumpMap, growth: new THREE.Vector2(width / art.width, height / art.height) };
+}
+
+/** `source` with every opaque pixel turned `color`, keeping its alpha. */
+function tinted(source: HTMLCanvasElement, color: string): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(source.width, source.height);
+  context.drawImage(source, 0, 0);
+  context.globalCompositeOperation = 'source-in';
+  context.fillStyle = color;
+  context.fillRect(0, 0, source.width, source.height);
+  return canvas;
+}
+
 /** 1943–44 national insignia: white star on a blue disc, white bars, all outlined in insignia blue. */
-export function insigniaTexture(): THREE.CanvasTexture {
+export function insigniaDecal(): DecalArt {
   const radius = 220;
   const border = radius / 8;
   const width = Math.round(radius * 4 + border * 2) + 8;
@@ -228,22 +295,22 @@ export function insigniaTexture(): THREE.CanvasTexture {
   }
   context.closePath();
   context.fill();
-  return finishTexture(canvas);
+  return waterSlideDecal(canvas, 12);
 }
 
 /** Fuselage codes in the medium-grey stencil the 91st BG used on camouflaged aircraft. */
-export function codeLettersTexture(letters: string): THREE.CanvasTexture {
+export function codeLettersDecal(letters: string): DecalArt {
   const [canvas, context] = createCanvas(256 * letters.length, 320);
   context.fillStyle = PALETTE.codeGray;
   context.font = '700 300px "DM Mono", Menlo, monospace';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(letters, canvas.width / 2, canvas.height / 2 + 12);
-  return finishTexture(canvas);
+  return waterSlideDecal(canvas, 10);
 }
 
 /** 91st BG "Triangle A" in white with the group letter in insignia blue, and the tail serial below in yellow. */
-export function tailMarkingTexture(serial: string, aircraftLetter: string): THREE.CanvasTexture {
+export function tailMarkingDecal(serial: string, aircraftLetter: string): DecalArt {
   const [canvas, context] = createCanvas(512, 760);
   context.fillStyle = PALETTE.insigniaWhite;
   context.beginPath();
@@ -262,7 +329,7 @@ export function tailMarkingTexture(serial: string, aircraftLetter: string): THRE
   context.fillText(serial, 256, 500);
   context.font = '700 170px "DM Mono", Menlo, monospace';
   context.fillText(aircraftLetter, 256, 660);
-  return finishTexture(canvas);
+  return waterSlideDecal(canvas, 12);
 }
 
 /** Motion-blurred propeller disc: faint black blade smear with the yellow tip band as a bright ring. */

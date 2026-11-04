@@ -1,10 +1,14 @@
-/** Frames kept for the chart: about four seconds at 60 fps. */
-const HISTORY = 240;
+import { STOP_MOTION_FPS } from '../scene/stop-motion';
+
+/** Frames kept for the chart: about eight seconds at the stop-motion rate. */
+const HISTORY = STOP_MOTION_FPS * 8;
+/** Frames the readout averages: one second's worth. */
+const AVERAGED_FRAMES = STOP_MOTION_FPS;
 /** The chart and readout redraw at this rate; measuring stays per frame. */
 const REDRAW_SECONDS = 0.1;
-/** Frame-time scale of the chart, with guides at the 60 and 30 fps budgets. */
-const CHART_MAX_MS = 50;
-const GUIDES_MS = [1000 / 60, 1000 / 30];
+/** Frame-time scale of the chart, with a guide at the stop-motion rate the film is locked to. */
+const CHART_MAX_MS = 120;
+const GUIDES_MS = [1000 / STOP_MOTION_FPS];
 const CHART = { width: 168, height: 40 } as const;
 
 /**
@@ -51,8 +55,8 @@ export class FpsMeter {
   }
 
   private redraw(): void {
-    // Average over the last half second for a steady number.
-    const recent = Math.min(this.filled, 30);
+    // Average over the last second for a steady number.
+    const recent = Math.min(this.filled, AVERAGED_FRAMES);
     let total = 0;
     let worst = 0;
     for (let index = 1; index <= this.filled; index++) {
