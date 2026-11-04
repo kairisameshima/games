@@ -33,9 +33,11 @@ const DOORS_OPEN = [26, 28.5] as const;
  * The burst that hits the lead; No. 3 catches fire at once, is feathered, and its fire extinguisher puts the flames out
  * over `fireOut`; the smoke trails on until `smokeUntil`.
  */
-const FLAK_HIT = { at: 39.3, catches: 0.4, featheredAt: 40.8, fireOut: [43.5, 45.5], smokeUntil: 49 } as const;
+const FLAK_HIT = { at: 39.3, catches: 0.4, featheredAt: 40.8, fireOut: [43.5, 45.5], smokeUntil: 49, streaksBuild: 5 } as const;
 /** Film time of the burst that hits the lead. */
 export const FLAK_HIT_SECONDS = FLAK_HIT.at;
+/** When No. 3's fire extinguisher is fired. */
+export const EXTINGUISHER_SECONDS = FLAK_HIT.fireOut[0];
 
 const DOORS_CLOSE = [49, 51.5] as const;
 const RALLY_TURN = [49.5, 57.5] as const;
@@ -59,8 +61,12 @@ export interface SortieState {
   engineSmoking: boolean;
   /** How hard No. 3 is burning, 0 out to 1 well alight. */
   engineFire: number;
+  /** How far the oil and soot from No. 3 have built up over its nacelle and the wing, 0 clean to 1. */
+  oilStreaks: number;
   /** No. 3 engine's propeller is feathered and stopped. */
   propellerFeathered: boolean;
+  /** Hit and not yet feathered, No. 3 runs rough. */
+  engineSputtering: boolean;
   /** Positive is right wing down. */
   bankRadians: number;
   pitchRadians: number;
@@ -109,6 +115,8 @@ export function sortieStateAt(time: number): SortieState {
     engineSmoking: time >= FLAK_HIT.at && time < FLAK_HIT.smokeUntil,
     engineFire: smooth(FLAK_HIT.at, FLAK_HIT.at + FLAK_HIT.catches, time) * (1 - smooth(FLAK_HIT.fireOut[0], FLAK_HIT.fireOut[1], time)),
     propellerFeathered: time >= FLAK_HIT.featheredAt,
+    engineSputtering: time >= FLAK_HIT.at && time < FLAK_HIT.featheredAt,
+    oilStreaks: smooth(FLAK_HIT.at, FLAK_HIT.at + FLAK_HIT.streaksBuild, time),
     bankRadians,
     pitchRadians,
     headingDegrees,

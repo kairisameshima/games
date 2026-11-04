@@ -6,7 +6,9 @@
 
 /** The four Wright R-1820s' firing notes, a little apart so they beat against each other, in Hz. */
 const ENGINE_NOTES = [38, 38.7, 39.5, 40.2];
-const LEVELS = { master: 0.5, engine: 0.06, engineRumble: 0.09, gun: 0.22, flak: 0.5, shutter: 0.035 } as const;
+const LEVELS = { master: 0.5, engine: 0.06, engineRumble: 0.09, gun: 0.22, flak: 0.5, shutter: 0.035, crackle: 0.18 } as const;
+/** A fire's crackle: pops this short, up to this many an exposure at full blaze. */
+const CRACKLE = { seconds: 0.025, perExposure: 4 } as const;
 const GUN_BURST_SECONDS = 0.07;
 const FLAK_SECONDS = 0.9;
 const SHUTTER_SECONDS = 0.012;
@@ -17,6 +19,10 @@ interface Engines { gains: GainNode[]; rumble: GainNode }
 export interface ExposureSounds {
   /** How many of the four engines are running. */
   enginesRunning: number;
+  /** The last running engine catches and misses: hit and not yet feathered. */
+  sputtering: boolean;
+  /** How hard an engine is burning, 0 to 1: its crackle. */
+  fire: number;
   /** 0..1 how hard the gunners are firing. */
   gunfire: number;
   flakBursts: number;
@@ -46,7 +52,17 @@ export class Foley {
   expose(sounds: ExposureSounds, random: () => number): void {
     if (!this.enabled || !this.context || !this.engines) return;
     const now = this.context.currentTime;
-    this.engines.gains.forEach((gain, index) => gain.gain.setTargetAtTime(index < sounds.enginesRunning ? LEVELS.engine : 0, now, 0.4));
+    this.engines.gains.forEach((gain, index) => {
+      if (sounds.sputtering && index === sounds.enginesRunning - 1) {
+        // Misfiring: cutting in and out from exposure to exposure.
+        gain.gain.setValueAtTime(random() < 0.5 ? LEVELS.engine * 1.3 : 0, now);
+        return;
+      }
+      gain.gain.setTargetAtTime(index < sounds.enginesRunning ? LEVELS.engine : 0, now, 0.4);
+    });
+    for (let pop = 0; pop < CRACKLE.perExposure; pop++) {
+      if (random() < sounds.fire * 0.6) this.burst(CRACKLE.seconds, LEVELS.crackle * (0.4 + random() * 0.6), 'highpass', 1800 + random() * 2500);
+    }
     this.engines.rumble.gain.setTargetAtTime((sounds.enginesRunning / ENGINE_NOTES.length) * LEVELS.engineRumble, now, 0.4);
     this.burst(SHUTTER_SECONDS, LEVELS.shutter, 'highpass', 3000);
     // Each gunner's burst is a few rounds; on an exposure, a burst goes off with the fire's strength.

@@ -9,13 +9,13 @@ import { buildB17, createBomb, type B17 } from './scene/b17';
 import { LEAD_LIVERY, WINGMAN_LIVERIES } from './scene/livery';
 import type { CrewStation } from './scene/interior';
 import { Walkthrough } from './walkthrough';
-import { Hardstand, PROLOGUE_ENGINES_START_SECONDS, PROLOGUE_LIFT_OFF_SECONDS } from './scene/hardstand';
+import { Hardstand, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart } from './scene/hardstand';
 import { Foley } from './audio/foley';
 import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
-import { BombTrain, Contrails, ENGINE_SMOKE_LOOK, EngineFire, FlakField } from './scene/effects';
+import { BombTrain, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
@@ -24,7 +24,7 @@ import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, STAND_JOINT_RADIUS, type DisplayStand } from './scene/set';
 import { hullSectionAt } from './scene/hull';
-import { BOMB_COUNT, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
+import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ShowMode, type ViewMode } from './ui/ui';
@@ -153,11 +153,15 @@ const engineSmoke = new Contrails(1, ENGINE_SMOKE_LOOK);
 const engineSmokeEmitter = [new THREE.Vector3()];
 /** The lead's No. 3 on fire after the flak hit. */
 const engineFire = new EngineFire();
+/** The extinguisher's second puff, a little aft and below the first, world units. */
+const EXTINGUISHER_SECOND_PUFF = new THREE.Vector3(-0.12, -0.05, 0.04);
+/** Extinguisher clouds and starting coughs. */
+const puffs = new CottonPuffs();
 const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, bombs.root, gunnery.root);
+scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -458,8 +462,23 @@ const hardstand = new Hardstand(formation[0].aircraft, MODEL_SCALE, formationSlo
 scene.add(hardstand.root);
 /** Film seconds into the prologue, or null once the lead is on its stand. */
 let prologueTime: number | null = null;
-/** Where No. 1 to No. 4's propellers stand while the engines are cold. */
+/** Where each propeller (in build order) stands while its engine is cold. */
 const COLD_PROPELLER_ANGLES = [0.5, 1.4, 2.2, 0.9];
+/**
+ * Engines No. 1 to No. 4 as indices into the ship's propellers and exhausts, which are built inboard pair first,
+ * starboard before port: No. 1 is the port outboard, No. 4 the starboard outboard.
+ */
+const ENGINE_PROPELLER = [3, 1, 0, 2];
+/** A catching engine coughs smoke out under its lower cowl flaps: this far aft of and below its propeller, model metres. */
+const COUGH_FROM_PROPELLER = new THREE.Vector3(-1.9, -1.15, 0);
+/** How far a starter turns its propeller over each exposure. */
+const STARTER_TURN = 0.45;
+/** Each engine's state in the prologue last exposure, to see the moment it catches. */
+const prologueEngines: EngineStart[] = ['cold', 'cold', 'cold', 'cold'];
+/** Each engine's propeller angle while it is cold or being cranked, by engine number less one. */
+const crankAngles = [0, 0, 0, 0];
+/** Engines the lead has running, for the foley: all four in flight until No. 3 is feathered. */
+let leadEnginesRunning = 4;
 const HARDSTAND_SHOT = { target: new THREE.Vector3(-10, 0.9, 10), spherical: new THREE.Spherical(13, 1.22, 0.75) };
 const FORMATION_SHOT = { target: new THREE.Vector3(0.3, 3.9, 0), spherical: new THREE.Spherical(16, 1.36, 0.95) };
 
@@ -471,6 +490,7 @@ function startPrologue(hold = 0): void {
   if (show !== 'exterior') setShow('exterior');
   jumpToPhase(0);
   prologueTime = -hold;
+  prologueEngines.fill('cold');
   playing = true;
   ui.setPlaying(true);
   hardstand.setShown(true);
@@ -498,7 +518,19 @@ function stepPrologue(deltaSec: number): void {
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
   for (const man of aircraft.crew) man.mesh.visible = frame.crewAboard;
-  if (!frame.enginesRunning) aircraft.propellers.forEach((propeller, index) => { propeller.rotation.x = COLD_PROPELLER_ANGLES[index]; });
+  frame.engines.forEach((engine, index) => {
+    const propeller = ENGINE_PROPELLER[index];
+    if (engine === 'cold') crankAngles[index] = COLD_PROPELLER_ANGLES[propeller];
+    // The starter turns the propeller over slowly, a blade at a time across a few exposures.
+    if (engine === 'cranking' && deltaSec > 0) crankAngles[index] += STARTER_TURN;
+    if (engine !== 'running') aircraft.propellers[propeller].rotation.x = crankAngles[index];
+    if (engine === 'running' && prologueEngines[index] !== 'running') {
+      const cowlFlaps = scratchPosition.copy(aircraft.propellers[propeller].position).add(COUGH_FROM_PROPELLER);
+      puffs.emit('cough', aircraft.root.localToWorld(cowlFlaps), false, stopMotion.random);
+    }
+    prologueEngines[index] = engine;
+  });
+  leadEnginesRunning = frame.engines.filter((engine) => engine === 'running').length;
   if (before < PROLOGUE_LIFT_OFF_SECONDS && prologueTime >= PROLOGUE_LIFT_OFF_SECONDS) tweenCamera(FORMATION_SHOT);
   if (frame.finished) finishPrologue();
 }
@@ -514,6 +546,7 @@ let playing = true;
 
 function resetEffects(): void {
   flak.reset();
+  puffs.reset();
   bombs.reset();
   gunnery.resetTracers();
   for (const ship of formation) ship.bombsDropped = 0;
@@ -613,7 +646,7 @@ addEventListener('keydown', (event) => {
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.root, engineSmoke.root, engineFire.root, flak.root];
+const cottonSet = [set.clouds, contrails.root, engineSmoke.root, engineFire.root, puffs.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -684,8 +717,12 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
       propeller.rotation.x = random() * Math.PI * 2;
     }
   }
-  // Only the lead is hit: its holes show, and No. 3's propeller stops with its blades turned edge-on to the air.
-  for (const hole of aircraft.battleDamage.holes) hole.visible = damaged && state.flakHit;
+  // Each ship's holes show from its flak hit (Nine-O-Nine has none). Only the lead's No. 3 is hit: oil streaks build
+  // back from it, and its propeller stops with its blades turned edge-on to the air.
+  for (const hole of aircraft.battleDamage.holes) hole.visible = state.flakHit;
+  const { streaks } = aircraft.battleDamage;
+  for (const streak of streaks.meshes) streak.visible = damaged && state.oilStreaks > 0;
+  if (damaged) streaks.material.opacity = state.oilStreaks;
   const feathered = damaged && state.propellerFeathered;
   if (feathered) aircraft.battleDamage.propeller.rotation.x = FEATHERED_PROPELLER.restAngle;
   for (const blade of aircraft.battleDamage.propeller.children) {
@@ -942,12 +979,21 @@ function exposeFrame(exposureSec: number): void {
   damage.smokePort.getWorldPosition(engineSmokeEmitter[0]);
   engineSmoke.update(deltaSec, AIR_DRIFT_SPEED, engineSmokeEmitter, stopMotion.random, leadState.engineSmoking);
   engineFire.update(deltaSec, leadState.engineFire, engineSmokeEmitter[0], stopMotion.random);
+  if (previousTime < EXTINGUISHER_SECONDS && sortieTime >= EXTINGUISHER_SECONDS) {
+    // The CO2 bottle fires into No. 3: a white cloud bursts out of its cowl flaps and is carried aft.
+    puffs.emit('extinguisher', engineSmokeEmitter[0], true, stopMotion.random);
+    puffs.emit('extinguisher', scratchPosition.copy(engineSmokeEmitter[0]).add(EXTINGUISHER_SECOND_PUFF), true, stopMotion.random);
+  }
+  puffs.update(deltaSec, AIR_DRIFT_SPEED);
   if (previousTime < FLAK_HIT_SECONDS && sortieTime >= FLAK_HIT_SECONDS) flak.burstAt(damage.burstPoint.getWorldPosition(scratchPosition));
   if (deltaSec > 0) {
     flickerLamps();
     filmGate.advance(stopMotion.random);
-    const leadEngines = prologueTime !== null && prologueTime < PROLOGUE_ENGINES_START_SECONDS ? 0 : leadState.propellerFeathered ? 3 : 4;
-    foley.expose({ enginesRunning: leadEngines, gunfire: leadState.gunfire, flakBursts: flak.takeBurstCount() }, stopMotion.random);
+    const leadEngines = prologueTime !== null ? leadEnginesRunning : leadState.propellerFeathered ? 3 : 4;
+    foley.expose({
+      enginesRunning: leadEngines, sputtering: leadState.engineSputtering, fire: leadState.engineFire,
+      gunfire: leadState.gunfire, flakBursts: flak.takeBurstCount(),
+    }, stopMotion.random);
   }
   renderer.shadowMap.needsUpdate = !shadowMapHeld;
 }

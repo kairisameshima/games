@@ -25,7 +25,7 @@ import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullS
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersDecal, fingerprintTexture, flakDamageTexture, hatchOutlineTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
+  codeLettersDecal, fingerprintTexture, flakDamageTexture, hatchOutlineTexture, oilStreakTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
   type DecalArt,
 } from './textures';
 
@@ -102,6 +102,8 @@ interface AircraftMaterials {
   cowlLiner: THREE.MeshStandardMaterial;
   /** Scorched flak holes, painted on with the soot round them. */
   flakDamage: THREE.MeshStandardMaterial;
+  /** Oil and soot streaked back from a hit engine; its opacity rises as the streaks build. */
+  oilStreak: THREE.MeshStandardMaterial;
   /** Doped canvas of the stinger guns' boots. */
   canvas: THREE.MeshStandardMaterial;
   gunmetal: THREE.MeshStandardMaterial;
@@ -259,6 +261,10 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
     bayDoor: Object.assign(paintMaterial(null, lower, finish), { side: THREE.DoubleSide }),
     cowlLiner: matteMaterial('#1c1e1f', { roughness: 0.8, side: THREE.DoubleSide }),
     canvas: matteMaterial('#7d7255', { roughness: 0.9 }),
+    oilStreak: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      map: oilStreakTexture(19), transparent: true, depthWrite: false, roughness: 0.55, envMapIntensity: 0.5, opacity: 0,
+      polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5,
+    })),
     flakDamage: applyStudioShading(new THREE.MeshPhysicalMaterial({
       map: flakDamageTexture(7), transparent: true, depthWrite: false, roughness: 0.85,
       polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
@@ -984,8 +990,10 @@ function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): L
   };
 }
 
-/** Where the flak strikes land: the hull's starboard side by the bomb bay, and the wing's top beside No. 3 engine. */
-const FLAK_HOLES = { hull: { d: 6.9, y: 0.25 }, wing: { span: 4.2, d: 6.6 } } as const;
+/** The burst that hits the lead goes off under the starboard wing, outboard of No. 3. */
+const BURST = { d: 7.2, span: 5.0, below: 1.4 } as const;
+/** The oil streaks: aft of the cowl over the nacelle, and on the wing just outboard of it to the trailing edge. */
+const OIL_STREAKS = { nacelle: { aftOfCowl: 1.2, length: 2.4, width: 0.9 }, wing: { d: 8.3, outboard: 0.35, length: 2.8, width: 1.0 } } as const;
 
 /** Depth of the nose art's projector box, deep enough to reach the skin where the nose curves in under it. */
 const NOSE_ART_PROJECTOR_DEPTH = 1.4;
@@ -1197,6 +1205,8 @@ function addSideWindows(airframe: THREE.Object3D, hull: THREE.Mesh, material: TH
  */
 export interface BattleDamage {
   holes: THREE.Mesh[];
+  /** Oil and soot streaked back over No. 3's nacelle and the wing behind it; their material's opacity builds them up. */
+  streaks: { meshes: THREE.Mesh[]; material: THREE.MeshStandardMaterial };
   /** No. 3 engine's propeller: the one feathered. */
   propeller: THREE.Object3D;
   /** Where its fire and smoke break out, through the cowl flaps on the nacelle's upper outboard quarter. */
@@ -1300,7 +1310,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
   sharedBladeGeometry ??= buildBladeGeometry();
   const propellers: THREE.Object3D[] = [];
   const exhaustPorts: THREE.Object3D[] = [];
-  let damagedEngine: { nacelle: THREE.Object3D; smokePort: THREE.Object3D } | null = null;
+  let damagedEngine: { nacelle: THREE.Object3D; nacelleBody: THREE.Mesh; spec: NacelleSpec; smokePort: THREE.Object3D } | null = null;
   let damagedPropeller: THREE.Object3D | null = null;
   const navigationLights: THREE.Mesh[] = [];
   for (const spec of NACELLES) {
@@ -1311,7 +1321,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
       const nacelleId = engineAssembly(side, spec === NACELLES[0]);
       const nacelle = assignAssembly(new THREE.Group(), nacelleId);
       airframe.add(nacelle);
-      part(nacelle, side > 0 ? nacelleGeometry : mirrorAcrossZ(nacelleGeometry), materials.nacelle, 0, 0, 0);
+      const nacelleBody = part(nacelle, side > 0 ? nacelleGeometry : mirrorAcrossZ(nacelleGeometry), materials.nacelle, 0, 0, 0);
       // Cylinder plane sits just behind the cowl lip, so the heads show through the opening as on the real aircraft.
       const cylinderPlaneD = spec.cowlFrontD + 0.26;
       const engine = buildRadialEngine(cylinderPlaneD - (spec.propellerD + PROPELLER_HUB_REAR));
@@ -1332,7 +1342,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
       nacelle.add(exhaust);
       exhaustPorts.push(exhaust);
       if (spec === NACELLES[0] && side > 0) {
-        damagedEngine = { nacelle, smokePort: new THREE.Object3D() };
+        damagedEngine = { nacelle, nacelleBody, spec, smokePort: new THREE.Object3D() };
         // Just aft of the cowl flaps, on the nacelle's upper outboard quarter where the fire breaks out through them.
         damagedEngine.smokePort.position.set(toX(spec.cowlRearD + 0.12), spec.thrustLineH + COWL_RADIUS * 0.74, span + side * COWL_RADIUS * 0.74);
         damagedEngine.smokePort.userData.unmerged = true;
@@ -1443,18 +1453,34 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
 
   if (!damagedEngine || !damagedPropeller) throw new Error('No. 3 engine was not built');
   const hitEngine = { smokePort: damagedEngine.smokePort, propeller: damagedPropeller };
-  // Flak holes, hidden until the hit: in the starboard side by the bomb bay and in the wing beside No. 3 engine.
-  const holes = [
-    addDecal(airframe, hull, materials.flakDamage, new THREE.Vector3(toX(FLAK_HOLES.hull.d), FLAK_HOLES.hull.y, hullHalfWidthAtHeight(FLAK_HOLES.hull.d, FLAK_HOLES.hull.y)), STARBOARD, FORWARD, 1.1, 0.8, 0.5),
-    assignAssembly(addDecal(airframe, starboardWing, materials.flakDamage, new THREE.Vector3(toX(FLAK_HOLES.wing.d), wingSurfaceAt(FLAK_HOLES.wing.span, FLAK_HOLES.wing.d).upper, FLAK_HOLES.wing.span), UP, FORWARD, 0.9, 0.9, 0.3), 'wing-starboard'),
+  // Flak holes, hidden until the hit, where the livery puts them.
+  const holes = livery.flakStrikes.map((strike) => {
+    if (strike.surface === 'hull') {
+      const z = strike.side * hullHalfWidthAtHeight(strike.d, strike.y);
+      const hole = addDecal(airframe, hull, materials.flakDamage, new THREE.Vector3(toX(strike.d), strike.y, z), strike.side > 0 ? STARBOARD : PORT, FORWARD, 1.1, 0.8, 0.5);
+      return assignAssembly(hole, fuselageSectionAt(strike.d));
+    }
+    const wing = strike.span > 0 ? starboardWing : portWing;
+    const surface = wingSurfaceAt(Math.abs(strike.span), strike.d).upper;
+    return assignAssembly(addDecal(airframe, wing, materials.flakDamage, new THREE.Vector3(toX(strike.d), surface, strike.span), UP, FORWARD, 0.9, 0.9, 0.3), strike.span > 0 ? 'wing-starboard' : 'wing-port');
+  });
+  // Oil and soot from No. 3: back over the top of its nacelle from the cowl flaps, and on across the wing behind it.
+  const engine3 = damagedEngine.spec;
+  const streakNormal = new THREE.Vector3(0, 1, 0.55).normalize();
+  const streaks = [
+    assignAssembly(addDecal(airframe, damagedEngine.nacelleBody, materials.oilStreak,
+      new THREE.Vector3(toX(engine3.cowlRearD + OIL_STREAKS.nacelle.aftOfCowl), engine3.thrustLineH + COWL_RADIUS * 0.85, engine3.span + COWL_RADIUS * 0.45),
+      streakNormal, AFT, OIL_STREAKS.nacelle.length, OIL_STREAKS.nacelle.width, 0.7), engineAssembly(1, true)),
+    assignAssembly(addDecal(airframe, starboardWing, materials.oilStreak,
+      new THREE.Vector3(toX(OIL_STREAKS.wing.d), wingSurfaceAt(engine3.span + OIL_STREAKS.wing.outboard, OIL_STREAKS.wing.d).upper, engine3.span + OIL_STREAKS.wing.outboard),
+      UP, AFT, OIL_STREAKS.wing.length, OIL_STREAKS.wing.width, 0.35), 'wing-starboard'),
   ];
-  for (const hole of holes) {
-    hole.visible = false;
-    hole.userData.unmerged = true;
+  for (const decal of [...holes, ...streaks]) {
+    decal.visible = false;
+    decal.userData.unmerged = true;
   }
-  assignAssembly(holes[0], fuselageSectionAt(FLAK_HOLES.hull.d));
   const burstPoint = new THREE.Object3D();
-  burstPoint.position.set(toX(FLAK_HOLES.wing.d + 0.6), wingSurfaceAt(FLAK_HOLES.wing.span, FLAK_HOLES.wing.d).lower - 1.4, FLAK_HOLES.wing.span + 0.8);
+  burstPoint.position.set(toX(BURST.d), wingSurfaceAt(BURST.span, BURST.d).lower - BURST.below, BURST.span);
   root.add(burstPoint);
 
   // Bomb bay doors: patches of the skin hinged along the outer edges of the opening.
@@ -1615,7 +1641,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     cabinFittings,
     noseArt,
     exhaustPorts,
-    battleDamage: { holes, ...hitEngine, burstPoint },
+    battleDamage: { holes, streaks: { meshes: streaks, material: materials.oilStreak }, ...hitEngine, burstPoint },
     landingGear: buildLandingGear(root, materials),
     turboGlow: materials.turboGlow,
     navigationLights,

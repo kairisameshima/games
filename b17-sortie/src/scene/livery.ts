@@ -6,6 +6,12 @@ export type Finish = 'oliveDrab' | 'naturalMetal';
  */
 export type TailGunPosition = 'stinger' | 'cheyenne';
 
+/**
+ * Where a ship's flak strikes land, shown from its flak hit: in the hull's side at a station and height (side +1
+ * starboard), or in a wing's upper surface at a station and signed span (+ starboard).
+ */
+export type FlakStrike = { surface: 'hull'; d: number; y: number; side: 1 | -1 } | { surface: 'wing'; d: number; span: number };
+
 /** One ship's markings and the production features that differ between 1944 B-17Gs. */
 export interface Livery {
   /** Squadron code letters, forward of the waist windows. */
@@ -18,6 +24,7 @@ export interface Livery {
   tailGunPosition: TailGunPosition;
   /** Whether the ship carries the switchable nose art and the mission tally. */
   noseArt: boolean;
+  flakStrikes: FlakStrike[];
 }
 
 /**
@@ -27,6 +34,8 @@ export interface Livery {
  */
 export const LEAD_LIVERY: Livery = {
   codes: 'LG', letter: 'K', tailSerial: '297261', finish: 'oliveDrab', tailGunPosition: 'cheyenne', noseArt: true,
+  // The burst under the right wing: the starboard side by the bomb bay, and the wing beside No. 3 engine.
+  flakStrikes: [{ surface: 'hull', d: 6.9, y: 0.25, side: 1 }, { surface: 'wing', d: 6.6, span: 4.2 }],
 };
 
 /**
@@ -37,6 +46,10 @@ export const LEAD_LIVERY: Livery = {
  *   (reference/photo-91bg-b17g-42-102509.jpg).
  */
 export const WINGMAN_LIVERIES: Livery[] = [
-  { codes: 'OR', letter: 'R', tailSerial: '231909', finish: 'oliveDrab', tailGunPosition: 'stinger', noseArt: false },
-  { codes: 'LL', letter: 'A', tailSerial: '2102509', finish: 'naturalMetal', tailGunPosition: 'stinger', noseArt: false },
+  { codes: 'OR', letter: 'R', tailSerial: '231909', finish: 'oliveDrab', tailGunPosition: 'stinger', noseArt: false, flakStrikes: [] },
+  {
+    codes: 'LL', letter: 'A', tailSerial: '2102509', finish: 'naturalMetal', tailGunPosition: 'stinger', noseArt: false,
+    // Fragments of the same barrage along its port side: the radio room, aft of the waist window, and the outer wing.
+    flakStrikes: [{ surface: 'hull', d: 9.9, y: 0.45, side: -1 }, { surface: 'hull', d: 16.4, y: 0.05, side: -1 }, { surface: 'wing', d: 7.5, span: -9.2 }],
+  },
 ];

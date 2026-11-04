@@ -15,9 +15,15 @@ import { FACING, plantedFoot, pose } from './interior/poses';
  */
 
 /** Film seconds of the prologue's beats. */
-const BEATS = { boardingEnds: 8.5, enginesStart: 9, rollStart: 10.5, liftOff: 13.5, docked: 20.5 } as const;
+const BEATS = { boardingEnds: 8.5, enginesStart: 9, rollStart: 12.3, liftOff: 15.3, docked: 22.3 } as const;
 export const PROLOGUE_LIFT_OFF_SECONDS = BEATS.liftOff;
-export const PROLOGUE_ENGINES_START_SECONDS = BEATS.enginesStart;
+
+/**
+ * The engines start one at a time in the order 1, 2, 3, 4, this far apart; each is cranked over by its starter for
+ * `crank` seconds, turning its propeller slowly, before it catches with a cough of smoke.
+ */
+const ENGINE_START = { interval: 0.75, crank: 0.55 } as const;
+export type EngineStart = 'cold' | 'cranking' | 'running';
 
 /** Where the hardstand's centre is on the studio floor, world units, clear of the cloud deck and the lamp. */
 const HARDSTAND_ORIGIN = new THREE.Vector3(-12, 0, 11);
@@ -83,7 +89,8 @@ export interface PrologueFrame {
   position: THREE.Vector3;
   rotation: THREE.Euler;
   gearExtension: number;
-  enginesRunning: boolean;
+  /** Each engine's state, by engine number less one (No. 1, the port outboard, first). */
+  engines: EngineStart[];
   /** The crew inside show once the last man is aboard. */
   crewAboard: boolean;
   finished: boolean;
@@ -94,7 +101,7 @@ export class Hardstand {
   private readonly rigs: BoarderRig[];
   private readonly path: THREE.CatmullRomCurve3;
   private readonly frame: PrologueFrame = {
-    position: new THREE.Vector3(), rotation: new THREE.Euler(0, 0, 0, 'YZX'), gearExtension: 1, enginesRunning: false, crewAboard: false, finished: false,
+    position: new THREE.Vector3(), rotation: new THREE.Euler(0, 0, 0, 'YZX'), gearExtension: 1, engines: ['cold', 'cold', 'cold', 'cold'], crewAboard: false, finished: false,
   };
   private readonly tangent = new THREE.Vector3();
   private readonly ahead = new THREE.Vector3();
@@ -144,7 +151,10 @@ export class Hardstand {
   update(time: number): PrologueFrame {
     for (const rig of this.rigs) this.poseBoarder(rig, time);
     const frame = this.frame;
-    frame.enginesRunning = time >= BEATS.enginesStart;
+    frame.engines.forEach((_, engine) => {
+      const catches = BEATS.enginesStart + ENGINE_START.crank + engine * ENGINE_START.interval;
+      frame.engines[engine] = time >= catches ? 'running' : time >= catches - ENGINE_START.crank ? 'cranking' : 'cold';
+    });
     frame.crewAboard = time >= BEATS.boardingEnds;
     frame.finished = time >= BEATS.docked;
     const { ground } = this.lead.landingGear;

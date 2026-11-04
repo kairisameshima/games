@@ -452,6 +452,106 @@ export class EngineFire {
   }
 }
 
+// Puffs: a single breath of cotton set at a point and teased bigger and thinner over a second or two, then taken away.
+// White for the CO2 cloud of an engine's fire extinguisher, black for the cough of an engine catching on start.
+
+export type PuffKind = 'extinguisher' | 'cough';
+
+const PUFF_LOOKS: Record<PuffKind, { colour: string; size: number; life: number; rise: number }> = {
+  extinguisher: { colour: '#f2f4f6', size: 0.3, life: 2.8, rise: 0.04 },
+  cough: { colour: '#1c1c1d', size: 0.3, life: 1.8, rise: 0.25 },
+};
+const PUFF_POOL = 8;
+const PUFF_TUFTS = 4;
+
+interface Puff {
+  group: THREE.Group;
+  tufts: THREE.Mesh[];
+  offsets: THREE.Vector3[];
+  material: CottonMaterial;
+  kind: PuffKind;
+  age: number;
+  /** Whether it drifts aft with the air (in flight) or hangs where it was let off (on the ground). */
+  drifts: boolean;
+  active: boolean;
+}
+
+export class CottonPuffs {
+  readonly root = new THREE.Group();
+  private readonly puffs: Puff[];
+
+  constructor() {
+    const geometry = cottonTuftGeometry(53, { detail: 4, shellDetail: 2, shells: FIRE_COTTON.shells });
+    this.puffs = Array.from({ length: PUFF_POOL }, () => {
+      const group = new THREE.Group();
+      group.visible = false;
+      const material = cottonMaterial({ color: PUFF_LOOKS.extinguisher.colour, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz });
+      const tufts = Array.from({ length: PUFF_TUFTS }, () => {
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = false;
+        group.add(mesh);
+        return mesh;
+      });
+      this.root.add(group);
+      return { group, tufts, offsets: tufts.map(() => new THREE.Vector3()), material, kind: 'extinguisher' as PuffKind, age: 0, drifts: true, active: false };
+    });
+  }
+
+  /** Lets off a puff at a world position. */
+  emit(kind: PuffKind, position: THREE.Vector3, drifts: boolean, random: () => number): void {
+    const puff = this.puffs.find((candidate) => !candidate.active) ?? this.puffs.reduce((oldest, candidate) => (candidate.age > oldest.age ? candidate : oldest));
+    puff.kind = kind;
+    puff.material.color.set(PUFF_LOOKS[kind].colour);
+    puff.age = 0;
+    puff.drifts = drifts;
+    puff.active = true;
+    puff.group.visible = true;
+    puff.group.position.copy(position);
+    puff.offsets.forEach((offset, index) => {
+      if (index === 0) offset.set(0, 0, 0);
+      else offset.set(random() - 0.5, (random() - 0.5) * 0.7, random() - 0.5).multiplyScalar(1.4);
+    });
+    this.place(puff);
+  }
+
+  /** Grows, thins and drifts the puffs by an exposure's film time. */
+  update(deltaSec: number, driftSpeed: number): void {
+    if (deltaSec <= 0) return;
+    for (const puff of this.puffs) {
+      if (!puff.active) continue;
+      puff.age += deltaSec;
+      const look = PUFF_LOOKS[puff.kind];
+      if (puff.age > look.life) {
+        puff.active = false;
+        puff.group.visible = false;
+        continue;
+      }
+      if (puff.drifts) puff.group.position.x -= driftSpeed * deltaSec;
+      puff.group.position.y += look.rise * deltaSec;
+      this.place(puff);
+    }
+  }
+
+  reset(): void {
+    for (const puff of this.puffs) {
+      puff.active = false;
+      puff.group.visible = false;
+    }
+  }
+
+  private place(puff: Puff): void {
+    const look = PUFF_LOOKS[puff.kind];
+    // Bursts out fast, then keeps spreading slowly while it thins to strands.
+    const growth = (1 - Math.exp(-puff.age * 7)) * (1 + puff.age * 0.25);
+    const size = look.size * (0.25 + growth * 0.75);
+    puff.tufts.forEach((tuft, index) => {
+      tuft.position.copy(puff.offsets[index]).multiplyScalar(size);
+      tuft.scale.setScalar(size * (index === 0 ? 1 : 0.75));
+    });
+    puff.material.wisp.value = THREE.MathUtils.smoothstep(puff.age, look.life * 0.4, look.life);
+  }
+}
+
 /** Filaments per unit tuft, the halo's reach in tuft radii, and its shells. */
 const FIRE_COTTON = { frequency: 9, fuzz: 0.28, shells: 3 } as const;
 

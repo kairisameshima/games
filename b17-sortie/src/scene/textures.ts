@@ -774,6 +774,36 @@ export function decalSheetTexture(arts: DecalArt[]): THREE.CanvasTexture {
   return finishTexture(canvas);
 }
 
+/**
+ * Oil and soot thrown back from a hit engine, as a modeller airbrushes it: streaks starting thin where the oil leaves
+ * the cowl (canvas left) and spreading and fading as the airflow carries them aft (right), brown-black over the paint.
+ */
+export function oilStreakTexture(seed: number): THREE.CanvasTexture {
+  const width = 1024;
+  const height = 256;
+  const [canvas, context] = createCanvas(width, height);
+  const random = seededRandom(seed);
+  for (let streak = 0; streak < 16; streak++) {
+    const startY = height * (0.4 + random() * 0.2);
+    const spread = (random() - 0.5) * height * 0.6;
+    const reach = width * (0.45 + random() * 0.55);
+    const thickness = 3 + random() * 9;
+    const gradient = context.createLinearGradient(0, 0, reach, 0);
+    const alpha = 0.3 + random() * 0.35;
+    gradient.addColorStop(0, `rgba(14,12,10,${alpha})`);
+    gradient.addColorStop(0.6, `rgba(20,17,14,${alpha * 0.55})`);
+    gradient.addColorStop(1, 'rgba(24,20,16,0)');
+    context.strokeStyle = gradient;
+    context.lineWidth = thickness;
+    context.lineCap = 'round';
+    context.beginPath();
+    context.moveTo(8, startY);
+    context.quadraticCurveTo(reach * 0.5, startY + spread * 0.4, reach, startY + spread);
+    context.stroke();
+  }
+  return finishTexture(canvas);
+}
+
 /** The mission tally under the pilot's window: one small yellow bomb per mission, in rows of twelve. */
 export function missionTallyDecal(missions: number): DecalArt {
   const perRow = 12;
