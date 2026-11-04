@@ -119,6 +119,8 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
   const crew = compartments.flatMap((compartment) => compartment.crew);
   const figures = crew.map((station) => {
     const mesh = crewMesh(station, detail);
+    // The figure's mesh sits at the origin; its pelvis says which compartment it is in.
+    mesh.userData.stationX = buildSkeleton(station.member.pose).pelvis.position.x * (station.member.stature ?? 1);
     (station.host ?? hosts.root).add(mesh);
     return { station, mesh };
   });

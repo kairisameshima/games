@@ -20,6 +20,8 @@ The airframe comes from a traced 3-view and wartime photographs, not by eye. `re
 | Crew | Ten men posed with IK onto the real controls (wheels, grips, Norden knobs, throttles, Morse key). Each is a signed-distance sculpture meshed in a worker: anatomy under B-3/A-3 sheepskin, A-2 or F-3 heated suit, A-6 boots, A-11 helmet, A-14 mask and hose to his regulator, B-8 goggles, M4 helmet, M1 vest, M3 apron, B-4 life vest, harness |
 | Bomb bay | Twelve AN-M64 500 lb bombs to TM 9-1980 (59.2 in, 14.18 in body, yellow nose and tail bands, AN-M103 nose fuze, box fin, lugs 14 in apart), hung lugs-inboard in B-7 shackles on the two vertical racks along the catwalk, released bottom tier first through a real opening |
 
+The exploded view (**E**) pulls the lead ship apart along the lines it was built on: the fuselage splits at its bulkheads into nose, pilots' compartment, bomb bay, radio room, waist and tail, each taking its crew, guns and fittings with it; the wings, the four engine nacelles, the stabilizers, the fin, the three turrets and the bomb bay doors come away on their own, each labelled. The formation keeps flying, and the guns keep firing, while it is open.
+
 The cutaway (**C**) peels the lead ship's starboard skin, frames and bulkheads back to the centreline and labels each crew station. The skin is clipped in the shader, so the cut follows the aircraft as it banks and the turrets keep turning with their gunners inside. Equipment hung on the starboard wall hides once the cut passes it. With the skin on, the crew show through glazed window openings.
 
 The sortie loop runs 72 seconds:
@@ -50,6 +52,7 @@ npm run build      # typecheck + production build into dist/
 | ← / → | previous / next phase |
 | V | switch Lab and Studio |
 | C | cutaway of the lead ship |
+| E | exploded view of the lead ship |
 | Drag, scroll | orbit and zoom |
 
 Under the controls, a frame-rate readout (average of the last half second, and the worst frame of the last four seconds) sits over a frame-time chart with guides at the 60 and 30 fps budgets.
@@ -57,7 +60,7 @@ Under the controls, a frame-rate readout (average of the last half second, and t
 ## Layout
 
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
-- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
+- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
 - `src/scene/effects.ts` runs flak bursts, contrail ribbons and falling bombs; `src/scene/gunnery.ts` fires the guns.
 - `src/sortie.ts` is the mission timeline. `src/main.ts` wires the formation, camera, views and adaptive quality.

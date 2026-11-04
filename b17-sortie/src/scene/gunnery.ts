@@ -46,7 +46,8 @@ interface GunState {
   flashTimer: number;
 }
 
-interface Case { position: THREE.Vector3; velocity: THREE.Vector3; spinAxis: THREE.Vector3; spin: number; orientation: THREE.Quaternion; age: number; resting: boolean; floorY: number }
+/** `space`: for a case inside the aircraft, the assembly whose (model-space) frame its position is in. */
+interface Case { position: THREE.Vector3; velocity: THREE.Vector3; spinAxis: THREE.Vector3; spin: number; orientation: THREE.Quaternion; age: number; resting: boolean; floorY: number; space: THREE.Object3D | null }
 interface Tracer { position: THREE.Vector3; direction: THREE.Vector3; age: number }
 
 interface ShipGuns {
@@ -55,6 +56,12 @@ interface ShipGuns {
   insideCases: Case[];
   insideMesh: THREE.InstancedMesh;
   light: THREE.PointLight;
+}
+
+/** The exploded-view assembly an object is carried in. */
+function assemblyOf(object: THREE.Object3D): THREE.Object3D {
+  for (let node: THREE.Object3D | null = object; node; node = node.parent) if (node.userData.isAssembly) return node;
+  throw new Error('Gun is not in an assembly');
 }
 
 /** Deterministic hash → [0, 1) for a gun and a burst window, so a phase replays the same way. */
@@ -205,16 +212,18 @@ export class Gunnery {
     const orientation = new THREE.Quaternion().setFromUnitVectors(this.up, new THREE.Vector3(0, 0, 1).transformDirection(gun.barrel.matrixWorld));
     if (caseFloorY === null) {
       const velocity = down.multiplyScalar(CASE_EJECT_SPEED * this.modelScale).addScaledVector(across, jitter(11) * 0.4 * this.modelScale);
-      this.pushCase(this.overboard, MAX_OVERBOARD_CASES, { position: port, velocity, spinAxis, spin: 18 + jitter(12) * 10, orientation, age: 0, resting: false, floorY: 0 });
+      this.pushCase(this.overboard, MAX_OVERBOARD_CASES, { position: port, velocity, spinAxis, spin: 18 + jitter(12) * 10, orientation, age: 0, resting: false, floorY: 0, space: null });
       return;
     }
-    // Inside: ship space, where the floors are. The ship's own small motions are ignored for a falling case.
-    const inverse = ship.root.matrixWorld.clone().invert();
+    // Inside: in the frame of the gun's assembly, which is model space moved by the exploded view, so the floors are
+    // where `caseFloorY` says and a case stays with its compartment. The ship's own small motions are ignored.
+    const space = assemblyOf(gun.barrel);
+    const inverse = space.matrixWorld.clone().invert();
     const shipQuaternion = ship.root.getWorldQuaternion(new THREE.Quaternion()).invert();
     const velocity = down.applyQuaternion(shipQuaternion).multiplyScalar(CASE_EJECT_SPEED).addScaledVector(across.applyQuaternion(shipQuaternion), jitter(11) * 0.6);
     this.pushCase(ship.insideCases, MAX_INSIDE_CASES, {
       position: port.applyMatrix4(inverse), velocity, spinAxis, spin: 18 + jitter(12) * 10,
-      orientation: orientation.premultiply(shipQuaternion), age: 0, resting: false, floorY: caseFloorY,
+      orientation: orientation.premultiply(shipQuaternion), age: 0, resting: false, floorY: caseFloorY, space,
     });
   }
 
@@ -292,7 +301,11 @@ export class Gunnery {
 
   private writeInstances(mesh: THREE.InstancedMesh, cases: Case[], scale: number): void {
     this.scaleVector.setScalar(scale);
-    cases.forEach((spent, index) => mesh.setMatrixAt(index, this.matrix.compose(spent.position, spent.orientation, this.scaleVector)));
+    cases.forEach((spent, index) => {
+      // An assembly sits directly under the aircraft root, so its position is its whole offset in the root's frame.
+      const position = spent.space ? this.scratch.addVectors(spent.position, spent.space.position) : spent.position;
+      mesh.setMatrixAt(index, this.matrix.compose(position, spent.orientation, this.scaleVector));
+    });
     mesh.count = cases.length;
     mesh.instanceMatrix.needsUpdate = true;
   }

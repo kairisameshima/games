@@ -42,14 +42,22 @@ export function part(
 
 const MERGED_ATTRIBUTES = ['position', 'normal', 'uv'];
 
+/** Where a baked piece of geometry goes: which group, as part of that group's mesh for the piece's material. */
+export interface MergeTarget { group: THREE.Object3D; geometry: THREE.BufferGeometry }
+
 /**
- * Replaces the static meshes under `root` with one merged mesh per material, which keeps the
- * reflection, AO and main passes at a few dozen draw calls. Objects flagged `userData.unmerged` (moving parts) are
- * kept whole and carried over into the merged group at the same place.
+ * Bakes the static meshes under `root` into one mesh per (target group, material), which keeps the reflection, AO and
+ * main passes at a few dozen draw calls. `place` gets each mesh with its geometry already in `root`'s space and says
+ * where it goes, splitting it if it must. Objects flagged `userData.unmerged` (moving parts) are kept whole, in the same
+ * space, and handed to `keep`.
  */
-export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
+export function mergeStaticMeshesInto(
+  root: THREE.Object3D,
+  place: (mesh: THREE.Mesh, geometry: THREE.BufferGeometry) => MergeTarget[],
+  keep: (object: THREE.Object3D) => void,
+): void {
   root.updateMatrixWorld(true);
-  const geometriesByMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const buckets = new Map<THREE.Object3D, Map<THREE.Material, THREE.BufferGeometry[]>>();
   const shadowByMaterial = new Map<THREE.Material, boolean>();
   const kept: THREE.Object3D[] = [];
   const keptMeshes = new Set<THREE.Object3D>();
@@ -69,29 +77,40 @@ export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
       source.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(source.getAttribute('position').count * 2), 2));
     }
     source.applyMatrix4(object.matrixWorld);
-    const list = geometriesByMaterial.get(object.material) ?? [];
-    list.push(source);
-    geometriesByMaterial.set(object.material, list);
+    for (const target of place(object, source)) {
+      const byMaterial = buckets.get(target.group) ?? new Map<THREE.Material, THREE.BufferGeometry[]>();
+      buckets.set(target.group, byMaterial);
+      const list = byMaterial.get(object.material) ?? [];
+      list.push(target.geometry);
+      byMaterial.set(object.material, list);
+    }
     shadowByMaterial.set(object.material, object.castShadow);
   });
-  const merged = new THREE.Group();
-  for (const [material, geometries] of geometriesByMaterial) {
-    const geometry = mergeGeometries(geometries);
-    if (!geometry) {
-      const layouts = [...new Set(geometries.map((source) => Object.keys(source.attributes).sort().join(',')))];
-      throw new Error(`Cannot merge ${geometries.length} geometries for material ${material.type}; attribute layouts: ${layouts.join(' | ')}`);
+  for (const [group, byMaterial] of buckets) {
+    for (const [material, geometries] of byMaterial) {
+      const geometry = mergeGeometries(geometries);
+      if (!geometry) {
+        const layouts = [...new Set(geometries.map((source) => Object.keys(source.attributes).sort().join(',')))];
+        throw new Error(`Cannot merge ${geometries.length} geometries for material ${material.type}; attribute layouts: ${layouts.join(' | ')}`);
+      }
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = shadowByMaterial.get(material) ?? false;
+      mesh.receiveShadow = !(material instanceof THREE.MeshBasicMaterial);
+      group.add(mesh);
     }
-    const mesh = new THREE.Mesh(geometry, material);
-    const isUnlit = material instanceof THREE.MeshBasicMaterial;
-    mesh.castShadow = shadowByMaterial.get(material) ?? false;
-    mesh.receiveShadow = !isUnlit;
-    merged.add(mesh);
   }
   // Same space as the baked geometry: world space of the source tree.
   for (const object of kept) {
     object.matrixWorld.decompose(object.position, object.quaternion, object.scale);
-    merged.add(object);
+    object.removeFromParent();
+    keep(object);
   }
+}
+
+/** `mergeStaticMeshesInto` with everything, kept parts included, in one returned group. */
+export function mergeStaticMeshes(root: THREE.Object3D): THREE.Group {
+  const merged = new THREE.Group();
+  mergeStaticMeshesInto(root, (_mesh, geometry) => [{ group: merged, geometry }], (object) => merged.add(object));
   return merged;
 }
 

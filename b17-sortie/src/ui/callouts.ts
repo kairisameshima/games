@@ -18,7 +18,11 @@ export class Callouts {
   private readonly toCamera = new THREE.Vector3();
   private readonly rootQuaternion = new THREE.Quaternion();
 
-  constructor(container: HTMLElement, private readonly root: THREE.Object3D, stations: CrewStation[]) {
+  /**
+   * `root` is the aircraft; a station's anchor is in its `space` if it has one, else in the root. `fadeOnPortSide`
+   * hides a callout when the camera swings round to the side the cutaway leaves whole.
+   */
+  constructor(container: HTMLElement, private readonly root: THREE.Object3D, stations: CrewStation[], private readonly fadeOnPortSide = true) {
     this.callouts = stations.map((station, index) => {
       const element = document.createElement('div');
       element.className = `callout is-${station.placement}`;
@@ -36,9 +40,9 @@ export class Callouts {
     this.root.getWorldQuaternion(this.rootQuaternion);
     this.starboard.set(0, 0, 1).applyQuaternion(this.rootQuaternion);
     for (const callout of this.callouts) {
-      this.root.localToWorld(this.world.copy(callout.station.anchor));
+      (callout.station.space ?? this.root).localToWorld(this.world.copy(callout.station.anchor));
       const facing = this.toCamera.subVectors(camera.position, this.world).normalize().dot(this.starboard);
-      const opacity = visibility * THREE.MathUtils.smoothstep(facing, 0.05, 0.3);
+      const opacity = this.fadeOnPortSide ? visibility * THREE.MathUtils.smoothstep(facing, 0.05, 0.3) : visibility;
       this.world.project(camera);
       const onScreen = this.world.z < 1 && Math.abs(this.world.x) < 1.05 && Math.abs(this.world.y) < 1.05;
       const shown = opacity > 0.01 && onScreen;

@@ -7,8 +7,10 @@ import type { InteriorMaterials } from './materials';
 
 export interface CrewStation {
   role: string;
-  /** Model-space point the cutaway callout pins to. */
+  /** Point the callout pins to, in `space` (model space when absent). */
   anchor: THREE.Vector3;
+  /** Group the anchor rides in: an exploded-view assembly, so the callout follows it. */
+  space?: THREE.Object3D;
   /** Callouts sit above their anchor, except under the aircraft where they hang below it. */
   placement: 'above' | 'below';
   /** The bomb bay callout also reports how many bombs are still aboard. */

@@ -13,7 +13,9 @@ import { buildDisplayStand, buildStudioSet, driftClouds, type DisplayStand } fro
 import { BOMB_COUNT, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
-import { Ui, type ViewMode } from './ui/ui';
+import { Ui, type ShowMode, type ViewMode } from './ui/ui';
+import { ExplodedView } from './scene/exploded';
+import { fuselageSectionAt } from './scene/assemblies';
 
 /** World units per metre: the 22.66 m fuselage becomes a 7.3-unit model. */
 const MODEL_SCALE = 0.32;
@@ -120,7 +122,7 @@ const formation: FormationShip[] = formationSlots.map((slot, index) => {
   const turboLights = index === 0
     ? aircraft.exhaustPorts.map(() => addVirtualLight(new THREE.Vector3(), PALETTE.turboGlow, 1.1, 0.85))
     : [];
-  const exhaustWorld = aircraft.exhaustPorts.map((port) => holder.localToWorld(port.clone()));
+  const exhaustWorld = aircraft.exhaustPorts.map((port) => port.getWorldPosition(new THREE.Vector3()));
   return { aircraft, holder, base, stand, lag: slot.lag, bombsDropped: 0, turboLights, exhaustWorld };
 });
 const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
@@ -134,7 +136,12 @@ scene.add(flak.root, contrails.mesh, bombs.root, gunnery.root);
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
 const callouts = new Callouts(calloutRoot, formation[0].aircraft.root, formation[0].aircraft.crewStations);
+// Exploded view of the lead ship: compartments, wings, engines, tail surfaces and turrets pulled apart and named.
+const exploded = new ExplodedView(formation[0].aircraft.assemblies);
+const assemblyCallouts = new Callouts(calloutRoot, formation[0].aircraft.root, exploded.labels(formation[0].aircraft.root), false);
 const CUTAWAY_SHOT = { target: new THREE.Vector3(0.2, 3.65, 0), spherical: new THREE.Spherical(11.5, 1.0, 0.2) };
+/** Three-quarter view from ahead and above, wide enough for the spread-out assemblies. */
+const EXPLODED_SHOT = { target: new THREE.Vector3(-0.2, 3.5, 0), spherical: new THREE.Spherical(19, 0.98, 0.5) };
 const CAMERA_TWEEN_SECONDS = 1.3;
 const FOCUS_RANGE = { exterior: 4.2, cutaway: 6.0 } as const;
 
@@ -271,22 +278,28 @@ function jumpToPhase(index: number): void {
   for (const ship of formation) ship.bombsDropped = sortieStateAt(sortieTime - ship.lag).bombsReleased;
 }
 
-function setCutawayOpen(open: boolean): void {
-  cutaway.setOpen(open);
-  ui.setCutaway(open);
-  if (!open) return;
+let show: ShowMode = 'exterior';
+
+/** Cutaway and exploded are exclusive: opening one closes the other, and each brings its own camera shot. */
+function setShow(mode: ShowMode): void {
+  show = mode;
+  cutaway.setOpen(mode === 'cutaway');
+  exploded.setOpen(mode === 'exploded');
+  ui.setShow(mode);
+  const shot = mode === 'cutaway' ? CUTAWAY_SHOT : mode === 'exploded' ? EXPLODED_SHOT : null;
+  if (!shot) return;
   cameraTween = {
     fromTarget: controls.target.clone(),
-    toTarget: CUTAWAY_SHOT.target.clone(),
+    toTarget: shot.target.clone(),
     fromPosition: camera.position.clone(),
-    toPosition: new THREE.Vector3().setFromSpherical(CUTAWAY_SHOT.spherical).add(CUTAWAY_SHOT.target),
+    toPosition: new THREE.Vector3().setFromSpherical(shot.spherical).add(shot.target),
     progress: 0,
   };
 }
 
-const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onCutawayChange: setCutawayOpen });
+const ui = new Ui(uiRoot, { onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow });
 const fpsMeter = new FpsMeter(ui.meterSlot);
-ui.setCutaway(false);
+ui.setShow('exterior');
 applyView('lab');
 
 addEventListener('keydown', (event) => {
@@ -302,7 +315,9 @@ addEventListener('keydown', (event) => {
   } else if (event.key === 'v' || event.key === 'V') {
     switchView(view === 'lab' ? 'studio' : 'lab');
   } else if (event.key === 'c' || event.key === 'C') {
-    setCutawayOpen(!cutaway.isOpen);
+    setShow(show === 'cutaway' ? 'exterior' : 'cutaway');
+  } else if (event.key === 'e' || event.key === 'E') {
+    setShow(show === 'exploded' ? 'exterior' : 'exploded');
   }
 });
 
@@ -346,11 +361,12 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
   }
   aircraft.rackedBombs.forEach((bomb, index) => { bomb.visible = index >= ship.bombsDropped; });
 
-  ship.stand.aimAt(holder.localToWorld(scratchPosition.copy(standMount)));
+  // The stand holds the waist section, and follows it when the lead ship is exploded.
+  ship.stand.aimAt(aircraft.assemblies.get(fuselageSectionAt(STAND_MOUNT_D)).localToWorld(scratchPosition.copy(standMount)));
 
   aircraft.turboGlow.color.setRGB(1.0, 0.54, 0.24).multiplyScalar(2.3 + Math.sin(elapsed * 23) * 0.15 + Math.sin(elapsed * 37) * 0.1);
   aircraft.exhaustPorts.forEach((port, index) => {
-    const world = holder.localToWorld(ship.exhaustWorld[index].copy(port));
+    const world = port.getWorldPosition(ship.exhaustWorld[index]);
     const light = ship.turboLights[index];
     if (light) light.position.copy(world);
   });
@@ -446,6 +462,7 @@ function frame(timestamp: number): void {
   sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
   if (sortieTime < previousTime) resetEffects();
   const leadState = sortieStateAt(sortieTime);
+  exploded.update(realDelta);
 
   formation.forEach((ship, index) => {
     const state = index === 0 ? leadState : sortieStateAt(Math.max(sortieTime - ship.lag, 0));
@@ -466,9 +483,10 @@ function frame(timestamp: number): void {
   focusPoint.copy(controls.target);
   formation[0].holder.updateMatrixWorld(true);
   cutaway.update(realDelta);
-  depthOfField.uFocusRange.value = THREE.MathUtils.lerp(FOCUS_RANGE.exterior, FOCUS_RANGE.cutaway, cutaway.amount);
+  depthOfField.uFocusRange.value = THREE.MathUtils.lerp(FOCUS_RANGE.exterior, FOCUS_RANGE.cutaway, Math.max(cutaway.amount, exploded.amount));
   depthOfField.uFocusDistance.value = camera.position.distanceTo(controls.target);
   callouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(cutaway.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
+  assemblyCallouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(exploded.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
   contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, camera.position);
 
   renderer.shadowMap.needsUpdate = true;
@@ -478,7 +496,7 @@ function frame(timestamp: number): void {
 }
 
 if (import.meta.env.DEV) {
-  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setCutawayOpen, setPlaying: (value: boolean) => { playing = value; } } });
+  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setShow, exploded, setPlaying: (value: boolean) => { playing = value; } } });
 }
 
 requestAnimationFrame(frame);

@@ -1,11 +1,13 @@
 import { BOMB_COUNT, PHASES, type SortieState } from '../sortie';
 
 export type ViewMode = 'lab' | 'studio';
+/** How the lead ship is shown: whole, cut away to the crew, or exploded into its assemblies. */
+export type ShowMode = 'exterior' | 'cutaway' | 'exploded';
 
 export interface UiCallbacks {
   onJumpToPhase: (index: number) => void;
   onViewChange: (view: ViewMode) => void;
-  onCutawayChange: (open: boolean) => void;
+  onShowChange: (mode: ShowMode) => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -28,7 +30,7 @@ export class Ui {
   private readonly progressBars: HTMLElement[] = [];
   private readonly detail: HTMLElement;
   private readonly viewButtons: Record<ViewMode, HTMLButtonElement>;
-  private readonly cutawayButtons: { exterior: HTMLButtonElement; cutaway: HTMLButtonElement };
+  private readonly showButtons: Record<ShowMode, HTMLButtonElement>;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -85,6 +87,7 @@ export class Ui {
     hintRow('← →', 'previous / next phase');
     hintRow('V', 'lab / studio');
     hintRow('C', 'cutaway');
+    hintRow('E', 'exploded');
     hintRow('Drag', 'orbit · scroll to zoom');
     const makeToggleButton = (toggle: HTMLElement, label: string, onClick: () => void) => {
       const button = element('button', '', label);
@@ -98,13 +101,14 @@ export class Ui {
       lab: makeToggleButton(viewToggle, 'Lab', () => callbacks.onViewChange('lab')),
       studio: makeToggleButton(viewToggle, 'Studio', () => callbacks.onViewChange('studio')),
     };
-    const cutawayToggle = element('div', 'view-toggle');
-    this.cutawayButtons = {
-      exterior: makeToggleButton(cutawayToggle, 'Exterior', () => callbacks.onCutawayChange(false)),
-      cutaway: makeToggleButton(cutawayToggle, 'Cutaway', () => callbacks.onCutawayChange(true)),
+    const showToggle = element('div', 'view-toggle');
+    this.showButtons = {
+      exterior: makeToggleButton(showToggle, 'Exterior', () => callbacks.onShowChange('exterior')),
+      cutaway: makeToggleButton(showToggle, 'Cutaway', () => callbacks.onShowChange('cutaway')),
+      exploded: makeToggleButton(showToggle, 'Exploded', () => callbacks.onShowChange('exploded')),
     };
     this.meterSlot = element('div', 'meter-slot');
-    hints.append(viewToggle, cutawayToggle, this.meterSlot);
+    hints.append(viewToggle, showToggle, this.meterSlot);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading);
@@ -141,9 +145,8 @@ export class Ui {
     this.viewButtons.studio.classList.toggle('is-active', view === 'studio');
   }
 
-  setCutaway(open: boolean): void {
-    this.cutawayButtons.exterior.classList.toggle('is-active', !open);
-    this.cutawayButtons.cutaway.classList.toggle('is-active', open);
+  setShow(mode: ShowMode): void {
+    for (const [button, element] of Object.entries(this.showButtons)) element.classList.toggle('is-active', button === mode);
   }
 
   hideLoading(): void {
