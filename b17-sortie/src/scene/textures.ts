@@ -679,31 +679,42 @@ export function flakDamageTexture(seed: number): THREE.CanvasTexture {
   return finishTexture(canvas);
 }
 
-/**
- * The kit box's lid: a night-blue sky with searchlight beams, the nose art as the box painting, and the title band, the
- * way 1950s kit boxes put the subject's art over the name.
- */
-export function kitBoxLidTexture(): THREE.CanvasTexture {
-  if (!noseArtPainting) throw new Error('Nose art not loaded: await loadNoseArt() before building the kit box');
-  const [canvas, context] = createCanvas(1536, 1024);
-  const sky = context.createLinearGradient(0, 0, 0, 1024);
+/** The box painting's area on the lid, above the title band, in lid pixels. */
+export const KIT_BOX_ART = { width: 1536, height: 820 } as const;
+
+/** The box painting's sky: night blue to a dusk glow low down, with searchlight beams across it. */
+export function kitBoxSkyTexture(): THREE.CanvasTexture {
+  const { width, height } = KIT_BOX_ART;
+  const [canvas, context] = createCanvas(width, height);
+  const sky = context.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, '#0d1b33');
   sky.addColorStop(0.7, '#3b4d6b');
   sky.addColorStop(1, '#c9864a');
   context.fillStyle = sky;
-  context.fillRect(0, 0, 1536, 1024);
+  context.fillRect(0, 0, width, height);
   context.fillStyle = 'rgba(255,240,200,0.1)';
   for (const [x, lean] of [[220, 0.5], [1250, -0.4], [900, 0.2]]) {
     context.beginPath();
-    context.moveTo(x - 30, 1024);
-    context.lineTo(x + 30, 1024);
+    context.moveTo(x - 30, height);
+    context.lineTo(x + 30, height);
     context.lineTo(x + lean * 900 + 120, 0);
     context.lineTo(x + lean * 900 - 120, 0);
     context.fill();
   }
-  const artHeight = 760;
-  const artWidth = (noseArtPainting.naturalWidth / noseArtPainting.naturalHeight) * artHeight;
-  context.drawImage(noseArtPainting, 1536 - artWidth - 60, 40, artWidth, artHeight);
+  return finishTexture(canvas);
+}
+
+/**
+ * The kit box's lid: the box painting (the model itself in flight over the sky), the nose art inset in its corner, and
+ * the title band under it, the way 1950s kit boxes put the subject over the name.
+ */
+export function kitBoxLidTexture(painting: CanvasImageSource): THREE.CanvasTexture {
+  if (!noseArtPainting) throw new Error('Nose art not loaded: await loadNoseArt() before building the kit box');
+  const [canvas, context] = createCanvas(KIT_BOX_ART.width, 1024);
+  context.drawImage(painting, 0, 0, KIT_BOX_ART.width, KIT_BOX_ART.height);
+  const insetHeight = 300;
+  const insetWidth = (noseArtPainting.naturalWidth / noseArtPainting.naturalHeight) * insetHeight;
+  context.drawImage(noseArtPainting, KIT_BOX_ART.width - insetWidth - 40, KIT_BOX_ART.height - insetHeight - 20, insetWidth, insetHeight);
   context.fillStyle = PALETTE.tailYellow;
   context.fillRect(0, 820, 1536, 204);
   context.fillStyle = '#1b1c1d';

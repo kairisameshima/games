@@ -45,7 +45,7 @@ On load the film opens on the **hardstand**: the lead stands on its wheels (main
 
 In the cutaway, clicking a crew label walks the camera through the ship to that station along the crew's own way: past the navigator, through bulkhead 4 and the crawlway, up behind the pilots, round the top turret, down the catwalk step between the bomb racks, through the radio room, past the ball turret and up the tail. Close in, amber rings mark named fittings; hovering one gives its name and the Pilot's Manual figure it was modelled from.
 
-**K** puts the finished lead on a turntable on the set floor beside its kit box (the nose art as the box painting) and the decal sheet its markings came from. **P** stops the film, clears the overlays and saves the frame re-rendered at three times the screen's resolution; **M** switches on the foley: a synthesised engine drone (three engines once No. 3 is feathered), gun bursts that land on the exposures, flak thumps and a shutter click per frame.
+**K** puts the finished lead on a turntable on the set floor beside its kit box (the lead itself in flight as the box painting, rendered from the model the first time the bench opens, with Hattie in the corner) and the decal sheet its markings came from. **P** stops the film, clears the overlays and saves the frame re-rendered at three times the screen's resolution; **M** switches on the foley: a synthesised engine drone (three engines once No. 3 is feathered), gun bursts that land on the exposures, flak thumps and a shutter click per frame.
 
 The sortie loop runs 72 seconds:
 

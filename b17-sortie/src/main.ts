@@ -405,6 +405,10 @@ const KIT_SHOT = { target: KitBench.focus, spherical: new THREE.Spherical(21, 1.
 function setKitBench(shown: boolean): void {
   if (shown && prologueTime !== null) finishPrologue();
   if (shown && show !== 'exterior') setShow('exterior');
+  if (shown) {
+    kitBench.paintBoxArt(renderer, scene);
+    resize();
+  }
   kitTime = shown ? 0 : null;
   kitBench.setShown(shown);
   formation[0].stand.root.visible = !shown;
