@@ -18,7 +18,6 @@ export class Cutaway {
   private readonly localPlanes = [new THREE.Plane(new THREE.Vector3(0, 0, -1), CUT_START_Z), new THREE.Plane(new THREE.Vector3(0, 0, 1), -CUT_START_Z)];
   private readonly worldPlanes = [new THREE.Plane(), new THREE.Plane()];
   /** Clipped meshes and whether they skipped ambient occlusion before the cut (glass always does). */
-  private readonly clippedMeshes: { mesh: THREE.Mesh; skippedAmbientOcclusion: boolean }[] = [];
   private progress = 0;
   private open = false;
 
@@ -39,7 +38,6 @@ export class Cutaway {
       const clone = clones.get(object.material);
       if (!clone) return;
       object.material = clone;
-      this.clippedMeshes.push({ mesh: object, skippedAmbientOcclusion: object.userData.skipAmbientOcclusion === true });
     });
   }
 
@@ -63,9 +61,6 @@ export class Cutaway {
     this.localPlanes[0].constant = cutZ;
     const matrix = this.aircraft.root.matrixWorld;
     this.localPlanes.forEach((plane, index) => this.worldPlanes[index].copy(plane).applyMatrix4(matrix));
-    // GTAO renders without material clipping, so the cut skin would still shade the interior; drop it from that pass.
-    const cut = this.progress > 0;
-    for (const entry of this.clippedMeshes) entry.mesh.userData.skipAmbientOcclusion = cut || entry.skippedAmbientOcclusion;
     for (const object of this.aircraft.cutawayHidden) object.visible = this.amount < HIDE_WALL_AT;
   }
 }

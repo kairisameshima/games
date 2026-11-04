@@ -111,7 +111,6 @@ export class Gunnery {
     this.tracerMesh = new THREE.InstancedMesh(streak, tracerMaterial, MAX_TRACERS);
     this.tracerMesh.count = 0;
     this.tracerMesh.frustumCulled = false;
-    this.tracerMesh.userData.skipAmbientOcclusion = true;
     this.root.add(this.overboardMesh, this.tracerMesh);
   }
 

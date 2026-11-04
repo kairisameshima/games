@@ -533,8 +533,9 @@ export interface StudioPipeline {
 }
 
 /**
- * Unlit emissive meshes, and anything flagged `userData.skipAmbientOcclusion` (soft transparent effects), are hidden
- * while GTAO renders its normal/depth pass, so neither glowing strips nor smoke ribbons darken their surroundings.
+ * GTAO works from the scene pass's own depth, normals reconstructed from it, instead of drawing the scene a second time
+ * for a normal buffer: the depth is already resolved for the depth of field, it carries the cutaway's clipping, and the
+ * see-through effects (glass, smoke, flashes, tracers) leave no trace in it because none of them writes depth.
  */
 export function createStudioPipeline(
   webglRenderer: THREE.WebGLRenderer,
@@ -548,26 +549,19 @@ export function createStudioPipeline(
 
   const scenePass = new MultisampledScenePass(renderScene, viewCamera, focusPoint, multisampleCount);
   composer.addPass(scenePass);
+  const sceneDepth = scenePass.sceneTarget.depthTexture;
+  if (!sceneDepth) throw new Error('The scene pass target has no depth texture');
 
   const ambientOcclusion = new GTAOPass(renderScene, viewCamera, 1, 1);
+  // Set after construction: passed to the constructor, three's GTAOPass reads the normal target it then never creates.
+  // Its own target stays allocated but unused (never rendered to, so it holds no GPU memory).
+  ambientOcclusion.setGBuffer(sceneDepth);
   ambientOcclusion.output = GTAOPass.OUTPUT.Default;
   ambientOcclusion.blendIntensity = 1;
   ambientOcclusion.updateGtaoMaterial({ radius: 0.6, thickness: 0.8, distanceExponent: 1.4, distanceFallOff: 1, scale: 1.1, samples: 12 });
   ambientOcclusion.updatePdMaterial({ radius: 6, rings: 2, samples: 12, lumaPhi: 10, depthPhi: 2, normalPhi: 3 });
   const setFullResolutionAmbientOcclusionSize = ambientOcclusion.setSize.bind(ambientOcclusion);
   ambientOcclusion.setSize = (width: number, height: number) => setFullResolutionAmbientOcclusionSize(Math.ceil(width / 2), Math.ceil(height / 2));
-  const renderAmbientOcclusion = ambientOcclusion.render.bind(ambientOcclusion);
-  const hiddenEmissives: THREE.Object3D[] = [];
-  ambientOcclusion.render = (...args: Parameters<GTAOPass['render']>) => {
-    hiddenEmissives.length = 0;
-    renderScene.traverseVisible((object) => {
-      const isUnlitEmissive = object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial && !object.material.map;
-      if (isUnlitEmissive || object.userData.skipAmbientOcclusion === true) hiddenEmissives.push(object);
-    });
-    for (const object of hiddenEmissives) object.visible = false;
-    renderAmbientOcclusion(...args);
-    for (const object of hiddenEmissives) object.visible = true;
-  };
   composer.addPass(ambientOcclusion);
 
   const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.42, 0.55, 1.25); // strength, radius, threshold
@@ -575,7 +569,7 @@ export function createStudioPipeline(
   bloom.setSize = (width: number, height: number) => setFullResolutionBloomSize(Math.ceil(width / 2), Math.ceil(height / 2));
   composer.addPass(bloom);
 
-  const depthOfField = new BokehDepthOfFieldPass(scenePass.sceneTarget.depthTexture as THREE.DepthTexture, viewCamera);
+  const depthOfField = new BokehDepthOfFieldPass(sceneDepth, viewCamera);
   composer.addPass(depthOfField);
 
   composer.addPass(new OutputPass());

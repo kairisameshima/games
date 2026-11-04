@@ -1000,12 +1000,6 @@ export function buildB17(crewDetail: FigureDetail = 'high'): B17 {
     const man = interior.crew.find((entry) => entry.station.label === station.role);
     return { ...station, space: man ? assemblies.of(man.mesh) : assemblies.get(fuselageSectionAt(toX(station.anchor.x))) };
   });
-  // Glass and propeller blur are see-through, so they must not cast ambient occlusion on what lies behind them.
-  root.traverse((object) => {
-    if (object instanceof THREE.Mesh && [materials.canopy, materials.windowPane, materials.propellerDisc].includes(object.material)) {
-      object.userData.skipAmbientOcclusion = true;
-    }
-  });
 
   return {
     root,

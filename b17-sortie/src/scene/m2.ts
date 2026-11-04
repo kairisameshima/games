@@ -210,7 +210,6 @@ function muzzleFlash(): THREE.Group {
     face.position.x = 0.02;
     flashTemplate.add(face);
     flashTemplate.traverse((object) => {
-      object.userData.skipAmbientOcclusion = true;
       if (object instanceof THREE.Mesh) object.castShadow = false;
     });
   }

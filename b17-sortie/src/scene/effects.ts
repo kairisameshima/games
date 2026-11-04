@@ -50,7 +50,6 @@ export class FlakField {
       for (let puff = 0; puff < FLAK_PUFFS; puff++) {
         const mesh = new THREE.Mesh(puffGeometry, smoke);
         mesh.castShadow = false;
-        mesh.userData.skipAmbientOcclusion = true;
         group.add(mesh);
         puffs.push(mesh);
         puffOffsets.push(new THREE.Vector3());
@@ -209,7 +208,6 @@ export class Contrails {
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 3;
-    this.mesh.userData.skipAmbientOcclusion = true;
   }
 
   /** Studio is cream, where pale trails vanish, so they darken there. */
