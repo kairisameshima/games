@@ -66,6 +66,8 @@ function roundTemplate(kind: RoundKind): THREE.Group {
   const cached = roundTemplates.get(kind);
   if (cached) return cached;
   const materials = ammunitionMaterials();
+  // No round casts a shadow: it is a few millimetres across, lost in the shadow map's texels, yet each belt would cost
+  // a shadow draw per material.
   const round = new THREE.Group();
   // Rimless case: head, extractor groove, tapered body, shoulder, neck.
   const caseGeometry = lathe([[0, 0], [10.2, 0], [10.2, 1.6], [9.4, 2.3], [9.4, 3.6], [10.2, 4.6], [9.2, 77], [7.2, 83.5], [7.2, 99]], 16);
@@ -73,11 +75,11 @@ function roundTemplate(kind: RoundKind): THREE.Group {
   const tip = lathe([[3.6, 127.6], [2.2, 131], [0.6, 133.4], [0, 134]], 12);
   for (const [geometry, material] of [[caseGeometry, materials.brass], [bullet, materials.jacket], [tip, materials.tips[kind]]] as const) {
     geometry.rotateZ(-Math.PI / 2).translate(-CARTRIDGE_LENGTH / 2, 0, 0);
-    part(round, geometry, material, 0, 0, 0);
+    part(round, geometry, material, 0, 0, 0, { castShadow: false });
   }
   // M2 link: a loop round the case body and the strap that carries the next round's loop.
-  part(round, new THREE.TorusGeometry(0.0103, 0.0013, 5, 18), materials.link, 0.045 - CARTRIDGE_LENGTH / 2, 0, 0, { rotation: [0, Math.PI / 2, 0] });
-  part(round, roundedBox(0.014, 0.0025, BELT_PITCH - 0.012, 0.001), materials.link, 0.045 - CARTRIDGE_LENGTH / 2, -0.0098, BELT_PITCH / 2);
+  part(round, new THREE.TorusGeometry(0.0103, 0.0013, 5, 18), materials.link, 0.045 - CARTRIDGE_LENGTH / 2, 0, 0, { rotation: [0, Math.PI / 2, 0], castShadow: false });
+  part(round, roundedBox(0.014, 0.0025, BELT_PITCH - 0.012, 0.001), materials.link, 0.045 - CARTRIDGE_LENGTH / 2, -0.0098, BELT_PITCH / 2, { castShadow: false });
   const template = mergeStaticMeshes(round);
   roundTemplates.set(kind, template);
   return template;
