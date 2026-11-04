@@ -374,14 +374,24 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
 
 // Adaptive quality: pixel ratio, then reflection, then MSAA, then AO; probe back up when there is headroom.
 
+/** Features shed after the pixel ratio is down to 1, in this order; `featuresShed` counts how many are off. */
+const SHEDDABLE_FEATURES = ['reflection', 'multisampling', 'ambientOcclusion'] as const;
+const FULL_MULTISAMPLES = pipeline.sceneTarget.samples;
+/** Steady windows before probing back up; doubled after every failed probe, so a transient dip never locks quality off. */
+const ADAPTIVE_PROBE_WINDOWS = 3;
+const ADAPTIVE_PROBE_WINDOWS_MAX = 48;
+
 let pixelRatio = renderer.getPixelRatio();
-let pixelRatioCeiling = Math.min(devicePixelRatio, 2);
+const pixelRatioCeiling = Math.min(devicePixelRatio, 2);
+let featuresShed = 0;
 let adaptiveElapsed = 0;
 let adaptiveFrames = 0;
 let bestFps = 0;
 let warmupWindows = 2;
 let highWindows = 0;
+let probeWindows = ADAPTIVE_PROBE_WINDOWS;
 let probing = false;
+let qualityPinned = false;
 
 function resize(): void {
   camera.aspect = innerWidth / innerHeight;
@@ -393,8 +403,51 @@ function resize(): void {
 addEventListener('resize', resize);
 resize();
 
+function applyFeaturesShed(count: number): void {
+  featuresShed = count;
+  const isShed = (feature: (typeof SHEDDABLE_FEATURES)[number]): boolean => SHEDDABLE_FEATURES.indexOf(feature) < count;
+  reflectionQualityEnabled = !isShed('reflection');
+  floorReflection.uniforms.uReflectionStrength.value = reflectionQualityEnabled ? VIEW_PRESETS[view].reflection : 0;
+  const samples = isShed('multisampling') ? 0 : FULL_MULTISAMPLES;
+  if (pipeline.sceneTarget.samples !== samples) {
+    pipeline.sceneTarget.samples = samples;
+    pipeline.sceneTarget.dispose();
+  }
+  pipeline.ambientOcclusion.enabled = !isShed('ambientOcclusion');
+}
+
+function lowerQuality(): void {
+  if (pixelRatio > 1) {
+    pixelRatio = Math.max(1, pixelRatio - PIXEL_RATIO_STEP);
+    resize();
+  } else if (featuresShed < SHEDDABLE_FEATURES.length) {
+    applyFeaturesShed(featuresShed + 1);
+  }
+}
+
+/** Raises quality one step, features first; false when already at full quality. */
+function raiseQuality(): boolean {
+  if (featuresShed > 0) {
+    applyFeaturesShed(featuresShed - 1);
+    return true;
+  }
+  if (pixelRatio >= pixelRatioCeiling) return false;
+  pixelRatio = Math.min(pixelRatioCeiling, pixelRatio + PIXEL_RATIO_STEP);
+  resize();
+  return true;
+}
+
+/** Full quality at the starting pixel ratio, with adaptation off: a fixed workload to measure frame cost against. */
+function pinQuality(pinned: boolean): void {
+  qualityPinned = pinned;
+  if (!pinned) return;
+  pixelRatio = initialPixelRatio();
+  resize();
+  applyFeaturesShed(0);
+}
+
 function stepAdaptiveQuality(deltaSec: number): void {
-  if (document.hidden) return;
+  if (document.hidden || qualityPinned) return;
   adaptiveElapsed += deltaSec;
   adaptiveFrames += 1;
   if (adaptiveElapsed < ADAPTIVE_WINDOW_SECONDS) return;
@@ -408,35 +461,22 @@ function stepAdaptiveQuality(deltaSec: number): void {
   if (probing) {
     probing = false;
     if (fps < ADAPTIVE_PROBE_FAIL_FPS) {
-      pixelRatioCeiling = pixelRatio - PIXEL_RATIO_STEP;
-      pixelRatio = pixelRatioCeiling;
-      resize();
+      probeWindows = Math.min(ADAPTIVE_PROBE_WINDOWS_MAX, probeWindows * 2);
+      lowerQuality();
       return;
     }
+    probeWindows = ADAPTIVE_PROBE_WINDOWS;
   }
   bestFps = Math.max(bestFps, fps);
   if (fps < bestFps * ADAPTIVE_LOW_RATIO && fps < ADAPTIVE_LOW_FPS) {
     highWindows = 0;
-    if (pixelRatio > 1) {
-      pixelRatio = Math.max(1, pixelRatio - PIXEL_RATIO_STEP);
-      resize();
-    } else if (reflectionQualityEnabled) {
-      reflectionQualityEnabled = false;
-      floorReflection.uniforms.uReflectionStrength.value = 0;
-    } else if (pipeline.sceneTarget.samples > 0) {
-      pipeline.sceneTarget.samples = 0;
-      pipeline.sceneTarget.dispose();
-    } else {
-      pipeline.ambientOcclusion.enabled = false;
-    }
+    lowerQuality();
     return;
   }
   highWindows = fps >= ADAPTIVE_HIGH_FPS ? highWindows + 1 : 0;
-  if (highWindows >= 3 && pixelRatio < pixelRatioCeiling) {
+  if (highWindows >= probeWindows) {
     highWindows = 0;
-    probing = true;
-    pixelRatio = Math.min(pixelRatioCeiling, pixelRatio + PIXEL_RATIO_STEP);
-    resize();
+    probing = raiseQuality();
   }
 }
 
@@ -496,7 +536,7 @@ function frame(timestamp: number): void {
 }
 
 if (import.meta.env.DEV) {
-  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setShow, exploded, setPlaying: (value: boolean) => { playing = value; } } });
+  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setShow, exploded, pinQuality, setPlaying: (value: boolean) => { playing = value; } } });
 }
 
 requestAnimationFrame(frame);
