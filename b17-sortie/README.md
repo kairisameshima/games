@@ -2,7 +2,7 @@
 
 A B-17G of the 91st Bomb Group flying the middle of a mission, built as a scale model and photographed in the studio-lab look from `../reference/sael-guide.md` (three.js). Three ships hold a combat box on display stands over a cloud deck while the lead runs from the initial point through flak to bombs away and the rally turn.
 
-The aircraft is a hand-painted plastic kit come to life on a stop-motion set. The whole film runs at 12 exposures a second and holds between them; only the orbit camera answers the mouse at once. Everything moves the way an animator moves it:
+The aircraft is a hand-painted plastic kit come to life on a stop-motion set. The whole film runs at 12 exposures a second (on twos; **F** switches to 24, on ones) and holds between them; only the orbit camera answers the mouse at once. Everything moves the way an animator moves it:
 
 | Stop-motion touch | What it does |
 |---|---|
@@ -78,6 +78,7 @@ npm run build      # typecheck + production build into dist/
 | C | cutaway of the lead ship |
 | E | exploded view of the lead ship |
 | N | switch the nose art between Hallucinatin' Hattie and the King of Hearts card (also in the controls panel) |
+| F | switch the film between 12 fps (on twos) and 24 fps (on ones), also in the controls panel |
 | H | replay the hardstand: boarding and take-off |
 | K | kit box and turntable |
 | P | photo mode: save a high-resolution still (Esc leaves) |
@@ -86,7 +87,7 @@ npm run build      # typecheck + production build into dist/
 | L | record a render log: about 40 s, then saves a `.json` with this machine's GPU, frame timings and what each cost adds |
 | Drag, scroll | orbit and zoom |
 
-Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the 12 fps the film is locked to.
+Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the rate the film is locked to, 12 or 24 fps.
 
 ## Layout
 

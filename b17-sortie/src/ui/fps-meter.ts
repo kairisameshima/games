@@ -1,14 +1,13 @@
-import { STOP_MOTION_FPS } from '../scene/stop-motion';
+import { MAX_STOP_MOTION_FPS, type StopMotionRate } from '../scene/stop-motion';
 
-/** Frames kept for the chart: about eight seconds at the stop-motion rate. */
-const HISTORY = STOP_MOTION_FPS * 8;
-/** Frames the readout averages: one second's worth. */
-const AVERAGED_FRAMES = STOP_MOTION_FPS;
+/** Frames kept for the chart: about eight seconds at the fastest stop-motion rate. */
+const HISTORY = MAX_STOP_MOTION_FPS * 8;
+/** The readout averages the frames of the last this many milliseconds. */
+const AVERAGED_MS = 1000;
 /** The chart and readout redraw at this rate; measuring stays per frame. */
 const REDRAW_SECONDS = 0.1;
-/** Frame-time scale of the chart, with a guide at the stop-motion rate the film is locked to. */
+/** Frame-time scale of the chart; a guide marks the stop-motion rate the film is locked to. */
 const CHART_MAX_MS = 120;
-const GUIDES_MS = [1000 / STOP_MOTION_FPS];
 const CHART = { width: 168, height: 40 } as const;
 
 /**
@@ -23,6 +22,7 @@ export class FpsMeter {
   private readonly readout: HTMLElement;
   private readonly context: CanvasRenderingContext2D;
   private readonly scale = Math.min(devicePixelRatio, 2);
+  private guideMs = 1000 / 12;
 
   /** `slot`: the element the meter is appended to (the controls panel, so it never overlaps the phase strip). */
   constructor(slot: HTMLElement) {
@@ -43,6 +43,11 @@ export class FpsMeter {
     slot.append(panel);
   }
 
+  /** Moves the chart's guide to the film's rate. */
+  setTargetFps(fps: StopMotionRate): void {
+    this.guideMs = 1000 / fps;
+  }
+
   /** Call once per rendered frame with the real (unpaused) frame time. */
   record(deltaSec: number): void {
     this.frameMs[this.next] = deltaSec * 1000;
@@ -56,12 +61,15 @@ export class FpsMeter {
 
   private redraw(): void {
     // Average over the last second for a steady number.
-    const recent = Math.min(this.filled, AVERAGED_FRAMES);
     let total = 0;
+    let recent = 0;
     let worst = 0;
     for (let index = 1; index <= this.filled; index++) {
       const ms = this.frameMs[(this.next - index + HISTORY) % HISTORY];
-      if (index <= recent) total += ms;
+      if (total < AVERAGED_MS) {
+        total += ms;
+        recent += 1;
+      }
       worst = Math.max(worst, ms);
     }
     const average = total / Math.max(recent, 1);
@@ -75,12 +83,10 @@ export class FpsMeter {
     context.lineWidth = this.scale;
     context.strokeStyle = style.getPropertyValue('--fps-guide');
     context.setLineDash([3 * this.scale, 3 * this.scale]);
-    for (const guide of GUIDES_MS) {
-      context.beginPath();
-      context.moveTo(0, yOf(guide));
-      context.lineTo(width, yOf(guide));
-      context.stroke();
-    }
+    context.beginPath();
+    context.moveTo(0, yOf(this.guideMs));
+    context.lineTo(width, yOf(this.guideMs));
+    context.stroke();
     context.setLineDash([]);
     context.strokeStyle = style.getPropertyValue('--fps-line');
     context.lineWidth = 1.5 * this.scale;

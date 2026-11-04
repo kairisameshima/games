@@ -1,3 +1,4 @@
+import type { StopMotionRate } from '../scene/stop-motion';
 import type { NoseArtChoice } from '../scene/textures';
 import { BOMB_COUNT, PHASES, type SortieState } from '../sortie';
 
@@ -16,6 +17,7 @@ export interface UiCallbacks {
   onSoundToggle: () => void;
   onPhoto: () => void;
   onKitBench: () => void;
+  onFilmRateChange: (fps: StopMotionRate) => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -42,6 +44,7 @@ export class Ui {
   private readonly noseArtButtons: Record<NoseArtChoice, HTMLButtonElement>;
   private readonly soundButton: HTMLButtonElement;
   private readonly kitButton: HTMLButtonElement;
+  private readonly filmRateButtons: Record<StopMotionRate, HTMLButtonElement>;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -101,6 +104,7 @@ export class Ui {
     hintRow('C', 'cutaway');
     hintRow('E', 'exploded');
     hintRow('N', 'nose art');
+    hintRow('F', '12 / 24 fps');
     hintRow('H', 'hardstand: board, take off');
     hintRow('M', 'sound on / off');
     hintRow('P', 'photo: save a still · Esc back');
@@ -137,13 +141,18 @@ export class Ui {
     makeToggleButton(logToggle, 'Record render log', callbacks.onRecordLog);
     this.logStatus = element('div', 'log-status', 'about 40 s, then saves a .json');
     logRow.append(logToggle, this.logStatus);
+    const filmRateToggle = element('div', 'view-toggle');
+    this.filmRateButtons = {
+      12: makeToggleButton(filmRateToggle, '12 fps', () => callbacks.onFilmRateChange(12)),
+      24: makeToggleButton(filmRateToggle, '24 fps', () => callbacks.onFilmRateChange(24)),
+    };
     const hardstandToggle = element('div', 'view-toggle');
     makeToggleButton(hardstandToggle, 'Hardstand · take off', callbacks.onHardstand);
     this.kitButton = makeToggleButton(hardstandToggle, 'Kit box', callbacks.onKitBench);
     const mediaToggle = element('div', 'view-toggle');
     this.soundButton = makeToggleButton(mediaToggle, 'Sound off', callbacks.onSoundToggle);
     makeToggleButton(mediaToggle, 'Photo', callbacks.onPhoto);
-    hints.append(viewToggle, showToggle, noseArtToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
+    hints.append(viewToggle, showToggle, noseArtToggle, filmRateToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'));
@@ -186,6 +195,11 @@ export class Ui {
 
   setNoseArt(choice: NoseArtChoice): void {
     for (const [button, element] of Object.entries(this.noseArtButtons)) element.classList.toggle('is-active', button === choice);
+  }
+
+  setFilmRate(fps: StopMotionRate): void {
+    this.filmRateButtons[12].classList.toggle('is-active', fps === 12);
+    this.filmRateButtons[24].classList.toggle('is-active', fps === 24);
   }
 
   setKitBench(shown: boolean): void {

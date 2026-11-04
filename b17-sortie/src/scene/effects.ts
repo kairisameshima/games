@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { addVirtualLight, glassMaterial, matteMaterial, type VirtualLight } from '../render/studio';
 import { cottonMaterial, cottonTuftGeometry, type CottonMaterial } from '../render/miniature';
 import { PALETTE } from './palette';
-import { STOP_MOTION_FPS } from './stop-motion';
+import { MAX_STOP_MOTION_FPS } from './stop-motion';
 import { handCutFlashTextures } from './textures';
 
 // Flak: an 88 mm burst is a split-second flash, then a black, ragged smoke cluster that hangs where it burst; on the
@@ -186,7 +186,7 @@ export class FlakField {
 // pressed on again at the exhaust. Near the engine the tufts are drawn out thin; further back they fatten and fray.
 
 const CONTRAIL_LIFETIME_SECONDS = 7;
-const CONTRAIL_POINTS = Math.ceil(CONTRAIL_LIFETIME_SECONDS * STOP_MOTION_FPS) + 2;
+const CONTRAIL_POINTS = Math.ceil(CONTRAIL_LIFETIME_SECONDS * MAX_STOP_MOTION_FPS) + 2;
 const CONTRAIL_BIRTH_RADIUS = 0.028;
 const CONTRAIL_SPREAD_PER_SECOND = 0.07;
 /** A tuft stretches to overlap its older neighbour by this much of the gap, so the trail reads as one strand. */

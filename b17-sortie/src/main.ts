@@ -18,7 +18,7 @@ import { Cutaway } from './scene/cutaway';
 import { BombTrain, Contrails, ENGINE_SMOKE_LOOK, FlakField } from './scene/effects';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
-import { STOP_MOTION_FPS, StopMotionClock } from './scene/stop-motion';
+import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
 import { codeLettersDecal, insigniaDecal, loadNoseArt, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, tailMarkingDecal, type NoseArtChoice } from './scene/textures';
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
@@ -44,9 +44,9 @@ const MAX_FRAME_SEC = 0.1;
 const HANDLING = { offset: 0.006, turn: 0.0025 } as const;
 const ADAPTIVE_WINDOW_SECONDS = 1.6;
 /** Drawn frames a second below which quality steps down: the machine is missing exposures. */
-const ADAPTIVE_LOW_FPS = STOP_MOTION_FPS - 1;
-const ADAPTIVE_HIGH_FPS = STOP_MOTION_FPS - 0.5;
-const ADAPTIVE_PROBE_FAIL_FPS = STOP_MOTION_FPS - 1;
+/** Below the film's rate by this much, quality steps down (and a probe up fails); within this much, it may step up. */
+const ADAPTIVE_LOW_MARGIN = 1;
+const ADAPTIVE_HIGH_MARGIN = 0.5;
 const PIXEL_RATIO_STEP = 0.25;
 const VEIL_MS = 200;
 
@@ -537,9 +537,18 @@ function walkToStation(station: CrewStation): void {
 }
 
 const ui = new Ui(uiRoot, {
-  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null),
+  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null), onFilmRateChange: setFilmRate,
 });
 const fpsMeter = new FpsMeter(ui.meterSlot);
+
+/** Shoots the film on twos (12 exposures a second) or on ones (24); adaptive quality re-measures at the new rate. */
+function setFilmRate(fps: StopMotionRate): void {
+  stopMotion.fps = fps;
+  fpsMeter.setTargetFps(fps);
+  ui.setFilmRate(fps);
+  warmupWindows = 2;
+  highWindows = 0;
+}
 ui.setShow('exterior');
 setNoseArt('pinup');
 applyView('lab');
@@ -563,6 +572,8 @@ addEventListener('keydown', (event) => {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
   } else if (event.key === 'n' || event.key === 'N') {
     setNoseArt(noseArt === 'pinup' ? 'card' : 'pinup');
+  } else if (event.key === 'f' || event.key === 'F') {
+    setFilmRate(stopMotion.fps === 12 ? 24 : 12);
   } else if (event.key === 'k' || event.key === 'K') {
     setKitBench(kitTime === null);
   } else if (event.key === 'p' || event.key === 'P') {
@@ -722,6 +733,7 @@ function resize(): void {
 }
 addEventListener('resize', resize);
 resize();
+setFilmRate(12);
 
 // Photo mode: the film stops on the frame, the overlays step aside, and each press of P saves the frame re-rendered at
 // several times the screen's resolution with every quality feature back on.
@@ -826,19 +838,19 @@ function stepAdaptiveQuality(deltaSec: number): void {
   }
   if (probing) {
     probing = false;
-    if (fps < ADAPTIVE_PROBE_FAIL_FPS) {
+    if (fps < stopMotion.fps - ADAPTIVE_LOW_MARGIN) {
       probeWindows = Math.min(ADAPTIVE_PROBE_WINDOWS_MAX, probeWindows * 2);
       lowerQuality();
       return;
     }
     probeWindows = ADAPTIVE_PROBE_WINDOWS;
   }
-  if (fps < ADAPTIVE_LOW_FPS) {
+  if (fps < stopMotion.fps - ADAPTIVE_LOW_MARGIN) {
     highWindows = 0;
     lowerQuality();
     return;
   }
-  highWindows = fps >= ADAPTIVE_HIGH_FPS ? highWindows + 1 : 0;
+  highWindows = fps >= stopMotion.fps - ADAPTIVE_HIGH_MARGIN ? highWindows + 1 : 0;
   if (highWindows >= probeWindows) {
     highWindows = 0;
     probing = raiseQuality();
