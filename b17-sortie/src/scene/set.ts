@@ -445,6 +445,9 @@ const STAND_ROD_RADIUS = 0.035;
 /** Rig marks on a stand: tape band and clamp distances below the joint, and the tape cross on the plinth top. */
 const RIG_TAPE = { band: 0.07, belowJoint: 0.32, clampBelowJoint: 0.17, crossLength: 0.26, cross: new THREE.Vector3(0.62, 0.342, 0.28) } as const;
 
+/** The brass ball joint at the top of a stand's rod, world units. */
+export const STAND_JOINT_RADIUS = 0.075;
+
 /** Gunmetal plinth with an amber edge strip, brass plaque, and a chrome rod up to the model's belly. */
 export function buildDisplayStand(base: THREE.Vector3, plaque: { title: string; subtitle: string } | null, lights: VirtualLight[] | null): DisplayStand {
   const root = new THREE.Group();
@@ -477,7 +480,7 @@ export function buildDisplayStand(base: THREE.Vector3, plaque: { title: string; 
   const rodGeometry = new THREE.CylinderGeometry(STAND_ROD_RADIUS, STAND_ROD_RADIUS, 1, 16);
   rodGeometry.translate(0, 0.5, 0);
   const rod = part(root, rodGeometry, chrome, 0, 0.46, 0);
-  const joint = part(root, new THREE.SphereGeometry(0.075, 16, 12), brass, 0, 0, 0);
+  const joint = part(root, new THREE.SphereGeometry(STAND_JOINT_RADIUS, 16, 12), brass, 0, 0, 0);
   // The animator's rig marks: masking tape wound round the rod below the model, a screw clamp at the joint, and a tape
   // cross on the plinth where the base goes back after each knock.
   const tape = matteMaterial(PALETTE.maskingTape, { roughness: 0.85 });

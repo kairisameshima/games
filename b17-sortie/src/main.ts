@@ -22,7 +22,8 @@ import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
 import { codeLettersDecal, insigniaDecal, loadNoseArt, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, tailMarkingDecal, type NoseArtChoice } from './scene/textures';
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
-import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, type DisplayStand } from './scene/set';
+import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, STAND_JOINT_RADIUS, type DisplayStand } from './scene/set';
+import { hullSectionAt } from './scene/hull';
 import { BOMB_COUNT, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
@@ -183,6 +184,26 @@ function updateWingmanCabins(): void {
     cabin.shown = shown;
     for (const mesh of cabin.fittings) mesh.visible = shown;
   }
+}
+
+/**
+ * Grain-of-wheat bulbs the animator tucks inside the lead along its centreline, lit when the cutaway opens it so each
+ * compartment reads from outside: nose, pilots, bomb bay, radio room, waist and tail, in model space.
+ */
+const CABIN_BULBS = [
+  new THREE.Vector3(9 - 1.8, 0.25, 0), new THREE.Vector3(9 - 4.6, 0.95, 0), new THREE.Vector3(9 - 7.1, 0.35, 0),
+  new THREE.Vector3(9 - 9.6, 0.4, 0), new THREE.Vector3(9 - 13.5, 0.2, 0), new THREE.Vector3(9 - 19.8, 0.15, 0),
+];
+const CABIN_BULB = { colour: '#ffe0b0', radius: 1.3, intensity: 0.7 } as const;
+const cabinBulbs = CABIN_BULBS.map(() => addVirtualLight(new THREE.Vector3(), CABIN_BULB.colour, CABIN_BULB.radius, 0));
+
+/** Moves the bulbs with the lead and brings them up as the cutaway opens. */
+function updateCabinBulbs(): void {
+  const lit = CABIN_BULB.intensity * THREE.MathUtils.smoothstep(cutaway.amount, 0.3, 1);
+  cabinBulbs.forEach((bulb, index) => {
+    bulb.intensity = lit;
+    if (lit > 0) formation[0].aircraft.root.localToWorld(bulb.position.copy(CABIN_BULBS[index]));
+  });
 }
 
 function updateLeadCabinShadows(): void {
@@ -628,7 +649,12 @@ const renderLog = new RenderLog(renderer, {
 
 const scratchPosition = new THREE.Vector3();
 const scratchQuaternion = new THREE.Quaternion();
-const standMount = new THREE.Vector3(9.0 - STAND_MOUNT_D, -1.22, 0);
+/**
+ * The rod's ball joint is centred this far below the belly skin, in model metres, so the ball stays outside the hull
+ * and never rises through the waist floor above it.
+ */
+const STAND_JOINT_DROP = STAND_JOINT_RADIUS / MODEL_SCALE - 0.02;
+const standMount = new THREE.Vector3(9.0 - STAND_MOUNT_D, hullSectionAt(STAND_MOUNT_D).bottom - STAND_JOINT_DROP, 0);
 
 /** Where No. 3's feathered propeller stops, and how far its blades turn about their length to stand edge-on. */
 const FEATHERED_PROPELLER = { restAngle: 0.4, bladeTurn: 1.25 } as const;
@@ -907,6 +933,7 @@ function exposeFrame(exposureSec: number): void {
   formation[0].holder.updateMatrixWorld(true);
   cutaway.update(exposureSec);
   updateLeadCabinShadows();
+  updateCabinBulbs();
   // No trails while the lead is on the ground or climbing out; the box forms up behind it.
   contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null);
   const damage = formation[0].aircraft.battleDamage;

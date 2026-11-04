@@ -92,42 +92,68 @@ export function addSkinAndStructure(parent: THREE.Object3D, materials: InteriorM
 
 /** Plywood floor panels, each as wide as the hull allows at its height. */
 /** A round hole in a floor, centred on the fuselage centreline: the ball turret's well. */
-export interface FloorOpening { d: number; radius: number }
+/** A hole through a floor: a round well (the ball turret's) or a rectangular hatchway (the crawlway's exit). */
+export type FloorOpening = { shape: 'round'; d: number; radius: number } | { shape: 'rectangle'; start: number; end: number; halfWidth: number };
 
-/** Floor strips round the hole are this long fore and aft, short enough that the hole's edge reads as round. */
+/** Floor strips round a round hole are this long fore and aft, short enough that the hole's edge reads as round. */
 const OPENING_STRIP = 0.06;
+/** Seam left between neighbouring floor panels. */
+const PANEL_SEAM = 0.008;
 
+/** Half-width of the hole across the floor between two stations, or 0 where the strip misses it. */
+function openingHalfWidth(opening: FloorOpening | null, from: number, to: number): number {
+  if (!opening) return 0;
+  if (opening.shape === 'rectangle') return from < opening.end - 1e-3 && to > opening.start + 1e-3 ? opening.halfWidth : 0;
+  const nearest = Math.max(0, Math.abs((from + to) / 2 - opening.d) - (to - from) / 2);
+  return nearest < opening.radius ? Math.sqrt(opening.radius ** 2 - nearest ** 2) : 0;
+}
+
+/** Where the next panel after `d` ends: a whole panel, a short strip by a round hole, or cut at a hatchway's edge. */
+function panelEnd(d: number, end: number, opening: FloorOpening | null): number {
+  let next = d + FLOOR_SEGMENT;
+  if (opening?.shape === 'round') {
+    const near = (station: number) => Math.abs(station - opening.d) < opening.radius;
+    if (near(d) || near(next)) next = d + OPENING_STRIP;
+  } else if (opening?.shape === 'rectangle') {
+    for (const edge of [opening.start, opening.end]) if (edge > d + 1e-3 && edge < next) next = edge;
+  }
+  return Math.min(next, end);
+}
+
+/**
+ * Plywood floor panels from `start` to `end`, each laid from the floor height at its forward end to that at its aft
+ * end, so a floor that climbs with the hull (the waist's, the tail's) is one even slope with seams, not a staircase.
+ */
 export function addFloor(
   parent: THREE.Object3D, materials: InteriorMaterials, start: number, end: number, heightAt: (d: number) => number,
   maxHalfWidth = 2, opening: FloorOpening | null = null,
 ): void {
-  const inOpening = (d: number) => opening !== null && Math.abs(d - opening.d) < opening.radius;
   for (let d = start; d < end - 1e-3;) {
-    const step = inOpening(d) || inOpening(d + FLOOR_SEGMENT) ? OPENING_STRIP : FLOOR_SEGMENT;
-    const length = Math.min(step, end - d);
+    const next = panelEnd(d, end, opening);
+    const length = next - d;
     const middle = d + length / 2;
-    const y = heightAt(middle);
+    const fore = heightAt(d);
+    const aft = heightAt(next);
+    const y = (fore + aft) / 2;
     // Measured at the panel's underside too: low in the tail the hull narrows fast, and a width taken at the top
     // surface alone would push the panel's lower corners out through the skin.
-    const bottom = y - FLOOR_THICKNESS;
     const halfWidth = Math.min(
-      hullHalfWidthAtHeight(d, y), hullHalfWidthAtHeight(d + length, y),
-      hullHalfWidthAtHeight(d, bottom), hullHalfWidthAtHeight(d + length, bottom), maxHalfWidth,
+      hullHalfWidthAtHeight(d, fore), hullHalfWidthAtHeight(next, aft),
+      hullHalfWidthAtHeight(d, fore - FLOOR_THICKNESS), hullHalfWidthAtHeight(next, aft - FLOOR_THICKNESS), maxHalfWidth,
     ) - 0.03;
-    d += length;
+    const holeHalfWidth = openingHalfWidth(opening, d, next);
+    d = next;
     if (halfWidth < 0.12) continue;
-    // Where the strip crosses the hole, the floor runs only outboard of it.
-    const nearest = opening ? Math.max(0, Math.abs(middle - opening.d) - length / 2) : 0;
-    const holeHalfWidth = opening && nearest < opening.radius ? Math.sqrt(opening.radius ** 2 - nearest ** 2) : 0;
-    if (holeHalfWidth === 0) {
-      const panel = part(parent, roundedBox(length - 0.008, FLOOR_THICKNESS, halfWidth * 2, 0.008), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, 0);
-      panel.castShadow = true;
-      continue;
-    }
-    const width = halfWidth - holeHalfWidth;
-    if (width < 0.03) continue;
-    for (const side of [-1, 1]) {
-      const panel = part(parent, roundedBox(length - 0.004, FLOOR_THICKNESS, width, 0.006), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, side * (holeHalfWidth + width / 2));
+    // Model x runs forward, so a floor rising aft tilts its forward end down: a turn about z by the slope.
+    const slope = Math.atan2(fore - aft, length);
+    const pieces = holeHalfWidth === 0
+      ? [{ z: 0, width: halfWidth * 2 }]
+      : [-1, 1].map((side) => ({ z: side * (holeHalfWidth + (halfWidth - holeHalfWidth) / 2), width: halfWidth - holeHalfWidth }));
+    for (const piece of pieces) {
+      if (piece.width < 0.03) continue;
+      const panelLength = Math.hypot(length, fore - aft) - PANEL_SEAM;
+      const panel = part(parent, roundedBox(panelLength, FLOOR_THICKNESS, piece.width, 0.006), materials.plywood, toX(middle), y - FLOOR_THICKNESS / 2, piece.z);
+      panel.rotation.z = slope;
       panel.castShadow = true;
     }
   }
@@ -139,12 +165,28 @@ export const tailFloorHeight = (d: number) => hullSectionAt(d).bottom + TAIL_FLO
 export function addFloors(parent: THREE.Object3D, materials: InteriorMaterials): void {
   addFloor(parent, materials, FLOORS.nose.start, FLOORS.nose.end, () => FLOORS.nose.y);
   addCrawlway(parent, materials);
-  addFloor(parent, materials, FLOORS.cockpit.start, FLOORS.cockpit.end, () => FLOORS.cockpit.y, 2, CRAWLWAY.exit);
+  addFloor(parent, materials, FLOORS.cockpit.start, FLOORS.cockpit.end, () => FLOORS.cockpit.y, 2, { shape: 'rectangle', ...CRAWLWAY.exit });
+  addHatchwayTrim(parent, materials.aluminium, CRAWLWAY.exit, FLOORS.cockpit.y);
   addFloor(parent, materials, FLOORS.flightDeck.start, FLOORS.flightDeck.end, () => FLOORS.flightDeck.y);
   addFloor(parent, materials, FLOORS.radioRoom.start, FLOORS.radioRoom.end, () => FLOORS.radioRoom.y);
-  addFloor(parent, materials, BULKHEADS.radioToWaist, BULKHEADS.waistToTail, waistFloorHeight, 2, { d: STATIONS.ballTurret.d, radius: BALL_WELL_RADIUS });
+  addFloor(parent, materials, BULKHEADS.radioToWaist, BULKHEADS.waistToTail, waistFloorHeight, 2, { shape: 'round', d: STATIONS.ballTurret.d, radius: BALL_WELL_RADIUS });
   addFloor(parent, materials, BULKHEADS.waistToTail, 21.75, tailFloorHeight, 0.32);
 }
+
+/**
+ * Aluminium angle round a hatchway in a floor: a lip on each side and across its forward end, standing just proud of
+ * the plywood, so the cut edges are capped as a real floor's are. The aft side is the next floor's edge.
+ */
+function addHatchwayTrim(parent: THREE.Object3D, material: THREE.Material, hatch: { start: number; end: number; halfWidth: number }, floorY: number): void {
+  const length = hatch.end - hatch.start;
+  for (const side of [-1, 1]) {
+    part(parent, new THREE.BoxGeometry(length, HATCH_TRIM.height, HATCH_TRIM.width), material, toX((hatch.start + hatch.end) / 2), floorY - FLOOR_THICKNESS / 2 + HATCH_TRIM.proud, side * (hatch.halfWidth + HATCH_TRIM.width / 2));
+  }
+  part(parent, new THREE.BoxGeometry(HATCH_TRIM.width, HATCH_TRIM.height, hatch.halfWidth * 2 + HATCH_TRIM.width * 2), material, toX(hatch.start) + HATCH_TRIM.width / 2, floorY - FLOOR_THICKNESS / 2 + HATCH_TRIM.proud, 0);
+}
+
+/** The hatchway trim's angle: face width on the floor, its depth, and how far it stands above the floor's middle. */
+const HATCH_TRIM = { width: 0.025, height: FLOOR_THICKNESS + 0.01, proud: 0.005 } as const;
 
 /** Half-width of the crawlway's floor, and where its side bearers stand. */
 const CRAWLWAY_HALF_WIDTH = 0.32;

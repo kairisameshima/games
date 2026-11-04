@@ -9,6 +9,7 @@ interface RouteWaypoint { d: number; eyeY: number; z: number }
 /** Eye height over a floor: crouched in the crawlways and doors, standing where the cabin allows. */
 const CROUCH = 0.3;
 const STAND = 1.0;
+const EXIT_MIDDLE = (CRAWLWAY.exit.start + CRAWLWAY.exit.end) / 2;
 
 /**
  * The way the crew moved from the bombardier's seat to the tail gunner's knee pads: aft past the navigator, through
@@ -21,9 +22,9 @@ const CREW_ROUTE: RouteWaypoint[] = [
   { d: 2.4, eyeY: FLOORS.nose.y + 0.75, z: 0.3 },
   { d: BULKHEADS.noseToCockpit - 0.1, eyeY: FLOORS.crawlway.y + CROUCH, z: 0.05 },
   { d: BULKHEADS.noseToCockpit + 0.15, eyeY: FLOORS.crawlway.y + CROUCH, z: 0 },
-  { d: CRAWLWAY.exit.d - 0.15, eyeY: FLOORS.crawlway.y + CROUCH, z: 0 },
-  { d: CRAWLWAY.exit.d, eyeY: FLOORS.cockpit.y + 0.2, z: 0 },
-  { d: CRAWLWAY.exit.d + 0.1, eyeY: FLOORS.cockpit.y + STAND - 0.05, z: 0 },
+  { d: EXIT_MIDDLE - 0.15, eyeY: FLOORS.crawlway.y + CROUCH, z: 0 },
+  { d: EXIT_MIDDLE, eyeY: FLOORS.cockpit.y + 0.2, z: 0 },
+  { d: EXIT_MIDDLE + 0.1, eyeY: FLOORS.cockpit.y + STAND - 0.05, z: 0 },
   { d: FLOORS.flightDeck.start, eyeY: FLOORS.flightDeck.y + STAND, z: 0.45 },
   { d: BULKHEADS.frontSpar - 0.3, eyeY: FLOORS.flightDeck.y + STAND, z: 0.45 },
   { d: BULKHEADS.frontSpar - 0.08, eyeY: FLOORS.flightDeck.y + 0.8, z: 0 },

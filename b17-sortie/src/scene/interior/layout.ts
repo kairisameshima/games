@@ -52,8 +52,11 @@ export const TAIL_FLOOR_CLEARANCE = 0.08;
  * covered in flight by a hinged metal guard, with a red emergency release that pulls the hinge pins.
  */
 export const CRAWLWAY = {
-  /** Round-cornered opening in the pilots' floor, centred behind the seats' armour, clear of the turret's platform. */
-  exit: { d: 4.42, radius: 0.31 },
+  /**
+   * The hatchway in the pilots' floor behind the seats' armour, out to the turret platform's floor at its aft end, and
+   * inside the crawlway's bearers.
+   */
+  exit: { start: 4.12, end: 4.75, halfWidth: 0.27 },
   /** The step up out of the crawlway, at the opening's aft edge. */
   step: { d: 4.58, topY: -0.34, width: 0.4 },
   /** Forward entrance hatch (along the fuselage, and across from the centreline to port). */

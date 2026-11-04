@@ -641,7 +641,9 @@ function tailHousingSections(tailGunPosition: TailGunPosition): NacelleProfile[]
   }
   return stations.map((d, index) => {
     const hull = hullSectionAt(d);
-    return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(hull.halfWidth + 0.015, 0.4) };
+    // The first section is tucked just inside the skin, so the cab's open forward end never shows from outside.
+    const halfWidth = index === 0 ? hull.halfWidth - 0.01 : hull.halfWidth + 0.015;
+    return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(halfWidth, 0.4) };
   });
 }
 
@@ -665,7 +667,8 @@ function buildTailHousingGeometry(tailGunPosition: TailGunPosition): THREE.Buffe
   const sections = tailHousingSections(tailGunPosition);
   const rings = sections.map((section) =>
     ellipseRing(new THREE.Vector3(toX(section.d), 0, 0), section.top, section.bottom, section.halfWidth, HULL_RING_POINTS, TAIL_HOUSING_EXPONENT[tailGunPosition]));
-  return loftGeometry(rings, sections.map((section) => section.d / FUSELAGE_LENGTH), true, true);
+  // Open forward, where the gunner crawls in from the fuselage; closed aft.
+  return loftGeometry(rings, sections.map((section) => section.d / FUSELAGE_LENGTH), false, true);
 }
 
 interface NacelleProfile { d: number; top: number; bottom: number; halfWidth: number }
