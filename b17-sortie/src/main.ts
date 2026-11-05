@@ -25,7 +25,7 @@ import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, STAND_JOINT_RADIUS, type DisplayStand } from './scene/set';
 import { hullSectionAt, toX } from './scene/hull';
-import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
+import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, STRIKE_PHOTO, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ShowMode, type ViewMode } from './ui/ui';
@@ -599,13 +599,20 @@ function stepLanding(seconds: number): void {
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
   holdStoppedPropellers(frame, NO_3_ENGINE);
+  setCrewAboard(frame.crewAboard);
   frame.engines.forEach((engine, index) => { landingEngines[index] = engine; });
   leadEnginesRunning = frame.engines.filter((engine) => engine === 'running').length;
+}
+
+/** Shows or hides the men inside the lead (the engineer stays hidden in the gunner's view, where the camera is). */
+function setCrewAboard(aboard: boolean): void {
+  for (const man of formation[0].aircraft.crew) man.mesh.visible = aboard && !(gunnerView && man.mesh === engineerMesh);
 }
 
 /** Back in the air from the hardstand: the lead on its stand again, unless the prologue has it. */
 function endLanding(): void {
   landingShown = false;
+  setCrewAboard(true);
   landingCameraShot = null;
   if (prologueTime !== null) return;
   hardstand.setShown(false);
@@ -678,6 +685,7 @@ function resetEffects(): void {
   flak.reset();
   puffs.reset();
   bombs.reset();
+  strikePoints.length = 0;
   chaff.reset();
   gunnery.resetTracers();
   for (const ship of formation) ship.bombsDropped = 0;
@@ -728,6 +736,83 @@ let gunnerView = false;
 /** Hidden in the gunner's view: the camera is where his head is. */
 const engineerMesh = formation[0].aircraft.crew.find(({ station }) => station.member.role === 'Flight engineer')?.mesh ?? null;
 const gunnerAhead = new THREE.Vector3();
+
+/** Where this sortie's bombs have burst, for the strike photograph to look down on. */
+const strikePoints: THREE.Vector3[] = [];
+/** The strike photograph's print size, pixels; the K-21's frame is 4:3 here. */
+const STRIKE_PHOTO_SIZE = { width: 640, height: 480 } as const;
+const STRIKE_PHOTO_QUALITY = 0.85;
+/**
+ * Made once: a new framebuffer on the frame the photograph is taken would stall it. Linear, like the film's own
+ * targets, so every material draws into it with the shader it already has; the print is gamma-encoded on the way out.
+ */
+const strikePhotoTarget = new THREE.WebGLRenderTarget(STRIKE_PHOTO_SIZE.width, STRIKE_PHOTO_SIZE.height);
+/** Linear 0–255 to sRGB 0–255, for the print. */
+const LINEAR_TO_SRGB = Uint8Array.from({ length: 256 }, (_, value) => {
+  const linear = value / 255;
+  const encoded = linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055;
+  return Math.round(encoded * 255);
+});
+/** The K-21 looks straight down from just under the lead's belly, with this field of view. */
+const STRIKE_CAMERA = { fov: 62, belowLead: 0.4, ownBombsWithin: 3 } as const;
+
+/**
+ * Takes the strike photograph: a still looking straight down from the lead onto where the bombs have burst, rendered
+ * apart from the film's own frame and handed to the UI as a print.
+ */
+function takeStrikePhoto(): void {
+  // The lead's own bombs: those that burst under it, not the wingmen's.
+  const lead = formation[0].holder.position;
+  const own = strikePoints.filter((point) => Math.hypot(point.x - lead.x, point.z - lead.z) < STRIKE_CAMERA.ownBombsWithin);
+  if (own.length === 0) return;
+  const centre = own.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(own.length);
+  const photoCamera = new THREE.PerspectiveCamera(STRIKE_CAMERA.fov, STRIKE_PHOTO_SIZE.width / STRIKE_PHOTO_SIZE.height, 0.1, 50);
+  photoCamera.position.set(centre.x, formation[0].holder.position.y - STRIKE_CAMERA.belowLead, centre.z);
+  // Nose of the ship toward the top of the print.
+  photoCamera.up.set(1, 0, 0);
+  photoCamera.lookAt(centre);
+  const previous = renderer.getRenderTarget();
+  // The film's frame has just drawn the shadows; the photograph uses them as they are.
+  const shadowsDue = renderer.shadowMap.needsUpdate;
+  renderer.shadowMap.needsUpdate = false;
+  // Taken through a gap in the undercast, from the ship itself: the cloud deck and the lead's stand are lifted out for
+  // the photograph, so the bursts show and no rig does.
+  const leadStand = formation[0].stand.root;
+  const standShown = leadStand.visible;
+  set.clouds.visible = false;
+  leadStand.visible = false;
+  renderer.setRenderTarget(strikePhotoTarget);
+  renderer.render(scene, photoCamera);
+  set.clouds.visible = true;
+  leadStand.visible = standShown;
+  renderer.shadowMap.needsUpdate = shadowsDue;
+  const pixels = new Uint8Array(STRIKE_PHOTO_SIZE.width * STRIKE_PHOTO_SIZE.height * 4);
+  renderer.readRenderTargetPixels(strikePhotoTarget, 0, 0, STRIKE_PHOTO_SIZE.width, STRIKE_PHOTO_SIZE.height, pixels);
+  renderer.setRenderTarget(previous);
+  const canvas = document.createElement('canvas');
+  canvas.width = STRIKE_PHOTO_SIZE.width;
+  canvas.height = STRIKE_PHOTO_SIZE.height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('2D canvas context unavailable');
+  const image = context.createImageData(STRIKE_PHOTO_SIZE.width, STRIKE_PHOTO_SIZE.height);
+  // GL rows run bottom up.
+  const row = STRIKE_PHOTO_SIZE.width * 4;
+  for (let y = 0; y < STRIKE_PHOTO_SIZE.height; y++) {
+    const from = y * row;
+    const to = (STRIKE_PHOTO_SIZE.height - 1 - y) * row;
+    for (let index = 0; index < row; index += 4) {
+      image.data[to + index] = LINEAR_TO_SRGB[pixels[from + index]];
+      image.data[to + index + 1] = LINEAR_TO_SRGB[pixels[from + index + 1]];
+      image.data[to + index + 2] = LINEAR_TO_SRGB[pixels[from + index + 2]];
+      image.data[to + index + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  // Encoded off the frame's time: the print is up a moment later.
+  canvas.toBlob((blob) => {
+    if (blob) ui.setStrikePhoto(URL.createObjectURL(blob));
+  }, 'image/jpeg', STRIKE_PHOTO_QUALITY);
+}
 
 /** How near the nearest fighter is to the camera and how fast it is closing, or null when none is heard. */
 function fighterHeard(deltaSec: number): { distance: number; closing: number } | null {
@@ -1256,6 +1341,8 @@ function exposeFrame(exposureSec: number): void {
   chaff.update(deltaSec, AIR_DRIFT_SPEED, chaffChutesWorld, leadState.chaffing, stopMotion.random);
   const bombBursts = bombs.takeImpacts();
   for (const impact of bombBursts) puffs.emit('bombBurst', impact, false, stopMotion.random);
+  strikePoints.push(...bombBursts);
+  if (previousTime < STRIKE_PHOTO.at && sortieTime >= STRIKE_PHOTO.at) takeStrikePhoto();
   const fighterSmoking = fighters.smoke(fighterSmokeEmitter[0]);
   fighterSmoke.update(deltaSec, AIR_DRIFT_SPEED, fighterSmokeEmitter, stopMotion.random, fighterSmoking);
   const crash = fighters.takeCrash();

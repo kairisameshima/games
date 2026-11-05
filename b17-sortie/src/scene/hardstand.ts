@@ -4,7 +4,7 @@ import type { B17 } from './b17';
 import { figureMesh, type CrewMember, type Outfit } from './crew/figure';
 import { meshFigureInWorker } from './crew/figure-pool';
 import type { HandTarget, Pose, Side } from './crew/skeleton';
-import { FACING, plantedFoot, pose } from './interior/poses';
+import { FACING, knobGrip, palmDown, plantedFoot, pose } from './interior/poses';
 import { CircuitPath } from './circuit';
 
 /**
@@ -52,9 +52,10 @@ const ROTATION_DISTANCE = 1;
 const LANDING_CIRCUIT = { turnX: 24, touchdownX: 10, turnEntryDrop: 0.3, finalHeight: 1.2 } as const;
 /**
  * Seconds of the landing: it leaves its stand, the wheels come down, it touches down; the roll-out, the swing round on
- * the pan and the engines being cut one by one (1, 2, 4: No. 3 is feathered) follow at the pace the touchdown speed sets.
+ * the pan, the engines being cut one by one (1, 2, 4: No. 3 is feathered) and the crew climbing out follow at the pace
+ * the touchdown speed sets.
  */
-const LANDING_BEATS = { leave: 0.5, gearDown: [3, 5.5], touchdown: 9, swingDelay: 0.4, swingSeconds: 2, cutDelay: 0.8, cutInterval: 0.6 } as const;
+const LANDING_BEATS = { leave: 0.5, gearDown: [3, 5.5], touchdown: 9, swingDelay: 0.4, swingSeconds: 2, cutDelay: 0.8, cutInterval: 0.6, deplaneDelay: 0.5, chiefDelay: 0.5 } as const;
 /** World units it takes to come up to speed leaving its stand, from a standstill. */
 const APPROACH_EASE_DISTANCE = 3;
 /** Over this much of the final before touchdown, world units, the nose comes up from the glide into the three-point attitude. */
@@ -65,6 +66,8 @@ const GLIDE_PITCH_FRACTION = 0.5;
 const BANK_RAMP = 4;
 /** No. 3, by engine number less one: feathered over the target, so never cut on the pan. */
 const FEATHERED_ENGINE = 2;
+/** Engines still running on the pan, cut one by one. */
+const ENGINES_CUT = 3;
 
 /** Most nose-up in the climb; bank per radian of turn per world unit flown, and the most it banks. */
 const CLIMB_PITCH = 0.12;
@@ -123,6 +126,8 @@ export interface HardstandFrame {
 export class Hardstand {
   readonly root = new THREE.Group();
   private readonly rigs: BoarderRig[];
+  /** The crew chief on his work stand at the tally, there from the swing round on the pan. */
+  private readonly crewChief: THREE.Group;
   private readonly takeoff: CircuitPath;
   /** How far along the take-off it lifts off: where it is at the lift-off beat. */
   private readonly liftOffAt: number;
@@ -185,6 +190,13 @@ export class Hardstand {
     const onGround = new THREE.Matrix4().makeRotationZ(ground.pitch).setPosition(0, ground.height, 0);
     const hatch = entries.forwardHatch.clone().applyMatrix4(onGround);
     const door = entries.mainDoor.clone().applyMatrix4(onGround);
+    // He paints the new bomb where it goes on the tally, so the stand is set by the bomb's decal.
+    const newBomb = lead.nextMissionBomb;
+    if (!newBomb) throw new Error('The hardstand\'s ship has no mission tally to add to');
+    newBomb.geometry.computeBoundingBox();
+    const bombOnSkin = newBomb.geometry.boundingBox?.getCenter(new THREE.Vector3());
+    if (!bombOnSkin) throw new Error('The mission tally\'s new bomb has no geometry');
+    this.crewChief = buildCrewChief(this.root, bombOnSkin.applyMatrix4(onGround));
     this.rigs = BOARDERS.map((boarder) => {
       const forwardHatch = boarder.entry === 'forwardHatch';
       // Under the hatch he faces forward and reaches up into it; at the door he faces it from starboard.
@@ -239,10 +251,8 @@ export class Hardstand {
    * The boarding men are not out for it.
    */
   landing(time: number): HardstandFrame {
-    for (const rig of this.rigs) for (const mesh of Object.values(rig.meshes)) mesh.visible = false;
     const frame = this.frame;
     const { ground } = this.lead.landingGear;
-    frame.crewAboard = true;
     frame.gearExtension = THREE.MathUtils.smoothstep(time, LANDING_BEATS.gearDown[0], LANDING_BEATS.gearDown[1]);
     const swingStart = this.rolledOutSeconds + LANDING_BEATS.swingDelay;
     const swingEnd = swingStart + LANDING_BEATS.swingSeconds;
@@ -252,6 +262,12 @@ export class Hardstand {
       frame.engines[engine] = cut ? 'cold' : 'running';
     });
     frame.finished = time >= swingEnd;
+    // Once the last engine is cut the crew climb out and walk back across the card.
+    const lastCut = swingEnd + LANDING_BEATS.cutDelay + (ENGINES_CUT - 1) * LANDING_BEATS.cutInterval;
+    const deplaneStart = lastCut + LANDING_BEATS.deplaneDelay;
+    frame.crewAboard = time < deplaneStart;
+    this.crewChief.visible = time >= swingEnd + LANDING_BEATS.chiefDelay;
+    for (const rig of this.rigs) this.poseDeplaning(rig, time - deplaneStart - rig.boarder.delay);
     const speed = this.landingSpeed;
     const path = this.landingPath;
     if (time < LANDING_BEATS.touchdown) {
@@ -273,36 +289,137 @@ export class Hardstand {
     const rolled = speed * rolling - (speed * speed * rolling * rolling) / (4 * LANDING_CIRCUIT.touchdownX);
     frame.position.set(LANDING_CIRCUIT.touchdownX - rolled, 0, 0).add(this.groundOrigin);
     const swung = THREE.MathUtils.smoothstep(time, swingStart, swingEnd);
-    frame.rotation.set(0, -Math.PI + Math.PI * 2 * swung, ground.pitch);
+    frame.rotation.set(0, -Math.PI + Math.PI * swung, ground.pitch);
     return frame;
   }
 
   /** Hides the boarding men and the card once the ship has gone. */
   setShown(shown: boolean): void {
     this.root.visible = shown;
+    // The crew chief is only out after a mission; the landing shows him.
+    if (!shown) this.crewChief.visible = false;
   }
 
+  /** Walking out from where he set off to the ship and climbing in, `local` seconds after he sets off. */
   private poseBoarder(rig: BoarderRig, time: number): void {
     const local = time - rig.boarder.delay;
-    const distance = rig.boarder.start.distanceTo(rig.entrySpot);
-    const walkSeconds = Math.ceil(distance / STRIDE_LENGTH) * STRIDE_SECONDS;
+    const walkSeconds = this.walkSeconds(rig);
     for (const mesh of Object.values(rig.meshes)) mesh.visible = false;
     if (local > walkSeconds + ENTRY_SECONDS) return;
     if (local >= walkSeconds) {
-      rig.group.position.set(rig.entrySpot.x, 0, rig.entrySpot.y);
-      rig.group.rotation.y = rig.entryYaw;
-      rig.meshes.entry.visible = true;
+      this.showEntry(rig);
       return;
     }
-    // Stride by stride: each replacement figure is held while he covers one step; before setting off he waits.
-    const stride = Math.floor(Math.max(local, 0) / STRIDE_SECONDS);
+    this.showStride(rig, rig.boarder.start, rig.entrySpot, Math.max(local, 0), walkSeconds);
+  }
+
+  /** The reverse after the mission: climbing out, then walking back the way he came and off the card. */
+  private poseDeplaning(rig: BoarderRig, local: number): void {
+    const walkSeconds = this.walkSeconds(rig);
+    for (const mesh of Object.values(rig.meshes)) mesh.visible = false;
+    if (local < 0 || local > ENTRY_SECONDS + walkSeconds) return;
+    if (local < ENTRY_SECONDS) {
+      this.showEntry(rig);
+      return;
+    }
+    this.showStride(rig, rig.entrySpot, rig.boarder.start, local - ENTRY_SECONDS, walkSeconds);
+  }
+
+  private walkSeconds(rig: BoarderRig): number {
+    return Math.ceil(rig.boarder.start.distanceTo(rig.entrySpot) / STRIDE_LENGTH) * STRIDE_SECONDS;
+  }
+
+  private showEntry(rig: BoarderRig): void {
+    rig.group.position.set(rig.entrySpot.x, 0, rig.entrySpot.y);
+    rig.group.rotation.y = rig.entryYaw;
+    rig.meshes.entry.visible = true;
+  }
+
+  /** Stride by stride from `from` to `to`: each replacement figure is held while he covers one step. */
+  private showStride(rig: BoarderRig, from: THREE.Vector2, to: THREE.Vector2, walked: number, walkSeconds: number): void {
+    const distance = from.distanceTo(to);
+    const stride = Math.floor(walked / STRIDE_SECONDS);
     const covered = Math.min((stride * STRIDE_SECONDS / walkSeconds) * distance, distance);
-    const at = rig.boarder.start.clone().lerp(rig.entrySpot, covered / distance);
-    const direction = rig.entrySpot.clone().sub(rig.boarder.start);
+    const at = from.clone().lerp(to, covered / distance);
+    const direction = to.clone().sub(from);
     rig.group.position.set(at.x, 0, at.y);
     rig.group.rotation.y = Math.atan2(-direction.y, direction.x);
     (stride % 2 === 0 ? rig.meshes.strideLeft : rig.meshes.strideRight).visible = true;
   }
+}
+
+/**
+ * The crew chief's work stand off the port side under the mission tally: a platform at the height his brush hand needs,
+ * `brushReach` below the tally, standing `offSkin` out from the skin, with legs and a rail.
+ */
+/** His hand is this far off the skin: the brush's length. */
+const BRUSH_LENGTH = 0.18;
+const WORK_STAND = { brushReach: 1.7, offSkin: 0.55, platform: [0.7, 0.05, 0.55] as [number, number, number], leg: 0.03, rail: 0.02 } as const;
+
+/**
+ * The crew chief at the tally after the mission, on his work stand, brush to the skin at `skin` (where the new bomb
+ * goes, in the card's frame) and his other hand on the rail; a yellow paint can by his feet.
+ */
+function buildCrewChief(root: THREE.Object3D, skin: THREE.Vector3): THREE.Group {
+  const group = new THREE.Group();
+  group.visible = false;
+  const platformY = skin.y - WORK_STAND.brushReach;
+  const standZ = skin.z - WORK_STAND.offSkin;
+  const steel = matteMaterial('#5d6150', { roughness: 0.7 });
+  const [width, thickness, depth] = WORK_STAND.platform;
+  const platform = new THREE.Mesh(new THREE.BoxGeometry(width, thickness, depth), steel);
+  platform.position.set(skin.x, platformY - thickness / 2, standZ);
+  group.add(platform);
+  for (const [dx, dz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(WORK_STAND.leg, WORK_STAND.leg, platformY, 6), steel);
+    leg.position.set(skin.x + (dx * width) / 2.2, platformY / 2, standZ + (dz * depth) / 2.2);
+    group.add(leg);
+  }
+  // The rail along the stand's outer edge, away from the ship.
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(WORK_STAND.rail, WORK_STAND.rail, width, 6), steel);
+  rail.rotation.z = Math.PI / 2;
+  rail.position.set(skin.x, platformY + 1, standZ - depth / 2);
+  group.add(rail);
+  for (const dx of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(WORK_STAND.rail, WORK_STAND.rail, 1, 6), steel);
+    post.position.set(skin.x + (dx * width) / 2, platformY + 0.5, standZ - depth / 2);
+    group.add(post);
+  }
+  const can = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 12), matteMaterial('#d9a62b', { roughness: 0.5 }));
+  can.position.set(skin.x + 0.22, platformY + 0.06, standZ + 0.12);
+  group.add(can);
+
+  // Facing the ship: his figure's forward (+x) turned onto +z. The brush hand is at the skin, a little forward of him.
+  const facing = FACING.starboard;
+  const brush = new THREE.Vector3(WORK_STAND.offSkin - BRUSH_LENGTH, WORK_STAND.brushReach, 0);
+  const member: CrewMember = {
+    role: 'Crew chief', outfit: GROUND_OUTFIT, regulator: null, faceSeed: 31,
+    pose: pose({
+      pelvis: new THREE.Vector3(0, 0.95, 0), yaw: FACING.forward, spineBend: 0.08, headPitch: -0.25,
+      hands: {
+        right: knobGrip(brush, 'right', FACING.forward, new THREE.Vector3(1, 0, 0), 0.75),
+        left: palmDown(new THREE.Vector3(-0.2, 1, -0.3), 'left', FACING.forward),
+      },
+      feet: { left: plantedFoot(new THREE.Vector3(0, 0.075, -0.12), FACING.forward), right: plantedFoot(new THREE.Vector3(0.06, 0.075, 0.12), FACING.forward) },
+    }),
+  };
+  const figure = figureMesh(member, 'high', new THREE.BufferGeometry());
+  void meshFigureInWorker(member, 'high').then((geometry) => {
+    figure.geometry.dispose();
+    figure.geometry = geometry;
+  });
+  const holder = new THREE.Group();
+  // The brush, from his hand to the skin.
+  const brushStick = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.012, BRUSH_LENGTH, 8), matteMaterial('#7a4f2a', { roughness: 0.6 }));
+  brushStick.rotation.z = -Math.PI / 2;
+  brushStick.position.set(WORK_STAND.offSkin - BRUSH_LENGTH / 2, WORK_STAND.brushReach, 0);
+  holder.add(brushStick);
+  holder.position.set(skin.x, platformY, standZ);
+  holder.rotation.y = facing;
+  holder.add(figure);
+  group.add(holder);
+  root.add(group);
+  return group;
 }
 
 /** The hardstand card: a concrete pan and the taxiway out of it, painted flat on board. */

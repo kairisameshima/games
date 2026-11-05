@@ -49,6 +49,11 @@ const DOORS_CLOSE = [49, 51.5] as const;
 const LANDING = { start: 72, down: 81 } as const;
 /** When chaff goes down the chute: through the flak, from the IP to bombs away. */
 const CHAFF = { from: 28, to: 45 } as const;
+/**
+ * The strike photograph: the K-21 in the lead's bomb bay takes it as the bombs burst, and it is shown, printed, for a
+ * few seconds.
+ */
+export const STRIKE_PHOTO = { at: 47.7, shownFor: 6 } as const;
 /** When the crew chief has the new bomb on the tally. */
 const TALLY_ADDED_AT = 89.5;
 const RALLY_TURN = [49.5, 57.5] as const;
@@ -91,6 +96,8 @@ export interface SortieState {
   tallyAdded: boolean;
   /** The radio operator is throwing chaff down the chute: from the turn at the IP to bombs away. */
   chaffing: boolean;
+  /** The strike photograph is up. */
+  strikePhotoShown: boolean;
   /** The intercom call being heard, if any. */
   intercom: IntercomCall | null;
 }
@@ -175,6 +182,7 @@ export function sortieStateAt(time: number): SortieState {
     landingSeconds: time >= LANDING.start ? time - LANDING.start : null,
     tallyAdded: time >= TALLY_ADDED_AT,
     chaffing: time >= CHAFF.from && time < CHAFF.to,
+    strikePhotoShown: time >= STRIKE_PHOTO.at && time < STRIKE_PHOTO.at + STRIKE_PHOTO.shownFor,
     intercom: INTERCOM.find((call) => time >= call.at && time < call.at + INTERCOM_SECONDS) ?? null,
   };
 }

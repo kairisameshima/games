@@ -59,11 +59,11 @@ The mission runs 94 seconds, then the crew board again on the hardstand for the 
 | Initial point | Turn onto the run, bomb bay doors open, flak starts |
 | Bomb run | Held level through heavy flak; from the IP each ship's radio operator throws packets of chaff down the chute in the radio room's floor, snipped kitchen foil that bursts, tumbles glinting and streams back behind the box |
 | Flak hit | A burst under the right wing holes the lead and sets No. 3 engine on fire; the co-pilot feathers it, its extinguisher is fired, and it trails black smoke |
-| Bombs away | Twelve 500 lb bombs leave in train from each ship and ride their rods down to the set floor, each bursting there in a puff of brown cotton dust |
+| Bombs away | Twelve 500 lb bombs leave in train from each ship and ride their rods down to the set floor, each bursting there in a puff of brown cotton dust; once the lead's last bomb is down its K-21 strike photograph comes up under the title panel, a sepia print of its bursts taken straight down through a gap in the cloud |
 | Rally | Doors close, banked turn off the target |
 | Withdrawal | Flak thins out behind |
-| Landing | The lead leaves its stand and flies a circuit: straight on ahead of the box, a level-banked half circle to starboard onto the taxiway's line with No. 3 still feathered, wheels down, a straight final and a flare onto the taxiway card, then an even braking roll to the pan, the camera panning with it all the way; it is swung round to stand as it started. Position, heading and bank come from the circuit's straight legs and constant-radius turns, so every exposure moves the same distance and the bank rolls in and out smoothly |
-| Debrief | Engines 1, 2 and 4 are cut one by one and the 25th bomb goes on the mission tally on its own scrap of decal sheet |
+| Landing | The lead leaves its stand and flies a circuit: straight on ahead of the box, a level-banked half circle to starboard onto the taxiway's line with No. 3 still feathered, wheels down, a straight final and a flare onto the taxiway card, then an even braking roll to the pan, the camera panning with it all the way; it is swung half round to stand as it started. Position, heading and bank come from the circuit's straight legs and constant-radius turns, so every exposure moves the same distance and the bank rolls in and out smoothly |
+| Debrief | Engines 1, 2 and 4 are cut one by one; the four men climb back out of the hatch and the door and walk off across the card, and the crew chief, up on a work stand off the port side with a yellow paint can, brushes the 25th bomb onto the mission tally (its own scrap of decal sheet) |
 
 ## Run
 

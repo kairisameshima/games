@@ -65,6 +65,9 @@ export class Ui {
   private readonly intercomSpeaker: HTMLElement;
   private readonly intercomLine: HTMLElement;
   private shownCall: IntercomCall | null = null;
+  /** The strike photograph's print: the frame and the photograph in it. */
+  private readonly strikePhoto: HTMLElement;
+  private readonly strikePhotoImage: HTMLImageElement;
   private readonly progressBars: HTMLElement[] = [];
   private readonly detail: HTMLElement;
   private readonly viewButtons: Record<ViewMode, HTMLButtonElement>;
@@ -192,6 +195,12 @@ export class Ui {
     this.intercom.append(this.intercomSpeaker, this.intercomLine);
     // Hung from the phase panel, so it sits just above it however many lines the phase's detail runs to.
     phasePanel.append(this.intercom);
+    this.strikePhoto = element('figure', 'strike-photo');
+    this.strikePhotoImage = element('img', '');
+    this.strikePhotoImage.alt = 'Strike photograph of the bombs bursting';
+    this.strikePhoto.append(this.strikePhotoImage, element('figcaption', '', 'Strike photo · 91 BG · K-21'));
+    // Laid just under the title panel, however tall the panel runs.
+    titlePanel.append(this.strikePhoto);
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'), gunsightReticle());
   }
@@ -212,6 +221,7 @@ export class Ui {
       this.detail.textContent = state.phase.detail;
     }
     this.routeMap.update(state.time);
+    this.strikePhoto.classList.toggle('is-on', state.strikePhotoShown && this.strikePhotoImage.src !== '');
     if (state.intercom !== this.shownCall) {
       this.shownCall = state.intercom;
       this.intercom.classList.toggle('is-on', state.intercom !== null);
@@ -225,6 +235,13 @@ export class Ui {
       const progress = index < state.phaseIndex ? 1 : index > state.phaseIndex ? 0 : (state.time - phase.start) / (phase.end - phase.start);
       bar.style.width = `${(progress * 100).toFixed(1)}%`;
     });
+  }
+
+  /** Prints the strike photograph from `url`; it is shown while the film is in its window. */
+  setStrikePhoto(url: string): void {
+    // Each sortie's print replaces the last; the old one's object URL is let go.
+    if (this.strikePhotoImage.src.startsWith('blob:')) URL.revokeObjectURL(this.strikePhotoImage.src);
+    this.strikePhotoImage.src = url;
   }
 
   setPlaying(playing: boolean): void {
