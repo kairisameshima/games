@@ -930,21 +930,73 @@ const MAIN_GEAR = { pivotD: 5.2, pivotDrop: 0.5, axleD: 5.55, axleY: -2.3, wheel
 const TAIL_GEAR = { forkTopAbove: 0.05, axleBelow: 0.36, axleAft: 0.12, wheelRadius: 0.33, tyre: 0.09, retractTurn: 1.2 } as const;
 
 /**
- * The Sperry A-1A upper turret's shape, in its own space (y up from the fixed ring's top, +x forward): the fixed ring
- * round the opening in the roof; the turret's sheet-metal drum, its guns out through two vertical slots in its front,
- * each closed by a dark canvas boot; and the Plexiglas dome on the drum, framed by meridians and a ring at mid height,
- * the front panel between the guns left clear for the sight.
+ * The Sperry A-1A upper turret (AN 11-45C-1; the dome types drawn in Hangar Thirteen's "Turrets In Detail", and
+ * photographs of a restored A-1A), in its own space: y up from the fixed ring's top, +x forward. A sheet-metal band, the
+ * tub's top ring, carries the Type 6 "Ainsworth" dome: a low oval of Plexiglas on a metal lower edge, two heavy
+ * longitudinal frames arching from the front over the top to the back with the windscreen and the top panel between
+ * them, a lighter frame arching over each side, and the guns out through metal shutter panels just outside the
+ * windscreen's frames.
  */
 const TOP_TURRET = {
   ring: { width: 0.07, top: 0.03 },
-  // A low drum: the guns ride in it, below the gunner's eye, which is up in the dome at the sight's height.
-  drum: { bottom: 0.0, top: 0.14, radius: 0.5 },
-  dome: { radius: 0.5, height: 0.44 },
-  slot: { width: 0.075, bottom: 0.015 },
-  /** The guns' trunnions, forward of the turret's axis and low in the drum, so the barrels leave through its slots. */
-  gunPivot: { x: 0.18, y: 0.06 },
-  frame: { tube: 0.012, meridians: [Math.PI / 6, Math.PI / 2, (5 * Math.PI) / 6, (7 * Math.PI) / 6, (3 * Math.PI) / 2, (11 * Math.PI) / 6], ringAt: 0.45 },
+  band: { radius: 0.5, height: 0.12 },
+  /** The dome on the band: its vertical lower edge, its height, and its metal lower edge's depth. */
+  dome: { radius: 0.5, wall: 0.1, height: 0.5, metalEdge: 0.06 },
+  /** Frame straps: the heavy ones' and the light ones' width on the glass, and how far they stand off it. */
+  frame: { heavy: 0.05, light: 0.028, thickness: 0.012, archZ: 0.16, sideZ: 0.37, sill: 0.09, header: 0.36 },
+  /** The shutter panels the guns leave through: azimuth from the windscreen's frame out, and their top. */
+  shutter: { fromAzimuth: 0.33, toAzimuth: 0.6, top: 0.3 },
+  /** The guns' trunnions, forward of the turret's axis, at the shutters' height above the band. */
+  gunPivot: { x: 0.18, y: 0.24 },
+  /** Where the barrels cross the dome, along the gun from the trunnions, and the collar round each there. */
+  collar: { along: 0.27, radius: 0.04, length: 0.05 },
 } as const;
+
+/** The dome's radius at height `y` above its foot: a vertical wall, then a quarter-ellipse up to the crown. */
+function topTurretDomeRadius(y: number): number {
+  const { radius, wall, height } = TOP_TURRET.dome;
+  if (y <= wall) return radius;
+  const t = Math.min((y - wall) / (height - wall), 1);
+  return radius * Math.sqrt(Math.max(1 - t * t, 0));
+}
+
+/** The dome's height at a point (x, z) in plan, or null outside it. */
+function topTurretDomeHeight(x: number, z: number): number | null {
+  const { radius, wall, height } = TOP_TURRET.dome;
+  const r = Math.hypot(x, z);
+  if (r > radius) return null;
+  return wall + (height - wall) * Math.sqrt(1 - (r / radius) ** 2);
+}
+
+/**
+ * A frame running over the dome in the plane z = `z`, from the front foot over the crown to the back foot, as points
+ * standing `proud` off the glass. With `toY`, only the front part up to that height.
+ */
+function topTurretFramePath(z: number, proud: number, base: number, toY?: number): THREE.Vector3[] {
+  const { radius, wall, metalEdge } = TOP_TURRET.dome;
+  const points: THREE.Vector3[] = [];
+  const reach = Math.sqrt(radius ** 2 - z ** 2);
+  const steps = 32;
+  for (let step = 0; step <= steps; step++) {
+    const x = reach * Math.cos((step / steps) * Math.PI);
+    const y = topTurretDomeHeight(x, z) ?? wall;
+    if (toY !== undefined && (x < 0 || y > toY)) continue;
+    const surface = new THREE.Vector3(x, y, z);
+    const normal = new THREE.Vector3(x, (y - wall) * 0.6, z).normalize();
+    points.push(surface.addScaledVector(normal, proud).setY(base + Math.max(surface.y, metalEdge)));
+  }
+  return points;
+}
+
+/** A horizontal frame round the dome at height `y`, between two azimuths (radians from ahead toward starboard). */
+function topTurretRingPath(y: number, from: number, to: number, proud: number, base: number): THREE.Vector3[] {
+  const r = topTurretDomeRadius(y) + proud;
+  const steps = Math.max(4, Math.ceil(Math.abs(to - from) * 12));
+  return Array.from({ length: steps + 1 }, (_, step) => {
+    const azimuth = THREE.MathUtils.lerp(from, to, step / steps);
+    return new THREE.Vector3(Math.cos(azimuth) * r, base + y, Math.sin(azimuth) * r);
+  });
+}
 
 /**
  * The fixed ring the turret turns in: a flat lip round the opening, and a skirt from it down to the fuselage's curved
@@ -952,7 +1004,7 @@ const TOP_TURRET = {
  */
 function buildTurretRingGeometry(d: number, base: number): THREE.BufferGeometry {
   const { width, top } = TOP_TURRET.ring;
-  const inner = TOP_TURRET.drum.radius + 0.01;
+  const inner = TOP_TURRET.band.radius + 0.015;
   const outer = inner + width;
   const segments = 64;
   const positions: number[] = [];
@@ -978,50 +1030,94 @@ function buildTurretRingGeometry(d: number, base: number): THREE.BufferGeometry 
   return geometry;
 }
 
-/** The turning part of the top turret, added to its yaw group: drum with gun slots and boots, framed dome. */
-function addTopTurretBody(turret: THREE.Object3D, materials: AircraftMaterials): void {
-  const { drum, dome, slot, frame } = TOP_TURRET;
-  const gunZ = STATIONS.topTurret.gunSpacing / 2;
-  // Three's cylinders sweep θ from +z toward +x; each slot is centred where a gun's line crosses the drum.
-  const slotTheta = (z: number) => Math.atan2(Math.sqrt(drum.radius ** 2 - z ** 2), z);
-  const halfSlot = slot.width / 2 / drum.radius;
-  const slots = [slotTheta(gunZ), slotTheta(-gunZ)].sort((a, b) => a - b);
-  const drumHeight = drum.top - drum.bottom;
-  // The drum's wall in three sectors round the two slots, and the short wall under each slot.
-  const sectors: [number, number][] = [
-    [slots[1] + halfSlot, slots[0] - halfSlot + Math.PI * 2],
-    [slots[0] + halfSlot, slots[1] - halfSlot],
-  ];
-  for (const [from, to] of sectors) {
-    part(turret, new THREE.CylinderGeometry(drum.radius, drum.radius, drumHeight, 48, 1, true, from, to - from), materials.upperPaint, 0, drum.bottom + drumHeight / 2, 0);
-  }
-  for (const centre of slots) {
-    const below = slot.bottom - drum.bottom;
-    part(turret, new THREE.CylinderGeometry(drum.radius, drum.radius, below, 4, 1, true, centre - halfSlot, halfSlot * 2), materials.upperPaint, 0, drum.bottom + below / 2, 0);
-    // The canvas boot closing the slot round the barrel, set just inside the wall.
-    const bootHeight = drum.top - slot.bottom;
-    part(turret, new THREE.CylinderGeometry(drum.radius - 0.012, drum.radius - 0.012, bootHeight, 4, 1, true, centre - halfSlot, halfSlot * 2), materials.canvas, 0, slot.bottom + bootHeight / 2, 0, { castShadow: false });
-    // Lips down each side of the slot.
-    for (const edge of [centre - halfSlot, centre + halfSlot]) {
-      part(turret, new THREE.BoxGeometry(0.012, drumHeight, 0.012), materials.gunmetal, Math.sin(edge) * drum.radius, drum.bottom + drumHeight / 2, Math.cos(edge) * drum.radius, { castShadow: false });
+/** Outward normal of the dome's surface at a point on it (turret space, `base` the dome's foot). */
+function topTurretDomeNormal(point: THREE.Vector3, base: number): THREE.Vector3 {
+  const { radius, wall, height } = TOP_TURRET.dome;
+  const y = point.y - base;
+  if (y <= wall) return new THREE.Vector3(point.x, 0, point.z).normalize();
+  // The ellipsoid's gradient: horizontal over the radius squared, vertical over the cap's height squared.
+  return new THREE.Vector3(point.x / radius ** 2, (y - wall) / (height - wall) ** 2, point.z / radius ** 2).normalize();
+}
+
+/**
+ * A flat frame strap laid along a path on the dome: `width` across the glass, standing `thickness` off it, with its
+ * edges closed, so it reads as the riveted sheet-metal frame it is rather than a tube.
+ */
+function strapGeometry(path: THREE.Vector3[], base: number, width: number, thickness: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const tangent = new THREE.Vector3();
+  const across = new THREE.Vector3();
+  path.forEach((point, index) => {
+    tangent.subVectors(path[Math.min(index + 1, path.length - 1)], path[Math.max(index - 1, 0)]).normalize();
+    const normal = topTurretDomeNormal(point, base);
+    across.crossVectors(tangent, normal).normalize().multiplyScalar(width / 2);
+    for (const [side, lift] of [[-1, 0], [1, 0], [1, thickness], [-1, thickness]] as const) {
+      const corner = point.clone().addScaledVector(across, side).addScaledVector(normal, lift + 0.002);
+      positions.push(corner.x, corner.y, corner.z);
+    }
+  });
+  for (let index = 0; index < path.length - 1; index++) {
+    const a = index * 4;
+    const b = a + 4;
+    // Four faces round the section: under, outer edge, top, inner edge.
+    for (let face = 0; face < 4; face++) {
+      const p = a + face;
+      const q = a + ((face + 1) % 4);
+      indices.push(p, b + face, q, q, b + face, b + ((face + 1) % 4));
     }
   }
-  // Riveted band where the dome sits on the drum.
-  part(turret, new THREE.TorusGeometry(drum.radius, 0.014, 6, 48), materials.gunmetal, 0, drum.top, 0, { rotation: [Math.PI / 2, 0, 0], castShadow: false });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
-  const glass = part(turret, new THREE.SphereGeometry(dome.radius, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2), materials.canopy, 0, drum.top, 0, { castShadow: false });
-  glass.scale.y = dome.height / dome.radius;
-  // Meridian frames, apex to rim, skipping the panel straight ahead; a ring round the dome at `ringAt` of its height.
-  for (const angle of frame.meridians) {
-    const meridian = part(turret, new THREE.TorusGeometry(dome.radius, frame.tube, 6, 24, Math.PI / 2), materials.upperPaint, 0, drum.top, 0, { castShadow: false });
-    meridian.rotation.set(0, angle, 0);
-    meridian.scale.set(1, dome.height / dome.radius, 1);
+/** The turning part of the top turret, added to its yaw group: the band, the framed dome and the gun shutters. */
+function addTopTurretBody(turret: THREE.Object3D, materials: AircraftMaterials, gunPitch: THREE.Object3D): void {
+  const { band, dome, frame, shutter, collar } = TOP_TURRET;
+  const base = band.height;
+  // The tub's top ring, standing above the fixed ring, a riveted lip where the dome is bolted on.
+  part(turret, new THREE.CylinderGeometry(band.radius, band.radius + 0.01, band.height, 48, 1, true), materials.upperPaint, 0, band.height / 2, 0);
+  part(turret, new THREE.TorusGeometry(band.radius + 0.004, 0.012, 6, 48), materials.upperPaint, 0, base, 0, { rotation: [Math.PI / 2, 0, 0], castShadow: false });
+
+  // The dome: metal lower edge, Plexiglas above it. Lathe angle φ puts a point at (sin φ, ·, cos φ).
+  const profile = (from: number, to: number) => Array.from({ length: 21 }, (_, step) => {
+    const y = THREE.MathUtils.lerp(from, to, step / 20);
+    return new THREE.Vector2(Math.max(topTurretDomeRadius(y), 0.001), y);
+  });
+  part(turret, new THREE.LatheGeometry(profile(0, dome.metalEdge), 48), materials.upperPaint, 0, base, 0, { castShadow: false });
+  part(turret, new THREE.LatheGeometry(profile(dome.metalEdge, dome.height), 48), materials.canopy, 0, base, 0, { castShadow: false });
+  // The metal shutter panels either side of the windscreen, from the metal edge up to the shutters' top.
+  for (const side of [-1, 1]) {
+    const [from, to] = side > 0 ? [shutter.fromAzimuth, shutter.toAzimuth] : [-shutter.toAzimuth, -shutter.fromAzimuth];
+    // Azimuth α (from ahead toward starboard) is lathe angle π/2 − α.
+    const panel = new THREE.LatheGeometry(profile(dome.metalEdge, shutter.top), 8, Math.PI / 2 - to, to - from);
+    const mesh = part(turret, panel, materials.upperPaint, 0, base, 0, { castShadow: false });
+    mesh.scale.set(1.006, 1, 1.006);
   }
-  const ringY = frame.ringAt * dome.height;
-  const ringRadius = dome.radius * Math.sqrt(1 - frame.ringAt ** 2);
-  part(turret, new THREE.TorusGeometry(ringRadius, frame.tube, 6, 48), materials.upperPaint, 0, drum.top + ringY, 0, { rotation: [Math.PI / 2, 0, 0], castShadow: false });
-  // The cap at the apex where the meridians meet.
-  part(turret, new THREE.CylinderGeometry(0.06, 0.07, 0.02, 20), materials.upperPaint, 0, drum.top + dome.height - 0.004, 0, { castShadow: false });
+
+  const tube = (points: THREE.Vector3[], width: number) => {
+    if (points.length < 2) return;
+    part(turret, strapGeometry(points, base, width, frame.thickness), materials.upperPaint, 0, 0, 0, { castShadow: false });
+  };
+  // The two heavy arches over the crown, a lighter one over each side, and the windscreen's sill and header.
+  for (const side of [-1, 1]) {
+    tube(topTurretFramePath(side * frame.archZ, 0, base), frame.heavy);
+    tube(topTurretFramePath(side * frame.sideZ, 0, base), frame.light);
+  }
+  const archAzimuth = Math.asin(frame.archZ / dome.radius);
+  tube(topTurretRingPath(frame.sill, -archAzimuth, archAzimuth, 0, base), frame.heavy);
+  tube(topTurretRingPath(frame.header, -Math.asin(frame.archZ / topTurretDomeRadius(frame.header)), Math.asin(frame.archZ / topTurretDomeRadius(frame.header)), 0, base), frame.heavy);
+  // Round the dome's foot, where the glass meets its metal edge.
+  tube(topTurretRingPath(dome.metalEdge, -Math.PI, Math.PI, 0, base), frame.light);
+
+  // A collar round each barrel where it leaves through its shutter; it rides with the guns.
+  const gunZ = STATIONS.topTurret.gunSpacing / 2;
+  for (const side of [-1, 1]) {
+    part(gunPitch, new THREE.CylinderGeometry(collar.radius, collar.radius, collar.length, 16), materials.gunmetal, collar.along, 0, side * gunZ, { rotation: [0, 0, Math.PI / 2], castShadow: false });
+  }
 }
 
 function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): LandingGear {
@@ -1602,9 +1698,9 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
   const topTurretYaw = assignAssembly(new THREE.Group(), 'top-turret');
   topTurretYaw.userData.unmerged = true;
   topTurretYaw.position.set(toX(topTurretSpec.d), turretBase, 0);
-  addTopTurretBody(topTurretYaw, materials);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.userData.unmerged = true;
+  addTopTurretBody(topTurretYaw, materials, topTurretPitch);
   topTurretPitch.position.set(TOP_TURRET.gunPivot.x, TOP_TURRET.gunPivot.y, 0);
   const topTurretGuns = [-1, 1].map((side) => addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret'));
   topTurretYaw.add(topTurretPitch);

@@ -95,7 +95,8 @@ export const COCKPIT = {
 
 export const FLIGHT_DECK = {
   /** The engineer stands on the turret's platform; the dome is the exterior top turret. */
-  platformY: 0.02,
+  /** Raised on the turret's stirrups so his eyes are up in the dome at the sight, above the guns. */
+  platformY: 0.14,
   oxygenBottlesD: 6.2,
 } as const;
 

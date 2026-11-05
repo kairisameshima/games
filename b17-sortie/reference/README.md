@@ -41,6 +41,12 @@ The `*-raw.json` files are the column traces, and `fuselage-stations.json` is th
 - *Pilot's Manual for Boeing B-17 Flying Fortress* (AAF), figures of the instrument panel (the panel texture follows its layout), pedestal, upper turret, bomb bay, radio room, ball turret, waist and tail positions.
 - *Pilot Training Manual for the B-17 Flying Fortress* (AAF Manual 50-13), [archive.org](https://archive.org/details/50-13): crew duties and stations, oxygen equipment, flight clothing.
 
+## Top turret sources
+
+- *Handbook of Operation and Service Instructions, Sperry Upper Turret* (AN 11-45C-1), [Hangar Thirteen copy](http://hangarthirteen.org/wp-content/uploads/2020/08/11-45C-1-Handbook-for-Sperry-Turrets-Pt-1-Upper-Turret.pdf).
+- Hangar Thirteen, ["Lucky Thirteen's Turrets In Detail, Pt. 1"](http://hangarthirteen.org/lucky-thirteens-turrets-in-detail/): the A-1, A-1A and A-1B and which B-17 blocks carried them (the A-1A from B-17F-80-BO to B-17G-90-BO), and the six dome types; the Type 6 "Ainsworth" dome is the one both makers fitted to A-1As.
+- Photographs of a restored A-1A with a Type 6 dome and a cutaway drawing of the turret (dome, gun cradle, radial support, sight), supplied for this project: the heavy flat frames arching over the crown either side of the windscreen, the metal shutter panels the guns leave through just outside them, and the sheet-metal ring under the dome.
+
 ## Markings and production sources
 
 - b17flyingfortress.de airframe records (after *The B-17 Flying Fortress Story*): 42-31909 "Nine-O-Nine", B-17G-30-BO, 323rd BS `OR-R`, delivered through Cheyenne January 1944; 42-102509 "The Liberty Run", B-17G-50-BO, 401st BS `LL-A`; 42-97261 in the B-17G-45-BO block.

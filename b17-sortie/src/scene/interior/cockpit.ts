@@ -124,12 +124,12 @@ function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vect
     context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: FLOORS.flightDeck.y });
   }
   // Computing sight: housing, reflector glass, and the hand grips below.
-  part(topTurretYaw, roundedBox(0.12, 0.13, 0.1, 0.015), materials.crinkle, 0.24, 0.17, 0);
-  part(topTurretYaw, roundedBox(0.004, 0.07, 0.07, 0.002), materials.glass, 0.18, 0.25, 0).rotation.z = -0.5;
-  rod(topTurretYaw, new THREE.Vector3(0.24, 0.1, 0), new THREE.Vector3(0.24, -0.08, 0), 0.02, materials.crinkle);
-  part(topTurretYaw, roundedBox(0.06, 0.03, 0.3, 0.01), materials.crinkle, 0.24, -0.1, 0);
-  const leftGrip = new THREE.Vector3(0.21, -0.08, -0.15);
-  const rightGrip = new THREE.Vector3(0.21, -0.08, 0.15);
+  part(topTurretYaw, roundedBox(0.12, 0.13, 0.1, 0.015), materials.crinkle, 0.24, 0.29, 0);
+  part(topTurretYaw, roundedBox(0.004, 0.07, 0.07, 0.002), materials.glass, 0.18, 0.37, 0).rotation.z = -0.5;
+  rod(topTurretYaw, new THREE.Vector3(0.24, 0.22, 0), new THREE.Vector3(0.24, 0.04, 0), 0.02, materials.crinkle);
+  part(topTurretYaw, roundedBox(0.06, 0.03, 0.3, 0.01), materials.crinkle, 0.24, 0.02, 0);
+  const leftGrip = new THREE.Vector3(0.21, 0.04, -0.15);
+  const rightGrip = new THREE.Vector3(0.21, 0.04, 0.15);
   for (const grip of [leftGrip, rightGrip]) rod(topTurretYaw, grip.clone().add(new THREE.Vector3(0, -0.07, 0)), grip.clone().add(new THREE.Vector3(0, 0.05, 0)), 0.016, materials.rubber, 10);
   return { leftGrip, rightGrip, platformY };
 }
