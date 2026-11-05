@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { addVirtualLight, glassMaterial, matteMaterial, type VirtualLight } from '../render/studio';
+import { addVirtualLight, glassMaterial, matteMaterial, metalMaterial, type VirtualLight } from '../render/studio';
 import { cottonMaterial, cottonTuftGeometry, type CottonMaterial } from '../render/miniature';
 import { PALETTE } from './palette';
 import { MAX_STOP_MOTION_FPS } from './stop-motion';
@@ -632,6 +632,99 @@ export class BombTrain {
   /** The floor points bombs have burst on since the last call. */
   takeImpacts(): THREE.Vector3[] {
     return this.impacts.splice(0);
+  }
+}
+
+// Chaff: on the bomb run the radio operator throws packets of foil strips down the chute in the radio room's floor to
+// blind the flak's gun-laying radar. On the set they are snipped kitchen foil, scattered from the chute exposure by
+// exposure: each packet bursts into strips that tumble, glinting, and stream back behind the ship.
+
+/** How many strips are about at once, across all the ships. */
+const CHAFF_CAPACITY = 1200;
+/** A strip's length and width, world units. */
+const CHAFF_STRIP = { length: 0.12, width: 0.012 } as const;
+/** Seconds between packets from one ship, and strips in a packet. */
+const CHAFF_PACKET = { every: 0.5, strips: 40 } as const;
+/** How fast a packet's strips spread from the chute, how fast a strip settles, and how long it is kept, world units and seconds. */
+const CHAFF_MOTION = { spread: 1.1, fall: 0.28, life: 5, tumble: 14 } as const;
+
+interface ChaffStrip { position: THREE.Vector3; velocity: THREE.Vector3; axis: THREE.Vector3; angle: number; spin: number; age: number }
+
+export class ChaffDrop {
+  readonly root = new THREE.Group();
+  private readonly mesh: THREE.InstancedMesh;
+  private readonly strips: ChaffStrip[] = [];
+  /** Film seconds since each ship's last packet. */
+  private readonly sincePacket: number[];
+  private readonly matrix = new THREE.Matrix4();
+  private readonly rotation = new THREE.Quaternion();
+  private readonly unit = new THREE.Vector3(1, 1, 1);
+  private static readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+
+  constructor(chutes: number) {
+    const geometry = new THREE.PlaneGeometry(CHAFF_STRIP.length, CHAFF_STRIP.width);
+    // Crumpled foil scatters the lamps more than a mirror would: rough enough to read silver from any side, not black.
+    const material = metalMaterial('#eef1f4', { roughness: 0.38, metalness: 0.85, side: THREE.DoubleSide, envMapIntensity: 2 });
+    this.mesh = new THREE.InstancedMesh(geometry, material, CHAFF_CAPACITY);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = false;
+    for (let index = 0; index < CHAFF_CAPACITY; index++) this.mesh.setMatrixAt(index, ChaffDrop.hidden);
+    this.root.add(this.mesh);
+    this.sincePacket = Array.from({ length: chutes }, (_, chute) => chute * 0.23);
+  }
+
+  /**
+   * Advances the strips by an exposure; while `dropping`, each chute in `chutes` (world positions, one per ship) lets
+   * a packet go every `CHAFF_PACKET.every` seconds.
+   */
+  update(deltaSec: number, driftSpeed: number, chutes: THREE.Vector3[], dropping: boolean, random: () => number): void {
+    if (deltaSec <= 0) return;
+    chutes.forEach((chute, index) => {
+      this.sincePacket[index] += deltaSec;
+      if (!dropping || this.sincePacket[index] < CHAFF_PACKET.every) return;
+      this.sincePacket[index] = 0;
+      for (let strip = 0; strip < CHAFF_PACKET.strips; strip++) this.release(chute, random);
+    });
+    for (let index = this.strips.length - 1; index >= 0; index--) {
+      const strip = this.strips[index];
+      strip.age += deltaSec;
+      if (strip.age > CHAFF_MOTION.life) {
+        this.strips.splice(index, 1);
+        continue;
+      }
+      // The packet's burst dies away quickly in the air; the strips settle and are carried aft.
+      strip.velocity.multiplyScalar(Math.exp(-3 * deltaSec));
+      strip.position.addScaledVector(strip.velocity, deltaSec);
+      strip.position.x -= driftSpeed * deltaSec;
+      strip.position.y -= CHAFF_MOTION.fall * deltaSec;
+      strip.angle += strip.spin * deltaSec;
+    }
+    this.strips.forEach((strip, index) => {
+      this.rotation.setFromAxisAngle(strip.axis, strip.angle);
+      this.mesh.setMatrixAt(index, this.matrix.compose(strip.position, this.rotation, this.unit));
+    });
+    for (let index = this.strips.length; index < CHAFF_CAPACITY; index++) this.mesh.setMatrixAt(index, ChaffDrop.hidden);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  reset(): void {
+    this.strips.length = 0;
+    for (let index = 0; index < CHAFF_CAPACITY; index++) this.mesh.setMatrixAt(index, ChaffDrop.hidden);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private release(chute: THREE.Vector3, random: () => number): void {
+    if (this.strips.length >= CHAFF_CAPACITY) this.strips.shift();
+    const direction = new THREE.Vector3(random() - 0.5, -random(), random() - 0.5).normalize();
+    this.strips.push({
+      position: chute.clone(),
+      velocity: direction.multiplyScalar(CHAFF_MOTION.spread * (0.4 + random() * 0.6)),
+      axis: new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).normalize(),
+      angle: random() * Math.PI * 2,
+      spin: (random() - 0.5) * 2 * CHAFF_MOTION.tumble,
+      age: 0,
+    });
   }
 }
 

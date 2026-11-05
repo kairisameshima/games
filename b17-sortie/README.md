@@ -48,6 +48,8 @@ In the cutaway, clicking a crew label walks the camera through the ship to that 
 
 **K** puts the finished lead on a turntable on the set floor beside its kit box (the lead itself in flight as the box painting, rendered from the model the first time the bench opens, with Hattie in the corner) and the decal sheet its markings came from. **P** stops the film, clears the overlays and saves the frame re-rendered at three times the screen's resolution; **M** switches on the foley: a synthesised engine drone (No. 3 cutting in and out once hit, silent once feathered, the engines joining one by one on the hardstand and falling silent one by one after the landing), gun bursts that land on the exposures, flak thumps, the burning engine's crackle, the fighters' engines howling up as they close and dropping away as they pass (louder the nearer they come) with their own gunfire, the bombs' dull thuds on the floor, the shot-down fighter's crash, and a shutter click per frame.
 
+Over the phase panel the crew's intercom calls come up as captions as they are made (the navigator's time to the IP, the oxygen check, the top turret calling the fighters in, the tail gunner seeing one go down, the co-pilot feathering No. 3, bombs away), and under the readouts a schematic route map shows the planned route from Bassingbourn over the North Sea to the IP, the target and the rally and home, with the track flown so far and the box's place on it.
+
 The mission runs 94 seconds, then the crew board again on the hardstand for the next one:
 
 | Phase | What happens |
@@ -55,7 +57,7 @@ The mission runs 94 seconds, then the crew board again on the hardstand for the 
 | Formation cruise | Gunners scan, formation wander |
 | Fighter attack | Three Fw 190 A-8s (RLM 74/75/76, yellow under the cowling, Balkenkreuze), each hung from the rig on two fishing lines, make four head-on passes threaded between the ships and break away below or past the box, their guns flashing paper stars as they close; the top, ball and chin turrets slew on to the nearest fighter and follow it through, and every gun in the box fires short bursts; on the last pass the gunners hit one: its guns stop, its propeller windmills, and it rolls over trailing black cotton smoke down onto the set floor, where it lands in an oily black puff |
 | Initial point | Turn onto the run, bomb bay doors open, flak starts |
-| Bomb run | Held level through heavy flak |
+| Bomb run | Held level through heavy flak; from the IP each ship's radio operator throws packets of chaff down the chute in the radio room's floor, snipped kitchen foil that bursts, tumbles glinting and streams back behind the box |
 | Flak hit | A burst under the right wing holes the lead and sets No. 3 engine on fire; the co-pilot feathers it, its extinguisher is fired, and it trails black smoke |
 | Bombs away | Twelve 500 lb bombs leave in train from each ship and ride their rods down to the set floor, each bursting there in a puff of brown cotton dust |
 | Rally | Doors close, banked turn off the target |
@@ -105,7 +107,7 @@ Under the controls, a frame-rate readout (average of the last second, and the wo
 ## Layout
 
 - `src/scene/b17-dimensions.ts` holds every measured dimension. `src/scene/b17.ts` builds the aircraft from them, and `src/scene/hull.ts` answers hull shape queries.
-- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations.
+- `src/scene/interior/` builds the compartments (`layout.ts` holds the stations, `index.ts` assembles them). `src/scene/crew/` holds the figure generator: skeleton and IK, signed-distance primitives, the surface-nets mesher and the meshing worker. `src/scene/m2.ts` builds the guns, `src/scene/ball-turret.ts` the ball turret, `src/scene/window-cutouts.ts` opens the windows, `src/scene/assemblies.ts` and `src/scene/exploded.ts` split and move the assemblies, `src/scene/cutaway.ts` clips the skin, and `src/ui/callouts.ts` labels the stations, `src/ui/route-map.ts` draws the route map.
 - `src/scene/loft.ts` lofts rings into meshes and generates NACA sections.
 - `src/scene/effects.ts` runs flak bursts, contrails and falling bombs with their rigs, `src/scene/stop-motion.ts` times the exposures and their hand spacing; `src/scene/gunnery.ts` fires the guns. `src/scene/set.ts` also builds the workshop props.
 - `src/sortie.ts` is the mission timeline. `src/scene/livery.ts` holds each ship's markings, finish and tail gun position. `src/scene/fw190.ts` builds the Fw 190 and `src/scene/fighters.ts` flies their passes on the rig. `src/scene/hardstand.ts` runs the prologue and the landing along the circuits `src/scene/circuit.ts` lays out, `src/scene/kit-bench.ts` the turntable, `src/walkthrough.ts` the walk through the cutaway, `src/audio/foley.ts` the sound. `src/main.ts` wires the formation, camera, views and adaptive quality.

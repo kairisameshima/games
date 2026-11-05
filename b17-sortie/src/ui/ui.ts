@@ -1,6 +1,7 @@
 import type { StopMotionRate } from '../scene/stop-motion';
 import type { NoseArtChoice } from '../scene/textures';
-import { BOMB_COUNT, PHASES, type SortieState } from '../sortie';
+import { BOMB_COUNT, PHASES, type IntercomCall, type SortieState } from '../sortie';
+import { RouteMap } from './route-map';
 
 export type ViewMode = 'lab' | 'studio';
 /** How the lead ship is shown: whole, cut away to the crew, or exploded into its assemblies. */
@@ -58,6 +59,12 @@ function formatClock(totalSeconds: number): string {
 export class Ui {
   private readonly readouts: Record<'clock' | 'altitude' | 'airspeed' | 'heading' | 'bay' | 'load', HTMLElement>;
   private readonly chips: HTMLButtonElement[] = [];
+  private readonly routeMap = new RouteMap();
+  /** The intercom caption: who is speaking and what. */
+  private readonly intercom: HTMLElement;
+  private readonly intercomSpeaker: HTMLElement;
+  private readonly intercomLine: HTMLElement;
+  private shownCall: IntercomCall | null = null;
   private readonly progressBars: HTMLElement[] = [];
   private readonly detail: HTMLElement;
   private readonly viewButtons: Record<ViewMode, HTMLButtonElement>;
@@ -97,7 +104,7 @@ export class Ui {
       bay: addReadout('Bomb bay'),
       load: addReadout('Bomb load'),
     };
-    titlePanel.append(readoutGrid);
+    titlePanel.append(readoutGrid, this.routeMap.element);
 
     const phasePanel = element('div', 'panel phase-panel');
     const phaseRow = element('div', 'phase-row');
@@ -179,6 +186,12 @@ export class Ui {
     makeToggleButton(mediaToggle, 'Photo', callbacks.onPhoto);
     hints.append(viewToggle, showToggle, noseArtToggle, filmRateToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
 
+    this.intercom = element('div', 'intercom');
+    this.intercomSpeaker = element('span', 'intercom-speaker');
+    this.intercomLine = element('span', 'intercom-line');
+    this.intercom.append(this.intercomSpeaker, this.intercomLine);
+    // Hung from the phase panel, so it sits just above it however many lines the phase's detail runs to.
+    phasePanel.append(this.intercom);
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
     root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'), gunsightReticle());
   }
@@ -197,6 +210,15 @@ export class Ui {
       this.shownPhase = state.phaseIndex;
       this.chips.forEach((chip, index) => chip.classList.toggle('is-active', index === state.phaseIndex));
       this.detail.textContent = state.phase.detail;
+    }
+    this.routeMap.update(state.time);
+    if (state.intercom !== this.shownCall) {
+      this.shownCall = state.intercom;
+      this.intercom.classList.toggle('is-on', state.intercom !== null);
+      if (state.intercom) {
+        this.intercomSpeaker.textContent = state.intercom.speaker;
+        this.intercomLine.textContent = state.intercom.line;
+      }
     }
     this.progressBars.forEach((bar, index) => {
       const phase = PHASES[index];

@@ -15,7 +15,7 @@ import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
-import { BombTrain, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FIGHTER_SMOKE_LOOK, FlakField } from './scene/effects';
+import { BombTrain, ChaffDrop, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FIGHTER_SMOKE_LOOK, FlakField } from './scene/effects';
 import { FighterAttack } from './scene/fighters';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
@@ -24,7 +24,7 @@ import { codeLettersDecal, insigniaDecal, loadNoseArt, missionTallyDecal, MISSIO
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, STAND_JOINT_RADIUS, type DisplayStand } from './scene/set';
-import { hullSectionAt } from './scene/hull';
+import { hullSectionAt, toX } from './scene/hull';
 import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
@@ -176,6 +176,11 @@ const BOMB_BURST_HEIGHT = 0.08;
 const bombs = new BombTrain(createBomb, BOMB_BURST_HEIGHT);
 const gunnery = new Gunnery(MODEL_SCALE);
 const fighters = new FighterAttack(MODEL_SCALE);
+/** The chaff chute in the radio room's floor, under the belly, model metres from the nose. */
+const CHAFF_CHUTE_D = 9.4;
+const chaffChute = new THREE.Vector3(toX(CHAFF_CHUTE_D), hullSectionAt(CHAFF_CHUTE_D).bottom - 0.05, 0);
+const chaff = new ChaffDrop(formation.length);
+const chaffChutesWorld = formation.map(() => new THREE.Vector3());
 /** The shot-down fighter's smoke. */
 const fighterSmoke = new Contrails(1, FIGHTER_SMOKE_LOOK);
 const fighterSmokeEmitter = [new THREE.Vector3()];
@@ -185,7 +190,7 @@ const fighterNearest = new THREE.Vector3();
 /** A fighter is heard within this range of the camera, world units. */
 const FIGHTER_HEARD_WITHIN = 40;
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root, fighters.root);
+scene.add(chaff.root, flak.root, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root, fighters.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -673,6 +678,7 @@ function resetEffects(): void {
   flak.reset();
   puffs.reset();
   bombs.reset();
+  chaff.reset();
   gunnery.resetTracers();
   for (const ship of formation) ship.bombsDropped = 0;
 }
@@ -1246,6 +1252,8 @@ function exposeFrame(exposureSec: number): void {
   driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45, stopMotion.random);
   flak.update(deltaSec, leadState.flakRate, AIR_DRIFT_SPEED, flakZone);
   bombs.update(deltaSec);
+  formation.forEach((ship, index) => ship.aircraft.root.localToWorld(chaffChutesWorld[index].copy(chaffChute)));
+  chaff.update(deltaSec, AIR_DRIFT_SPEED, chaffChutesWorld, leadState.chaffing, stopMotion.random);
   const bombBursts = bombs.takeImpacts();
   for (const impact of bombBursts) puffs.emit('bombBurst', impact, false, stopMotion.random);
   const fighterSmoking = fighters.smoke(fighterSmokeEmitter[0]);

@@ -47,6 +47,8 @@ export const EXTINGUISHER_SECONDS = FLAK_HIT.fireOut[0];
 const DOORS_CLOSE = [49, 51.5] as const;
 /** The landing: when the lead leaves its stand for the field, and when it is down; altitude and speed run off over it. */
 const LANDING = { start: 72, down: 81 } as const;
+/** When chaff goes down the chute: through the flak, from the IP to bombs away. */
+const CHAFF = { from: 28, to: 45 } as const;
 /** When the crew chief has the new bomb on the tally. */
 const TALLY_ADDED_AT = 89.5;
 const RALLY_TURN = [49.5, 57.5] as const;
@@ -87,7 +89,41 @@ export interface SortieState {
   landingSeconds: number | null;
   /** The bomb for this mission is on the tally. */
   tallyAdded: boolean;
+  /** The radio operator is throwing chaff down the chute: from the turn at the IP to bombs away. */
+  chaffing: boolean;
+  /** The intercom call being heard, if any. */
+  intercom: IntercomCall | null;
 }
+
+/** One call on the intercom: who, what, and when in the film it is heard. */
+export interface IntercomCall { at: number; speaker: string; line: string }
+
+/** How long a call stays up as a caption, film seconds. */
+const INTERCOM_SECONDS = 3.4;
+
+/**
+ * The crew's calls through the mission, in the 8th Air Force's intercom form (station to station, clock positions for
+ * fighters), timed to what the film shows.
+ */
+export const INTERCOM: readonly IntercomCall[] = [
+  { at: 1.5, speaker: 'Navigator', line: 'Navigator to pilot: forty minutes to the IP.' },
+  { at: 5.5, speaker: 'Pilot', line: 'Pilot to crew: oxygen check. Call in.' },
+  { at: 10.3, speaker: 'Top turret', line: 'Bandits, twelve o\'clock high! Coming through!' },
+  { at: 14.5, speaker: 'Ball turret', line: 'One going under us, low at six.' },
+  { at: 21.4, speaker: 'Tail', line: 'Got him! He\'s smoking, he\'s going down!' },
+  { at: 25, speaker: 'Navigator', line: 'IP. Turning onto the bomb run.' },
+  { at: 28.6, speaker: 'Bombardier', line: 'Bomb doors open.' },
+  { at: 32.2, speaker: 'Pilot', line: 'She\'s all yours, bombardier.' },
+  { at: 35.6, speaker: 'Radio operator', line: 'Chaff going out the chute.' },
+  { at: 39.5, speaker: 'Co-pilot', line: 'Number three\'s hit, she\'s burning! Feathering three.' },
+  { at: 43.4, speaker: 'Engineer', line: 'Fire\'s out on three.' },
+  { at: 44.3, speaker: 'Bombardier', line: 'Bombs away!' },
+  { at: 49.3, speaker: 'Pilot', line: 'Doors closed. Rallying right.' },
+  { at: 58.4, speaker: 'Navigator', line: 'Heading home, two-eight-zero.' },
+  { at: 74.5, speaker: 'Pilot', line: 'Gear coming down. Three engines, we\'ll make it.' },
+  { at: 81.4, speaker: 'Co-pilot', line: 'We\'re down.' },
+  { at: 89.5, speaker: 'Crew chief', line: 'One more on the tally.' },
+];
 
 const smooth = (from: number, to: number, time: number) => THREE.MathUtils.smoothstep(time, from, to);
 
@@ -138,5 +174,7 @@ export function sortieStateAt(time: number): SortieState {
     missionClockSeconds: MISSION_CLOCK_OFFSET_SECONDS + time,
     landingSeconds: time >= LANDING.start ? time - LANDING.start : null,
     tallyAdded: time >= TALLY_ADDED_AT,
+    chaffing: time >= CHAFF.from && time < CHAFF.to,
+    intercom: INTERCOM.find((call) => time >= call.at && time < call.at + INTERCOM_SECONDS) ?? null,
   };
 }

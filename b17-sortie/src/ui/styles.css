@@ -141,3 +141,28 @@ body.is-photo #ui-root .photo-hint { display: block; }
 .gunsight svg { width: 100%; height: 100%; fill: #ff7a3d; filter: drop-shadow(0 0 4px #ff7a3daa); opacity: 0.85; }
 body.is-gunner .gunsight { display: block; }
 body.is-gunner #callouts { display: none; }
+
+/* The route map under the readouts: land, sea, the planned route dashed, the track flown solid, the box in amber. */
+.route-map { margin-top: 14px; }
+.route-map svg { display: block; width: 100%; height: auto; }
+.route-sea { fill: #0e1626; }
+.route-land { fill: #1f2a3c; stroke: #3a4a63; stroke-width: 0.8; }
+.route-planned { fill: none; stroke: #8fa0bd; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.route-flown { fill: none; stroke: var(--amber); stroke-width: 1.6; }
+.route-place { fill: #c9d3e6; }
+.route-box { fill: var(--amber); stroke: #0b0f1a; stroke-width: 1.2; }
+.route-map text { font-family: var(--mono); font-size: 7px; letter-spacing: 0.08em; fill: #c9d3e6; }
+body.is-studio .route-sea { fill: #e9e1d3; }
+body.is-studio .route-land { fill: #d3c8b5; stroke: #b3a68f; }
+body.is-studio .route-planned { stroke: #6d6656; }
+body.is-studio .route-place { fill: #4a4434; }
+body.is-studio .route-map text { fill: #4a4434; }
+
+/* Intercom: the current call, a caption over the phase panel. */
+.intercom {
+  position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translateX(-50%); max-width: min(720px, calc(100vw - 48px));
+  padding: 7px 14px; border-radius: 10px; background: #0b0f1ad9; color: #eef2fa; font-size: 14px;
+  display: flex; gap: 10px; align-items: baseline; opacity: 0; transition: opacity 0.15s; pointer-events: none;
+}
+.intercom.is-on { opacity: 1; }
+.intercom-speaker { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber); white-space: nowrap; }
