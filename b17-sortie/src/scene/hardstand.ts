@@ -19,7 +19,8 @@ import { CircuitPath } from './circuit';
 
 /** Film seconds of the prologue's beats. */
 const BEATS = { boardingEnds: 8.5, enginesStart: 9, rollStart: 12.3, liftOff: 15.3, docked: 22.3 } as const;
-export const PROLOGUE_LIFT_OFF_SECONDS = BEATS.liftOff;
+/** The prologue's flight, film seconds: from the start of the take-off run to docking on the stand. */
+export const PROLOGUE_FLIGHT = { from: BEATS.rollStart, to: BEATS.docked } as const;
 
 /**
  * The engines start one at a time in the order 1, 2, 3, 4, this far apart; each is cranked over by its starter for

@@ -9,7 +9,7 @@ import { buildB17, createBomb, type B17 } from './scene/b17';
 import { LEAD_LIVERY, WINGMAN_LIVERIES } from './scene/livery';
 import type { CrewStation } from './scene/interior';
 import { Walkthrough } from './walkthrough';
-import { Hardstand, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart, type HardstandFrame } from './scene/hardstand';
+import { Hardstand, PROLOGUE_FLIGHT, type EngineStart, type HardstandFrame } from './scene/hardstand';
 import { Foley } from './audio/foley';
 import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
@@ -621,6 +621,30 @@ function endLanding(): void {
   tweenCamera(FORMATION_SHOT);
 }
 
+/** Where the camera was when the take-off run began: it dollies from there to the formation shot. */
+const takeoffCameraStart = new THREE.Vector3();
+const formationCameraPosition = new THREE.Vector3().setFromSpherical(FORMATION_SHOT.spherical).add(FORMATION_SHOT.target);
+/** Over the end of the flight, as a fraction of it, the camera's aim settles from the ship onto the formation shot's. */
+const TAKEOFF_AIM_SETTLE_FROM = 0.8;
+
+/**
+ * Follows the lead from the start of its take-off run until it docks: the camera keeps it in the middle of the frame
+ * while it dollies evenly from where it stood to the formation shot, and its aim settles onto that shot's at the end,
+ * so the film's own shot takes over without a cut.
+ */
+function followTakeoff(before: number, time: number, ship: THREE.Vector3): void {
+  if (time < PROLOGUE_FLIGHT.from) return;
+  if (before < PROLOGUE_FLIGHT.from) {
+    cameraTween = null;
+    takeoffCameraStart.copy(camera.position);
+  }
+  const flown = THREE.MathUtils.clamp((time - PROLOGUE_FLIGHT.from) / (PROLOGUE_FLIGHT.to - PROLOGUE_FLIGHT.from), 0, 1);
+  camera.position.lerpVectors(takeoffCameraStart, formationCameraPosition, THREE.MathUtils.smootherstep(flown, 0, 1));
+  controls.target.copy(ship).lerp(FORMATION_SHOT.target, THREE.MathUtils.smootherstep(flown, TAKEOFF_AIM_SETTLE_FROM, 1));
+  camera.lookAt(controls.target);
+  cameraMoved = true;
+}
+
 function startPrologue(hold = 0): void {
   setGunnerView(false);
   if (kitTime !== null) setKitBench(false);
@@ -668,7 +692,7 @@ function stepPrologue(deltaSec: number): void {
     prologueEngines[index] = engine;
   });
   leadEnginesRunning = frame.engines.filter((engine) => engine === 'running').length;
-  if (before < PROLOGUE_LIFT_OFF_SECONDS && prologueTime >= PROLOGUE_LIFT_OFF_SECONDS) tweenCamera(FORMATION_SHOT);
+  followTakeoff(before, prologueTime, frame.position);
   if (frame.finished) finishPrologue();
 }
 
