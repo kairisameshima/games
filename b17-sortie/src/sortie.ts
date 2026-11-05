@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PhaseId = 'cruise' | 'fighters' | 'initial-point' | 'bomb-run' | 'flak-hit' | 'bombs-away' | 'rally' | 'withdrawal';
+export type PhaseId = 'cruise' | 'fighters' | 'initial-point' | 'bomb-run' | 'flak-hit' | 'bombs-away' | 'rally' | 'withdrawal' | 'landing' | 'debrief';
 
 export interface Phase {
   id: PhaseId;
@@ -10,7 +10,10 @@ export interface Phase {
   end: number;
 }
 
-/** One loop of the middle of a mission: the run in from the initial point to the target and the turn for home. */
+/**
+ * The mission from the cruise in: the fighters, the run in from the initial point to the target, the turn for home, and
+ * the landing back at the hardstand; after the debrief the film goes round to the boarding again.
+ */
 export const PHASES: readonly Phase[] = [
   { id: 'cruise', label: 'Formation cruise', detail: 'Combat box at altitude, gunners scanning for fighters.', start: 0, end: 10 },
   { id: 'fighters', label: 'Fighter attack', detail: 'Fighters press in on the box. Every gun that bears answers; the box holds formation for mutual fire.', start: 10, end: 24 },
@@ -20,6 +23,8 @@ export const PHASES: readonly Phase[] = [
   { id: 'bombs-away', label: 'Bombs away', detail: 'Twelve 500 lb bombs released in train.', start: 44, end: 48 },
   { id: 'rally', label: 'Rally', detail: 'Doors closed, diving turn off the target to re-form.', start: 48, end: 58 },
   { id: 'withdrawal', label: 'Withdrawal', detail: 'Heading home, flak thinning out behind.', start: 58, end: 72 },
+  { id: 'landing', label: 'Landing', detail: 'Home on three engines: gear down over the field, a long flat approach with No. 3 feathered, and the taxi back to the hardstand.', start: 72, end: 86 },
+  { id: 'debrief', label: 'Debrief', detail: 'Engines cut on the hardstand. The crew go in to interrogation; the crew chief adds one more bomb to the mission tally.', start: 86, end: 94 },
 ];
 
 export const SORTIE_LOOP_SECONDS = PHASES[PHASES.length - 1].end;
@@ -40,6 +45,10 @@ export const FLAK_HIT_SECONDS = FLAK_HIT.at;
 export const EXTINGUISHER_SECONDS = FLAK_HIT.fireOut[0];
 
 const DOORS_CLOSE = [49, 51.5] as const;
+/** The landing: when the lead leaves its stand for the field, and when it is down; altitude and speed run off over it. */
+const LANDING = { start: 72, down: 81 } as const;
+/** When the crew chief has the new bomb on the tally. */
+const TALLY_ADDED_AT = 89.5;
 const RALLY_TURN = [49.5, 57.5] as const;
 /** Mission clock reading when the loop starts: four hours and ten minutes after take-off. */
 const MISSION_CLOCK_OFFSET_SECONDS = 4 * 3600 + 10 * 60;
@@ -74,6 +83,10 @@ export interface SortieState {
   altitudeFeet: number;
   airspeedMph: number;
   missionClockSeconds: number;
+  /** Seconds since the lead left its stand to land, or null while the mission is still in the air. */
+  landingSeconds: number | null;
+  /** The bomb for this mission is on the tally. */
+  tallyAdded: boolean;
 }
 
 const smooth = (from: number, to: number, time: number) => THREE.MathUtils.smoothstep(time, from, to);
@@ -120,8 +133,10 @@ export function sortieStateAt(time: number): SortieState {
     bankRadians,
     pitchRadians,
     headingDegrees,
-    altitudeFeet: 25000 + Math.round(Math.sin(time * 0.2) * 40) - Math.round(turn * 300),
-    airspeedMph: 150 + Math.round(smooth(30, 34, time) * 5 - smooth(48, 52, time) * 5 + turn * 12),
+    altitudeFeet: Math.round((25000 + Math.sin(time * 0.2) * 40 - turn * 300) * (1 - smooth(LANDING.start, LANDING.down, time))),
+    airspeedMph: Math.round((150 + smooth(30, 34, time) * 5 - smooth(48, 52, time) * 5 + turn * 12) * (1 - smooth(LANDING.start + 4, LANDING.down + 3, time))),
     missionClockSeconds: MISSION_CLOCK_OFFSET_SECONDS + time,
+    landingSeconds: time >= LANDING.start ? time - LANDING.start : null,
+    tallyAdded: time >= TALLY_ADDED_AT,
   };
 }

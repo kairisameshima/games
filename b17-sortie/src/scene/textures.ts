@@ -804,14 +804,20 @@ export function oilStreakTexture(seed: number): THREE.CanvasTexture {
   return finishTexture(canvas);
 }
 
-/** The mission tally under the pilot's window: one small yellow bomb per mission, in rows of twelve. */
-export function missionTallyDecal(missions: number): DecalArt {
-  const perRow = 12;
+/** Bombs in a row of the mission tally, and the art's pixels: a bomb's column and row pitch and the margin round them. */
+export const MISSION_TALLY_ART = { perRow: 12, column: 64, row: 40, margin: 8, bombY: 16 } as const;
+
+/**
+ * The mission tally under the pilot's window: one small yellow bomb per mission, in rows of `perRow` (twelve on the
+ * tally; one for a single bomb added after a mission).
+ */
+export function missionTallyDecal(missions: number, perRow: number = MISSION_TALLY_ART.perRow): DecalArt {
+  const { column, row, margin, bombY } = MISSION_TALLY_ART;
   const rows = Math.ceil(missions / perRow);
-  const [canvas, context] = createCanvas(perRow * 64 + 16, rows * 40 + 16);
+  const [canvas, context] = createCanvas(perRow * column + margin * 2, rows * row + margin * 2);
   for (let mission = 0; mission < missions; mission++) {
-    const x = 8 + (mission % perRow) * 64;
-    const y = 8 + Math.floor(mission / perRow) * 40 + 16;
+    const x = margin + (mission % perRow) * column;
+    const y = margin + Math.floor(mission / perRow) * row + bombY;
     // Noses towards the canvas's left, which is the aircraft's nose on the port side, where the tally sits.
     context.fillStyle = PALETTE.tailYellow;
     context.beginPath();

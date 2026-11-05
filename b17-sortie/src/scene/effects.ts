@@ -15,10 +15,10 @@ const FLAK_LIFETIME_SECONDS = 7;
 const FLAK_SMOKE_COLOR = '#17181b';
 /** Filaments per unit tuft and the halo's reach in tuft radii. */
 const FLAK_COTTON = { frequency: 12, fuzz: 0.25, shells: 3 } as const;
-/** World height of the rig the bursts hang from, above the set. */
-const RIG_HEIGHT = 16;
-/** Fishing-line wire: radius in world units, and the smoke density below which the burst is taken down off it. */
-const RIG_WIRE = { radius: 0.0035, takenDownBelow: 0.12 } as const;
+/** World height of the rig that bursts and fighters hang from, above the set. */
+export const RIG_HEIGHT = 16;
+/** Fishing-line wire: radius in world units, its colour, and the smoke density below which a burst is taken down off it. */
+export const RIG_WIRE = { radius: 0.0035, colour: '#c9ccd0', takenDownBelow: 0.12 } as const;
 
 interface FlakBurst {
   group: THREE.Group;
@@ -56,7 +56,7 @@ export class FlakField {
     }));
     const flashCard = new THREE.PlaneGeometry(2, 2);
     const wireGeometry = new THREE.CylinderGeometry(RIG_WIRE.radius, RIG_WIRE.radius, 1, 5, 1, true).translate(0, 0.5, 0);
-    const wireMaterial = matteMaterial('#c9ccd0', { roughness: 0.3, envMapIntensity: 1.2 });
+    const wireMaterial = matteMaterial(RIG_WIRE.colour, { roughness: 0.3, envMapIntensity: 1.2 });
     for (let index = 0; index < FLAK_POOL_SIZE; index++) {
       const group = new THREE.Group();
       group.visible = false;

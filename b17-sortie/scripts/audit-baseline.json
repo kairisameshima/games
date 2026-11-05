@@ -1,0 +1,122 @@
+{
+  "crew": [
+    {
+      "role": "Bombardier",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Navigator",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 1
+    },
+    {
+      "role": "Pilot",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Co-pilot",
+      "reachCm": {
+        "left": 2.2,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Flight engineer",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Radio operator",
+      "reachCm": {
+        "left": 0.2,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Ball turret gunner",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Right waist gunner",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Left waist gunner",
+      "reachCm": {
+        "left": 0,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    },
+    {
+      "role": "Tail gunner",
+      "reachCm": {
+        "left": 2,
+        "right": 2,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
+    }
+  ],
+  "equipment": {
+    "gunBlack@1.4": 41.5,
+    "gunBlack@9.3": 54.5,
+    "gunBlack@10.5": 61.2,
+    "gunBlack@12.2": 78.8,
+    "gunBlack@12.9": 105.1,
+    "gunBlack@13.7": 131,
+    "gunBlack@14.4": 156.8,
+    "gunBlack@15.2": 181.5,
+    "gunBlack@15.1": 182.5,
+    "gunBlack@15.9": 209.7,
+    "gunBlack@16.6": 239.2,
+    "gunBlack@17.4": 268.8,
+    "gunBlack@18.1": 300.5,
+    "aluminium@13.7": 2.1,
+    "aluminium@14.1": 1.9,
+    "armour@21.5": 1.4
+  }
+}

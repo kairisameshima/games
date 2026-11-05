@@ -25,7 +25,7 @@ import { HULL_EXPONENT, HULL_RING_POINTS, hullHalfWidthAtHeight, hullRing, hullS
 import { airfoilSection, ellipseRing, loftGeometry, mirrorAcrossZ, monotoneCubic } from './loft';
 import { PALETTE } from './palette';
 import {
-  codeLettersDecal, fingerprintTexture, flakDamageTexture, hatchOutlineTexture, oilStreakTexture, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
+  codeLettersDecal, fingerprintTexture, flakDamageTexture, hatchOutlineTexture, oilStreakTexture, MISSION_TALLY_ART, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, type NoseArtChoice, glueFogTexture, hullPaintTexture, insigniaDecal, surfacePaintTexture, tailMarkingDecal,
   type DecalArt,
 } from './textures';
 
@@ -100,6 +100,8 @@ interface AircraftMaterials {
   tailMarking: THREE.MeshStandardMaterial;
   noseArt: Record<NoseArtChoice, THREE.MeshStandardMaterial>;
   missionTally: THREE.MeshStandardMaterial;
+  /** The bomb added for the mission just flown, on its own scrap of decal sheet. */
+  nextMission: THREE.MeshStandardMaterial;
   /** Outline of the forward entrance hatch in the belly. */
   hatchOutline: THREE.MeshStandardMaterial;
   bayDoor: THREE.MeshStandardMaterial;
@@ -263,6 +265,7 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
     tailMarking: decalMaterial(tailMarkingDecal(livery.tailSerial, livery.letter, finish)),
     noseArt: { pinup: decalMaterial(noseArtDecal('pinup')), card: decalMaterial(noseArtDecal('card')) },
     missionTally: decalMaterial(missionTallyDecal(MISSIONS_FLOWN)),
+    nextMission: decalMaterial(missionTallyDecal(1, 1)),
     hatchOutline: applyStudioShading(new THREE.MeshPhysicalMaterial({
       map: hatchOutlineTexture(), transparent: true, depthWrite: false, roughness: 0.7,
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
@@ -960,7 +963,7 @@ const TOP_TURRET = {
    * radius just outside the dome where the barrel crosses it, its width across the slot, and how far it reaches below and
    * above the barrel (radians about the trunnions), covering the slot over the guns' working elevations.
    */
-  shutter: { radius: 0.3, width: 0.11, below: 0.42, above: 0.5 },
+  shutter: { radius: 0.3, width: 0.11, below: 0.62, above: 0.75 },
   /** The guns' trunnions, forward of the turret's axis, at the slots' height above the band. */
   gunPivot: { x: 0.18, y: 0.24 },
   /** The collar round each barrel where it passes through its shutter, along the gun from the trunnions. */
@@ -1315,6 +1318,31 @@ const NOSE_ART_PROJECTOR_DEPTH = 1.4;
 /** How far a decal stands off the skin it was projected onto, in model metres. */
 const DECAL_STANDOFF = 0.004;
 
+/**
+ * The next mission's bomb, on a scrap of decal sheet laid where it falls in the tally: the first place of the row after
+ * the last, at the tally's own scale.
+ */
+function addNextMissionBomb(airframe: THREE.Object3D, hull: THREE.Mesh, material: THREE.Material): THREE.Mesh {
+  const tally = STATIONS.missionTally;
+  const { perRow, column, row, margin } = MISSION_TALLY_ART;
+  const tallyWidth = perRow * column + margin * 2;
+  const tallyHeight = Math.ceil(MISSIONS_FLOWN / perRow) * row + margin * 2;
+  const metresAcross = tally.width / tallyWidth;
+  const metresUp = tally.height / tallyHeight;
+  const index = MISSIONS_FLOWN;
+  // Offsets of the scrap's centre from the tally's in art pixels: across toward the tail, and down.
+  const across = (index % perRow) * column - tallyWidth / 2 + (column + margin * 2) / 2;
+  const down = Math.floor(index / perRow) * row - tallyHeight / 2 + (row + margin * 2) / 2;
+  const d = tally.d + across * metresAcross;
+  const h = tally.h - down * metresUp;
+  const decal = addDecal(airframe, hull, material, new THREE.Vector3(toX(d), h, -hullHalfWidthAtHeight(d, h)), PORT, FORWARD.clone().negate(), column * metresAcross + margin * 2 * metresAcross, (row + margin * 2) * metresUp, 0.4);
+  // Shown and hidden on its own, so it is kept out of the bake.
+  decal.userData.unmerged = true;
+  assignAssembly(decal, fuselageSectionAt(d));
+  decal.visible = false;
+  return decal;
+}
+
 function addDecal(
   parent: THREE.Object3D,
   target: THREE.Mesh,
@@ -1572,6 +1600,8 @@ export interface B17 {
   interiorMeshes: THREE.Mesh[];
   /** The nose art the ship carries, each artwork its own decal, so show one; null if its livery has none. */
   noseArt: Record<NoseArtChoice, THREE.Mesh> | null;
+  /** The bomb put on the tally after the mission, hidden until the debrief; null on ships without a tally. */
+  nextMissionBomb: THREE.Mesh | null;
   /**
    * The part of `interiorMeshes` a distant viewer cannot make out through the glazing: everything but the crew and the
    * insulated skin, which closes the hull from inside (the outer skin is single-sided).
@@ -1748,9 +1778,11 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     decal.userData.unmerged = true;
     return [choice, decal];
   })) as Record<NoseArtChoice, THREE.Mesh> : null;
+  let nextMissionBomb: THREE.Mesh | null = null;
   if (livery.noseArt) {
     const tally = STATIONS.missionTally;
     addDecal(airframe, hull, materials.missionTally, new THREE.Vector3(toX(tally.d), tally.h, -hullHalfWidthAtHeight(tally.d, tally.h)), PORT, FORWARD.clone().negate(), tally.width, tally.height, 0.4);
+    nextMissionBomb = addNextMissionBomb(airframe, hull, materials.nextMission);
   }
   // The forward entrance hatch in the belly under the crawlway, port of the centreline.
   const hatch = CRAWLWAY.forwardHatch;
@@ -1942,13 +1974,14 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null, casesBagged: false }))],
     cutawayMaterials: [
       materials.hull, materials.upperPaint, materials.canopy, materials.turretDome, materials.paintChip, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
-      materials.noseArt.pinup, materials.noseArt.card, materials.missionTally,
+      materials.noseArt.pinup, materials.noseArt.card, materials.missionTally, materials.nextMission,
       materials.lowerPaint, ballWindowMaskMaterial(materials.lowerPaint), materials.tailHousing, ...interior.clipMaterials,
     ],
     cutawayHidden: starboardWall,
     interiorMeshes,
     cabinFittings,
     noseArt,
+    nextMissionBomb,
     exhaustPorts,
     battleDamage: { holes, streaks: { meshes: streaks, material: materials.oilStreak }, ...hitEngine, burstPoint },
     landingGear: buildLandingGear(root, materials),

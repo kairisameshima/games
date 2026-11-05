@@ -9,13 +9,14 @@ import { buildB17, createBomb, type B17 } from './scene/b17';
 import { LEAD_LIVERY, WINGMAN_LIVERIES } from './scene/livery';
 import type { CrewStation } from './scene/interior';
 import { Walkthrough } from './walkthrough';
-import { Hardstand, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart } from './scene/hardstand';
+import { Hardstand, LANDING_TOUCHDOWN_SECONDS, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart, type HardstandFrame } from './scene/hardstand';
 import { Foley } from './audio/foley';
 import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
 import { BombTrain, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FlakField } from './scene/effects';
+import { FighterAttack } from './scene/fighters';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
 import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
@@ -30,6 +31,7 @@ import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ShowMode, type ViewMode } from './ui/ui';
 import { ExplodedView } from './scene/exploded';
 import { fuselageSectionAt } from './scene/assemblies';
+import { runAudits } from './debug/audits';
 
 /** World units per metre: the 22.66 m fuselage becomes a 7.3-unit model. */
 const MODEL_SCALE = 0.32;
@@ -121,6 +123,16 @@ interface FormationShip {
   exhaustWorld: THREE.Vector3[];
   /** Where the animator's hand left the model off its true pose this exposure. */
   handling: { offset: THREE.Vector3; turn: THREE.Euler };
+  /** Where each turret points now; it slews from here toward a fighter, or toward its gunner's scan. */
+  turretAim: TurretAim | null;
+}
+
+interface TurretAim {
+  topYaw: number;
+  topPitch: number;
+  ballYaw: number;
+  ballPitch: number;
+  chinYaw: number;
 }
 
 const formationSlots = [
@@ -143,7 +155,7 @@ const formation: FormationShip[] = formationSlots.map((slot, index) => {
     ? aircraft.exhaustPorts.map(() => addVirtualLight(new THREE.Vector3(), PALETTE.turboGlow, 1.1, 0.85))
     : [];
   const exhaustWorld = aircraft.exhaustPorts.map((port) => port.getWorldPosition(new THREE.Vector3()));
-  return { aircraft, holder, base, stand, lag: slot.lag, bombsDropped: 0, turboLights, exhaustWorld, handling: { offset: new THREE.Vector3(), turn: new THREE.Euler() } };
+  return { aircraft, holder, base, stand, lag: slot.lag, bombsDropped: 0, turboLights, exhaustWorld, handling: { offset: new THREE.Vector3(), turn: new THREE.Euler() }, turretAim: null };
 });
 const contrailEmitters = formation.flatMap((ship) => ship.exhaustWorld);
 const flak = new FlakField();
@@ -160,8 +172,9 @@ const puffs = new CottonPuffs();
 const stopMotion = new StopMotionClock();
 const bombs = new BombTrain(createBomb, 1.0);
 const gunnery = new Gunnery(MODEL_SCALE);
+const fighters = new FighterAttack(MODEL_SCALE);
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root);
+scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root, fighters.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -432,6 +445,7 @@ const KIT_SHOT = { target: KitBench.focus, spherical: new THREE.Spherical(21, 1.
 
 function setKitBench(shown: boolean): void {
   if (shown && prologueTime !== null) finishPrologue();
+  if (shown && landingShown) endLanding();
   if (shown && show !== 'exterior') setShow('exterior');
   if (shown) {
     kitBench.paintBoxArt(renderer, scene);
@@ -478,13 +492,65 @@ const STARTER_TURN = 0.45;
 const prologueEngines: EngineStart[] = ['cold', 'cold', 'cold', 'cold'];
 /** Each engine's propeller angle while it is cold or being cranked, by engine number less one. */
 const crankAngles = [0, 0, 0, 0];
+/** No. 3, by engine number less one: the engine the flak hit and the pilot feathered. */
+const NO_3_ENGINE = 2;
 /** Engines the lead has running, for the foley: all four in flight until No. 3 is feathered. */
 let leadEnginesRunning = 4;
 const HARDSTAND_SHOT = { target: new THREE.Vector3(-10, 0.9, 10), spherical: new THREE.Spherical(13, 1.22, 0.75) };
+/**
+ * The lead's way down, from off the end of the field: the camera holds here and pans with the ship, which stays more
+ * than 22 units off all the way round onto final and down the taxiway.
+ */
+const LANDING_SHOT = { target: new THREE.Vector3(-2, 1.5, 9), spherical: new THREE.Spherical(24.3, 1.257, -0.087) };
 const FORMATION_SHOT = { target: new THREE.Vector3(0.3, 3.9, 0), spherical: new THREE.Spherical(16, 1.36, 0.95) };
 
 /** On load the prologue holds this long first, while the boarding men are still being meshed. */
 const PROLOGUE_LOAD_HOLD = 3;
+
+/** The lead is off its stand landing, or on the hardstand after it. */
+let landingShown = false;
+
+/**
+ * Engines the frame has stopped hold their propellers still where they were left; No. 3, feathered, is posed by the
+ * ship's animation.
+ */
+function holdStoppedPropellers(frame: HardstandFrame, featheredEngine: number | null): void {
+  const { aircraft } = formation[0];
+  frame.engines.forEach((engine, index) => {
+    if (engine === 'running' || index === featheredEngine) return;
+    aircraft.propellers[ENGINE_PROPELLER[index]].rotation.x = COLD_PROPELLER_ANGLES[ENGINE_PROPELLER[index]];
+  });
+}
+
+/** Poses the lead on its way home and on the hardstand, `seconds` after it left its stand, over the formation's pose. */
+function stepLanding(seconds: number, previousSeconds: number | null): void {
+  const { aircraft, holder, stand } = formation[0];
+  if (!landingShown) {
+    landingShown = true;
+    hardstand.setShown(true);
+    stand.root.visible = false;
+    tweenCamera(seconds >= LANDING_TOUCHDOWN_SECONDS ? HARDSTAND_SHOT : LANDING_SHOT);
+  } else if (previousSeconds !== null && previousSeconds < LANDING_TOUCHDOWN_SECONDS && seconds >= LANDING_TOUCHDOWN_SECONDS) {
+    tweenCamera(HARDSTAND_SHOT);
+  }
+  const frame = hardstand.landing(seconds);
+  holder.position.copy(frame.position);
+  if (seconds < LANDING_TOUCHDOWN_SECONDS) controls.target.copy(frame.position);
+  holder.rotation.copy(frame.rotation);
+  aircraft.landingGear.setExtension(frame.gearExtension);
+  holdStoppedPropellers(frame, NO_3_ENGINE);
+  leadEnginesRunning = frame.engines.filter((engine) => engine === 'running').length;
+}
+
+/** Back in the air from the hardstand: the lead on its stand again, unless the prologue has it. */
+function endLanding(): void {
+  landingShown = false;
+  if (prologueTime !== null) return;
+  hardstand.setShown(false);
+  formation[0].stand.root.visible = true;
+  formation[0].aircraft.landingGear.setExtension(0);
+  tweenCamera(FORMATION_SHOT);
+}
 
 function startPrologue(hold = 0): void {
   if (kitTime !== null) setKitBench(false);
@@ -557,6 +623,7 @@ function jumpToPhase(index: number): void {
   if (prologueTime !== null && index !== 0) finishPrologue();
   const wrapped = (index + PHASES.length) % PHASES.length;
   sortieTime = PHASES[wrapped].start;
+  if (landingShown && sortieStateAt(sortieTime).landingSeconds === null) endLanding();
   resetEffects();
   for (const ship of formation) ship.bombsDropped = sortieStateAt(sortieTime - ship.lag).bombsReleased;
 }
@@ -567,6 +634,8 @@ let show: ShowMode = 'exterior';
 function setShow(mode: ShowMode): void {
   if (prologueTime !== null && mode !== 'exterior') finishPrologue();
   if (kitTime !== null && mode !== 'exterior') setKitBench(false);
+  // The cutaway and the exploded view are of the ship on its stand: from the field it goes back up to the box.
+  if (landingShown && mode !== 'exterior') jumpToPhase(0);
   show = mode;
   walkthrough.cancel();
   controls.minDistance = ORBIT_MIN_DISTANCE.outside;
@@ -711,6 +780,75 @@ const standMount = new THREE.Vector3(9.0 - STAND_MOUNT_D, hullSectionAt(STAND_MO
 /** Where No. 3's feathered propeller stops, and how far its blades turn about their length to stand edge-on. */
 const FEATHERED_PROPELLER = { restAngle: 0.4, bladeTurn: 1.25 } as const;
 
+/**
+ * How fast a gunner slews his turret, radians per second: faster than the A-1A's 33° a second, as a head-on pass
+ * crosses the box in a few seconds of film.
+ */
+const TURRET_SLEW = 1.6;
+/** A gunner picks up a fighter inside this range of his turret, world units. */
+const FIGHTER_TRACKING_RANGE = 40;
+/**
+ * How far each turret's guns can be laid: the top turret within its shutters' travel, the ball from the horizon down,
+ * the chin either side of the nose.
+ */
+const TURRET_LIMITS = { topPitch: [0, 0.45], ballPitch: [-1.45, 0], chinYaw: [-1.2, 1.2] } as const;
+const scratchTarget = new THREE.Vector3();
+const scratchFighter = new THREE.Vector3();
+
+/** Turns `from` toward `to` by at most `step`, the short way round when `wraps`. */
+function slew(from: number, to: number, step: number, wraps: boolean): number {
+  const difference = wraps ? THREE.MathUtils.euclideanModulo(to - from + Math.PI, Math.PI * 2) - Math.PI : to - from;
+  return from + THREE.MathUtils.clamp(difference, -step, step);
+}
+
+/**
+ * Where a turret on `mount` must turn to bear on the fighter nearest it: azimuth about the mount's y and elevation
+ * above its horizon, or null when no fighter is in range.
+ */
+function bearingOnFighter(mount: THREE.Object3D): { azimuth: number; elevation: number } | null {
+  mount.getWorldPosition(scratchTarget);
+  if (!fighters.nearest(scratchTarget, FIGHTER_TRACKING_RANGE, scratchFighter)) return null;
+  const parent = mount.parent;
+  if (!parent) return null;
+  const local = parent.worldToLocal(scratchFighter).sub(mount.position);
+  return { azimuth: Math.atan2(-local.z, local.x), elevation: Math.atan2(local.y, Math.hypot(local.x, local.z)) };
+}
+
+/** Each gunner scans his sector until a fighter comes in range, then slews on to it and follows it through. */
+function aimTurrets(ship: FormationShip, state: SortieState, elapsed: number, deltaSec: number, wander: number): void {
+  const { aircraft } = ship;
+  const onRun = state.phase.id === 'bomb-run' || state.phase.id === 'flak-hit' || state.phase.id === 'bombs-away';
+  const scan: TurretAim = {
+    topYaw: Math.sin(elapsed * 0.31 + wander) * (onRun ? 0.6 : 1.4) + Math.sin(elapsed * 0.83) * 0.2,
+    topPitch: 0.12 + Math.sin(elapsed * 0.47 + wander) * 0.1,
+    ballYaw: elapsed * 0.35 + wander,
+    ballPitch: -0.35 + Math.sin(elapsed * 0.29 + wander) * 0.3,
+    chinYaw: onRun ? 0 : Math.sin(elapsed * 0.4 + wander) * 0.45,
+  };
+  const aim = ship.turretAim ??= { ...scan };
+  const top = bearingOnFighter(aircraft.topTurret.yaw);
+  const ball = bearingOnFighter(aircraft.ballTurret.yaw);
+  const chin = bearingOnFighter(aircraft.chinTurret);
+  const target: TurretAim = {
+    topYaw: top?.azimuth ?? scan.topYaw,
+    topPitch: THREE.MathUtils.clamp(top?.elevation ?? scan.topPitch, ...TURRET_LIMITS.topPitch),
+    ballYaw: ball?.azimuth ?? scan.ballYaw,
+    ballPitch: THREE.MathUtils.clamp(ball?.elevation ?? scan.ballPitch, ...TURRET_LIMITS.ballPitch),
+    chinYaw: THREE.MathUtils.clamp(chin?.azimuth ?? scan.chinYaw, ...TURRET_LIMITS.chinYaw),
+  };
+  const step = TURRET_SLEW * deltaSec;
+  aim.topYaw = slew(aim.topYaw, target.topYaw, step, true);
+  aim.topPitch = slew(aim.topPitch, target.topPitch, step, false);
+  aim.ballYaw = slew(aim.ballYaw, target.ballYaw, step, true);
+  aim.ballPitch = slew(aim.ballPitch, target.ballPitch, step, false);
+  aim.chinYaw = slew(aim.chinYaw, target.chinYaw, step, false);
+  aircraft.topTurret.yaw.rotation.y = aim.topYaw;
+  aircraft.topTurret.pitch.rotation.z = aim.topPitch;
+  aircraft.ballTurret.yaw.rotation.y = aim.ballYaw;
+  aircraft.ballTurret.pitch.rotation.z = aim.ballPitch;
+  aircraft.chinTurret.rotation.y = aim.chinYaw;
+}
+
 function animateShip(ship: FormationShip, state: SortieState, elapsed: number, deltaSec: number, shipIndex: number): void {
   const { aircraft, holder } = ship;
   const damaged = shipIndex === 0;
@@ -753,12 +891,7 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
   holder.rotation.y += ship.handling.turn.y;
   holder.rotation.z += ship.handling.turn.z;
 
-  const onRun = state.phase.id === 'bomb-run' || state.phase.id === 'flak-hit' || state.phase.id === 'bombs-away';
-  aircraft.topTurret.yaw.rotation.y = Math.sin(elapsed * 0.31 + wander) * (onRun ? 0.6 : 1.4) + Math.sin(elapsed * 0.83) * 0.2;
-  aircraft.topTurret.pitch.rotation.z = 0.12 + Math.sin(elapsed * 0.47 + wander) * 0.1;
-  aircraft.ballTurret.yaw.rotation.y = elapsed * 0.35 + wander;
-  aircraft.ballTurret.pitch.rotation.z = -0.35 + Math.sin(elapsed * 0.29 + wander) * 0.3;
-  aircraft.chinTurret.rotation.y = onRun ? 0 : Math.sin(elapsed * 0.4 + wander) * 0.45;
+  aimTurrets(ship, state, elapsed, deltaSec, wander);
 
   const doorAngle = state.bayDoors * THREE.MathUtils.degToRad(84);
   for (const door of aircraft.bombBayDoors) door.hinge.rotation.x = door.side * doorAngle;
@@ -966,12 +1099,16 @@ function exposeFrame(exposureSec: number): void {
   const deltaSec = playing ? stopMotion.space(exposureSec) : 0;
   filmTime += deltaSec;
   const previousTime = sortieTime;
-  // The sortie holds at the start of the cruise while the lead is still on the hardstand.
-  if (prologueTime === null) sortieTime = (sortieTime + deltaSec) % SORTIE_LOOP_SECONDS;
+  // The sortie holds at the start of the cruise while the lead is still on the hardstand; after the debrief the crew
+  // board again for the next mission.
+  if (prologueTime === null) sortieTime += deltaSec;
+  if (sortieTime >= SORTIE_LOOP_SECONDS) startPrologue();
   if (sortieTime < previousTime) resetEffects();
   const leadState = sortieStateAt(sortieTime);
+  const previousLanding = sortieStateAt(previousTime).landingSeconds;
   exploded.update(exposureSec);
 
+  fighters.update(leadState.time, deltaSec, stopMotion.random);
   formation.forEach((ship, index) => {
     const state = index === 0 ? leadState : sortieStateAt(Math.max(sortieTime - ship.lag, 0));
     if (state.bombsReleased < ship.bombsDropped) ship.bombsDropped = state.bombsReleased;
@@ -980,6 +1117,9 @@ function exposeFrame(exposureSec: number): void {
   });
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
   if (prologueTime !== null) stepPrologue(deltaSec);
+  else if (leadState.landingSeconds !== null && kitTime === null) stepLanding(leadState.landingSeconds, previousLanding);
+  const nextMissionBomb = formation[0].aircraft.nextMissionBomb;
+  if (nextMissionBomb) nextMissionBomb.visible = leadState.tallyAdded;
   stepKitBench(deltaSec);
 
   if (deltaSec > 0) setCottonFrame(stopMotion.frame);
@@ -993,7 +1133,7 @@ function exposeFrame(exposureSec: number): void {
   updateLeadCabinShadows();
   updateCabinBulbs();
   // No trails while the lead is on the ground or climbing out; the box forms up behind it.
-  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null);
+  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null && !landingShown);
   const damage = formation[0].aircraft.battleDamage;
   damage.smokePort.getWorldPosition(engineSmokeEmitter[0]);
   engineSmoke.update(deltaSec, AIR_DRIFT_SPEED, engineSmokeEmitter, stopMotion.random, leadState.engineSmoking);
@@ -1008,7 +1148,7 @@ function exposeFrame(exposureSec: number): void {
   if (deltaSec > 0) {
     flickerLamps();
     filmGate.advance(stopMotion.random, stopMotion.jitter);
-    const leadEngines = prologueTime !== null ? leadEnginesRunning : leadState.propellerFeathered ? 3 : 4;
+    const leadEngines = prologueTime !== null || landingShown ? leadEnginesRunning : leadState.propellerFeathered ? 3 : 4;
     foley.expose({
       enginesRunning: leadEngines, sputtering: leadState.engineSputtering, fire: leadState.engineFire,
       gunfire: leadState.gunfire, flakBursts: flak.takeBurstCount(),
@@ -1058,7 +1198,16 @@ function frame(timestamp: number): void {
 }
 
 if (import.meta.env.DEV) {
-  Object.assign(window, { b17Debug: { THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, jumpToPhase, switchView, setShow, exploded, pinQuality, setPlaying: (value: boolean) => { playing = value; } } });
+  Object.assign(window, {
+    b17Debug: {
+      THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, fighters, jumpToPhase, switchView, setShow, exploded, pinQuality,
+      setPlaying: (value: boolean) => { playing = value; },
+      seek: (time: number) => { sortieTime = time; },
+      /** Every man is meshed: his figure is built in a worker and arrives after load. */
+      crewMeshed: () => formation.every((ship) => ship.aircraft.crew.every(({ mesh }) => mesh.geometry.getAttribute('position')?.count > 0)),
+      audit: () => runAudits(formation[0].aircraft, formation[1].aircraft),
+    },
+  });
 }
 
 requestAnimationFrame(frame);
