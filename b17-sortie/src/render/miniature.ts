@@ -150,6 +150,17 @@ const cottonUniforms = { uCottonFrame: { value: 0 } };
 
 const COTTON_VERTEX_DECLARATIONS = /* glsl */ `
   attribute float aShell;
+  // Value noise for the fuzz's reach: where it is high, fibres are teased out in a wisp well beyond the tuft.
+  float cottonWispHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+  float cottonWispNoise(vec3 p) {
+    vec3 cell = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(cottonWispHash(cell), cottonWispHash(cell + vec3(1, 0, 0)), f.x), mix(cottonWispHash(cell + vec3(0, 1, 0)), cottonWispHash(cell + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(cottonWispHash(cell + vec3(0, 0, 1)), cottonWispHash(cell + vec3(1, 0, 1)), f.x), mix(cottonWispHash(cell + vec3(0, 1, 1)), cottonWispHash(cell + vec3(1, 1, 1)), f.x), f.y),
+      f.z);
+  }
   varying vec3 vCottonPosition;
   varying float vWisp;
   varying float vShell;
@@ -161,7 +172,9 @@ const COTTON_VERTEX_DECLARATIONS = /* glsl */ `
 
 const COTTON_VERTEX = /* glsl */ `
   #include <begin_vertex>
-  transformed += normalize(objectNormal) * aShell * COTTON_FUZZ;
+  // The halo is uneven: short and dense in most places, pulled out into loose wisps in others.
+  float cottonReach = COTTON_WISP_MIN + pow(cottonWispNoise(position * COTTON_WISP_FREQUENCY), 2.0) * COTTON_WISP_PULL;
+  transformed += normalize(objectNormal) * aShell * COTTON_FUZZ * cottonReach;
   vShell = aShell;
   #ifdef COTTON_INSTANCED
     // Fibres keep their size whatever an instance's scale; a stretched tuft's fibres stretch with it, as pulled cotton's do.
@@ -202,16 +215,23 @@ const COTTON_ALPHA = /* glsl */ `
   vec2 fibres = cottonFibres(vCottonPosition);
   {
     float density = fibres.y * 0.85 + fibres.x * 0.45;
-    // The body is solid until it wisps away; each shell out keeps only the stronger filaments.
-    float needed = vShell > 0.0 ? 0.32 + vShell * 0.7 + vWisp * 0.7 : vWisp * 1.6 - 0.9;
+    // The body is solid until it wisps away, except toward its silhouette, where it frays into the fibres it is made of
+    // so no hard ball edge shows; each shell out keeps only the stronger filaments.
+    float fray = pow(1.0 - cottonFacing, 2.5) * COTTON_BODY_FRAY;
+    float needed = vShell > 0.0 ? 0.32 + vShell * 0.7 + vWisp * 0.7 : vWisp * 1.6 - 0.9 + fray;
     diffuseColor.a = 0.5 + (density - needed) * 3.0;
   }`;
 
 const COTTON_SHADING = /* glsl */ `
   #include <normal_fragment_maps>
-  if (vShell == 0.0) normal = miniatureBump(-vViewPosition, normal, (fibres.y * 0.6 + fibres.x * 0.4) * COTTON_RELIEF, faceDirection);
-  // Fibres deeper in the halo sit in the shadow of those over them.
-  diffuseColor.rgb *= 0.84 + vShell * 0.12 + fibres.y * 0.08;`;
+  // Wool has no surface to bump: the strands only catch the light, so the relief is a whisper of the filaments alone.
+  if (vShell == 0.0) normal = miniatureBump(-vViewPosition, normal, fibres.y * COTTON_RELIEF, faceDirection);
+  // Light scatters through the fibres and back out, so wool never shades to a hard terminator: the shading normal is
+  // turned part way to the eye, which keeps the far side of each tuft soft and pale.
+  normal = normalize(mix(normal, vec3(0.0, 0.0, 1.0), COTTON_SOFTNESS));
+  // Fibres deeper in the halo sit in the shadow of those over them; the strands themselves read a touch brighter than
+  // the gaps between them.
+  diffuseColor.rgb *= 0.85 + vShell * 0.08 + fibres.y * 0.24 - (1.0 - fibres.x) * 0.04;`;
 
 // Loose fibres scatter light back towards a grazing eye: a soft bright rim in the wool's own colour, a cheap stand-in
 // for a sheen lobe.
@@ -238,15 +258,26 @@ export interface CottonOptions {
   fuzz: number;
   /** A light inside the tuft, in this colour: `glow` on the material sets how bright it burns. */
   glowColor?: THREE.ColorRepresentation;
+  /** How far the body frays to fibres at its silhouette; lower for dense wool, such as a fire's tightly packed core. */
+  fray?: number;
 }
 
 export type CottonMaterial = THREE.MeshStandardMaterial & { wisp: { value: number }; glow: { value: number } };
 
-/** Relief of the fibres on a tuft's body, in world units. */
-const COTTON_RELIEF = 0.004;
+/** Relief of the fibres on a tuft's body, in world units: barely any, or the wool reads as plaster. */
+const COTTON_RELIEF = 0.0012;
+/** By default, how far the body's alpha threshold rises at its silhouette, fraying its edge into fibres. */
+const COTTON_BODY_FRAY = 1.5;
+/** How far the shading normal turns to the eye, standing in for light scattered through the wool. */
+const COTTON_SOFTNESS = 0.32;
+/**
+ * The halo's reach as a multiple of `fuzz`: at least `min`, and up to `min + pull` where the wool is teased out into a
+ * wisp; wisps are spaced at `frequency` of the filament frequency, a few to a tuft.
+ */
+const COTTON_WISP = { min: 0.55, pull: 2.4, frequency: 0.12 } as const;
 /** Shell fragments facing the eye more squarely than this (|cos| of the view angle) are dropped. */
 const COTTON_SHELL_FACING = 0.55;
-const COTTON_RIM_STRENGTH = 0.22;
+const COTTON_RIM_STRENGTH = 0.3;
 
 export function cottonMaterial(options: CottonOptions): CottonMaterial {
   const material = applyStudioShading(new THREE.MeshStandardMaterial({
@@ -258,12 +289,16 @@ export function cottonMaterial(options: CottonOptions): CottonMaterial {
   const glowing = options.glowColor !== undefined;
   const instanced = options.instanced === true;
   const frequency = options.frequency.toFixed(2);
+  const fray = options.fray ?? COTTON_BODY_FRAY;
   const fuzz = options.fuzz.toFixed(4);
-  extendShader(material, `cotton-${instanced ? 'instanced' : 'single'}-${frequency}-${fuzz}${glowing ? '-glow' : ''}`, (shader) => {
+  extendShader(material, `cotton-${instanced ? 'instanced' : 'single'}-${frequency}-${fuzz}-${fray.toFixed(2)}${glowing ? '-glow' : ''}`, (shader) => {
     Object.assign(shader.uniforms, miniatureUniforms, cottonUniforms, { uWisp: wisp, uGlow: glow, uGlowColor: glowColor });
     const defines = [
       `#define COTTON_FREQUENCY ${frequency}`, `#define COTTON_FUZZ ${fuzz}`, `#define COTTON_RELIEF ${COTTON_RELIEF.toFixed(4)}`,
       `#define COTTON_SHELL_FACING ${COTTON_SHELL_FACING.toFixed(2)}`, `#define COTTON_RIM_STRENGTH ${COTTON_RIM_STRENGTH.toFixed(2)}`,
+      `#define COTTON_WISP_MIN ${COTTON_WISP.min.toFixed(2)}`, `#define COTTON_WISP_PULL ${COTTON_WISP.pull.toFixed(2)}`,
+      `#define COTTON_WISP_FREQUENCY ${(options.frequency * COTTON_WISP.frequency).toFixed(3)}`,
+      `#define COTTON_SOFTNESS ${COTTON_SOFTNESS.toFixed(2)}`, `#define COTTON_BODY_FRAY ${fray.toFixed(2)}`,
       instanced ? '#define COTTON_INSTANCED' : '', glowing ? '#define COTTON_GLOW' : '', '',
     ].join('\n');
     shader.vertexShader = defines + shader.vertexShader
@@ -300,7 +335,7 @@ export interface CottonTuftOptions {
  * shells come apart so a caller can keep the shells out of the shadow pass, where they would only repeat the body.
  */
 export function cottonTuftLayers(seed: number, options: CottonTuftOptions): { body: THREE.BufferGeometry; shells: THREE.BufferGeometry } {
-  const lumpiness = options.lumpiness ?? 0.22;
+  const lumpiness = options.lumpiness ?? 0.3;
   const body = withShellIndex(lumpySphere(options.detail, seed, lumpiness), 0);
   const shellLayers: THREE.BufferGeometry[] = [];
   for (let shell = 1; shell <= options.shells; shell++) {
@@ -333,8 +368,10 @@ function lumpySphere(detail: number, seed: number, lumpiness: number): THREE.Buf
   const direction = new THREE.Vector3();
   for (let index = 0; index < position.count; index++) {
     direction.fromBufferAttribute(position, index).normalize();
-    const lump = lumpNoise(direction.x * 2.1 + seed, direction.y * 2.1, direction.z * 2.1) * 0.7
-      + lumpNoise(direction.x * 4.6, direction.y * 4.6 + seed, direction.z * 4.6) * 0.3;
+    // Big lobes, smaller bulges on them, and the small tufts a pulled-apart ball of wool is made of.
+    const lump = lumpNoise(direction.x * 2.1 + seed, direction.y * 2.1, direction.z * 2.1) * 0.55
+      + lumpNoise(direction.x * 4.6, direction.y * 4.6 + seed, direction.z * 4.6) * 0.28
+      + lumpNoise(direction.x * 9.5, direction.y * 9.5, direction.z * 9.5 + seed) * 0.17;
     direction.multiplyScalar(1 + (lump - 0.5) * 2 * lumpiness);
     position.setXYZ(index, direction.x, direction.y, direction.z);
   }

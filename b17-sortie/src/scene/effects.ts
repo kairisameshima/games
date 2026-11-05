@@ -405,8 +405,9 @@ export class EngineFire {
 
   constructor() {
     this.materials = {
-      core: cottonMaterial({ color: FIRE_COLOURS.core.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.core.bulb ?? undefined }),
-      flame: cottonMaterial({ color: FIRE_COLOURS.flame.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.flame.bulb ?? undefined }),
+      // Packed tight round the bulbs, so the light never shows through gaps worn in the wool.
+      core: cottonMaterial({ color: FIRE_COLOURS.core.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.core.bulb ?? undefined, fray: FIRE_COTTON.fray }),
+      flame: cottonMaterial({ color: FIRE_COLOURS.flame.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz, glowColor: FIRE_COLOURS.flame.bulb ?? undefined, fray: FIRE_COTTON.fray }),
       smoke: cottonMaterial({ color: FIRE_COLOURS.smoke.wool, frequency: FIRE_COTTON.frequency, fuzz: FIRE_COTTON.fuzz }),
     };
     this.tufts = FIRE_TUFTS.map((spec, index) => {
@@ -553,7 +554,7 @@ export class CottonPuffs {
 }
 
 /** Filaments per unit tuft, the halo's reach in tuft radii, and its shells. */
-const FIRE_COTTON = { frequency: 9, fuzz: 0.28, shells: 3 } as const;
+const FIRE_COTTON = { frequency: 9, fuzz: 0.28, shells: 3, fray: 0.3 } as const;
 
 // Falling bombs, released in train from the bay; each rides down a clear acrylic rod stood on the set floor, the rig a
 // stop-motion animator would hold a falling prop on.

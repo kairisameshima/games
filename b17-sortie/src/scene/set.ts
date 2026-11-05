@@ -183,7 +183,7 @@ function buildSweep(): THREE.Group {
 }
 
 /** Cotton filaments per cloud unit (a tuft is half to one unit across), and how far its fibre halo reaches. */
-const CLOUD_COTTON = { frequency: 22, fuzz: 0.09, shells: 3 } as const;
+const CLOUD_COTTON = { frequency: 30, fuzz: 0.1, shells: 4 } as const;
 /** Stop-motion boil: how far an animator's hands shift a cloud between frames. */
 const CLOUD_BOIL = { turn: 0.012, scale: 0.012, lift: 0.006 } as const;
 
