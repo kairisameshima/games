@@ -225,7 +225,10 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
     const belt = feedGun(materials, {
       boxParent: parent,
       box: {
-        centre: v(boxD, boxFloor + height / 2, side * (hullHalfWidthAtHeight(TAIL.ammunitionD + length, tailFloorHeight(TAIL.ammunitionD + length)) - depth / 2 - 0.02)),
+        // Against the wall where it is narrowest round the box: the hull tapers aft and curves in under the floor.
+        centre: v(boxD, boxFloor + height / 2, side * (Math.min(
+          ...[TAIL.ammunitionD, TAIL.ammunitionD + length].flatMap((d) => [hullHalfWidthAtHeight(d, boxFloor), hullHalfWidthAtHeight(d, boxFloor + height)]),
+        ) - depth / 2 - 0.02)),
         size: TAIL_AMMUNITION_BOX, material: materials.aluminium, holedFace: 1,
         throat: { at: new THREE.Vector3(-length / 2 + 0.1, height / 2, 0), facing: new THREE.Vector3(0, 1, 0) },
       },

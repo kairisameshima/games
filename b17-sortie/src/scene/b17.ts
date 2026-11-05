@@ -621,6 +621,9 @@ function buildFinGeometry(tailGunPosition: TailGunPosition): THREE.BufferGeometr
   return conformRootToHull(loftGeometry(rings, heights.map((height) => height / FIN_TOP), true, true), roof);
 }
 
+/** How far the gunner's cab stands proud of the fuselage's sides. */
+const TAIL_HOUSING_PROUD = 0.015;
+
 /**
  * Superellipse exponent of the gunner's cab sections. The Cheyenne cab is flat-sided and flat-roofed with tight corners,
  * as its sheet metal and glazing frames make; the stinger's is rounder, nearer the hull's own sections.
@@ -647,9 +650,9 @@ function tailHousingSections(tailGunPosition: TailGunPosition): NacelleProfile[]
   }
   return stations.map((d, index) => {
     const hull = hullSectionAt(d);
-    // The first section is tucked just inside the skin, so the cab's open forward end never shows from outside.
-    const halfWidth = index === 0 ? hull.halfWidth - 0.01 : hull.halfWidth + 0.015;
-    return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: Math.min(halfWidth, 0.4) };
+    // Flush with the fuselage's sides, just proud of them: where the hull's top is cut away under the cab, the cab is
+    // the wall, and anything built against the hull's wall must stay inside it.
+    return { d, top: tops[index], bottom: hull.bottom + 0.3, halfWidth: hull.halfWidth + TAIL_HOUSING_PROUD };
   });
 }
 
