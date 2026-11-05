@@ -6,14 +6,29 @@
 
 /** The four Wright R-1820s' firing notes, a little apart so they beat against each other, in Hz. */
 const ENGINE_NOTES = [38, 38.7, 39.5, 40.2];
-const LEVELS = { master: 0.5, engine: 0.06, engineRumble: 0.09, gun: 0.22, flak: 0.5, shutter: 0.035, crackle: 0.18 } as const;
+const LEVELS = {
+  master: 0.5, engine: 0.06, engineRumble: 0.09, gun: 0.22, flak: 0.5, shutter: 0.035, crackle: 0.18,
+  fighter: 0.12, fighterGuns: 0.2, bombBurst: 0.35, crash: 0.6,
+} as const;
+/**
+ * A fighter's BMW 801: its note, how far off it is heard (world units from the camera), and how much its pitch rises per
+ * world unit a second it closes, overdone as a model's would be, so the pass reads as a pass.
+ */
+const FIGHTER_ENGINE = { note: 92, heardWithin: 22, dopplerPerUnit: 0.03, maxShift: 0.35, filter: 900 } as const;
+const BOMB_BURST_SECONDS = 1.3;
+const CRASH_SECONDS = 1.8;
 /** A fire's crackle: pops this short, up to this many an exposure at full blaze. */
 const CRACKLE = { seconds: 0.025, perExposure: 4 } as const;
 const GUN_BURST_SECONDS = 0.07;
 const FLAK_SECONDS = 0.9;
 const SHUTTER_SECONDS = 0.012;
 
-interface Engines { gains: GainNode[]; rumble: GainNode }
+/** `value` held within 0..1. */
+function clampUnit(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
+}
+
+interface Engines { gains: GainNode[]; rumble: GainNode; fighter: { gain: GainNode; oscillator: OscillatorNode } }
 
 /** What the film did this exposure, for the foley to answer. */
 export interface ExposureSounds {
@@ -26,6 +41,14 @@ export interface ExposureSounds {
   /** 0..1 how hard the gunners are firing. */
   gunfire: number;
   flakBursts: number;
+  /** The nearest fighter's distance from the camera, world units, and how fast it is closing (negative opening). */
+  fighter: { distance: number; closing: number } | null;
+  /** A fighter's guns flashed this exposure. */
+  fighterGuns: boolean;
+  /** Bombs that burst on the floor this exposure. */
+  bombBursts: number;
+  /** The hit fighter struck the floor this exposure. */
+  crashed: boolean;
 }
 
 export class Foley {
@@ -68,6 +91,15 @@ export class Foley {
     // Each gunner's burst is a few rounds; on an exposure, a burst goes off with the fire's strength.
     if (random() < sounds.gunfire) this.burst(GUN_BURST_SECONDS, LEVELS.gun * (0.6 + random() * 0.4), 'bandpass', 900 + random() * 500);
     for (let burst = 0; burst < sounds.flakBursts; burst++) this.burst(FLAK_SECONDS, LEVELS.flak, 'lowpass', 140);
+    // The fighter howls up as it closes and drops away as it opens, louder the nearer it is.
+    const { fighter } = this.engines;
+    const near = sounds.fighter ? clampUnit(1 - sounds.fighter.distance / FIGHTER_ENGINE.heardWithin) ** 2 : 0;
+    const shift = sounds.fighter ? Math.max(-FIGHTER_ENGINE.maxShift, Math.min(FIGHTER_ENGINE.maxShift, sounds.fighter.closing * FIGHTER_ENGINE.dopplerPerUnit)) : 0;
+    fighter.gain.gain.setTargetAtTime(near * LEVELS.fighter, now, 0.08);
+    fighter.oscillator.frequency.setTargetAtTime(FIGHTER_ENGINE.note * (1 + shift), now, 0.08);
+    if (sounds.fighterGuns) this.burst(GUN_BURST_SECONDS, LEVELS.fighterGuns * (0.4 + near * 0.6), 'bandpass', 600 + random() * 300);
+    for (let burst = 0; burst < sounds.bombBursts; burst++) this.burst(BOMB_BURST_SECONDS, LEVELS.bombBurst * (0.7 + random() * 0.3), 'lowpass', 90 + random() * 40);
+    if (sounds.crashed) this.burst(CRASH_SECONDS, LEVELS.crash, 'lowpass', 220);
   }
 
   private build(): void {
@@ -107,10 +139,21 @@ export class Foley {
     rumbleSource.connect(rumbleFilter).connect(rumble).connect(master);
     rumbleSource.start();
 
+    const fighterOscillator = context.createOscillator();
+    fighterOscillator.type = 'sawtooth';
+    fighterOscillator.frequency.value = FIGHTER_ENGINE.note;
+    const fighterFilter = context.createBiquadFilter();
+    fighterFilter.type = 'lowpass';
+    fighterFilter.frequency.value = FIGHTER_ENGINE.filter;
+    const fighterGain = context.createGain();
+    fighterGain.gain.value = 0;
+    fighterOscillator.connect(fighterFilter).connect(fighterGain).connect(master);
+    fighterOscillator.start();
+
     this.context = context;
     this.master = master;
     this.noise = noise;
-    this.engines = { gains, rumble };
+    this.engines = { gains, rumble, fighter: { gain: fighterGain, oscillator: fighterOscillator } };
   }
 
   /** A short filtered noise burst with a fast decay. */

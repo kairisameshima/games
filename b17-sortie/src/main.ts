@@ -15,7 +15,7 @@ import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
-import { BombTrain, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FlakField } from './scene/effects';
+import { BombTrain, Contrails, CottonPuffs, ENGINE_SMOKE_LOOK, EngineFire, FIGHTER_SMOKE_LOOK, FlakField } from './scene/effects';
 import { FighterAttack } from './scene/fighters';
 import { Gunnery } from './scene/gunnery';
 import { PALETTE } from './scene/palette';
@@ -171,11 +171,21 @@ const EXTINGUISHER_SECOND_PUFF = new THREE.Vector3(-0.12, -0.05, 0.04);
 /** Extinguisher clouds and starting coughs. */
 const puffs = new CottonPuffs();
 const stopMotion = new StopMotionClock();
-const bombs = new BombTrain(createBomb, 1.0);
+/** A falling bomb bursts once its middle is this far off the set floor: lying on it. */
+const BOMB_BURST_HEIGHT = 0.08;
+const bombs = new BombTrain(createBomb, BOMB_BURST_HEIGHT);
 const gunnery = new Gunnery(MODEL_SCALE);
 const fighters = new FighterAttack(MODEL_SCALE);
+/** The shot-down fighter's smoke. */
+const fighterSmoke = new Contrails(1, FIGHTER_SMOKE_LOOK);
+const fighterSmokeEmitter = [new THREE.Vector3()];
+/** The nearest fighter's distance from the camera on the last exposure, for the foley's pitch. */
+let lastFighterDistance: number | null = null;
+const fighterNearest = new THREE.Vector3();
+/** A fighter is heard within this range of the camera, world units. */
+const FIGHTER_HEARD_WITHIN = 40;
 for (const ship of formation) gunnery.addShip(ship.aircraft.root, ship.aircraft.guns);
-scene.add(flak.root, contrails.root, engineSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root, fighters.root);
+scene.add(flak.root, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, bombs.root, gunnery.root, fighters.root);
 
 // Cutaway of the lead ship: the starboard skin peels back to show the crew at their stations.
 const cutaway = new Cutaway(formation[0].aircraft);
@@ -378,6 +388,7 @@ function applyView(next: ViewMode): void {
   set.sweep.visible = next === 'studio';
   set.practicalLights.forEach((light, index) => { light.intensity = next === 'lab' ? practicalIntensities[index] : 0; });
   contrails.setStudioMode(next === 'studio');
+  fighterSmoke.setStudioMode(next === 'studio');
   engineSmoke.setStudioMode(next === 'studio');
   document.body.classList.toggle('is-studio', next === 'studio');
   ui.setView(next);
@@ -712,6 +723,18 @@ let gunnerView = false;
 const engineerMesh = formation[0].aircraft.crew.find(({ station }) => station.member.role === 'Flight engineer')?.mesh ?? null;
 const gunnerAhead = new THREE.Vector3();
 
+/** How near the nearest fighter is to the camera and how fast it is closing, or null when none is heard. */
+function fighterHeard(deltaSec: number): { distance: number; closing: number } | null {
+  if (!fighters.nearest(camera.position, FIGHTER_HEARD_WITHIN, fighterNearest)) {
+    lastFighterDistance = null;
+    return null;
+  }
+  const distance = fighterNearest.distanceTo(camera.position);
+  const closing = lastFighterDistance === null ? 0 : (lastFighterDistance - distance) / deltaSec;
+  lastFighterDistance = distance;
+  return { distance, closing };
+}
+
 /** Looks out through the top turret's sight, along its guns, with the reticle over the frame; off returns to the box. */
 function setGunnerView(on: boolean): void {
   if (on === gunnerView) return;
@@ -819,7 +842,7 @@ addEventListener('keydown', (event) => {
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.root, engineSmoke.root, engineFire.root, puffs.root, flak.root];
+const cottonSet = [set.clouds, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -1223,6 +1246,12 @@ function exposeFrame(exposureSec: number): void {
   driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45, stopMotion.random);
   flak.update(deltaSec, leadState.flakRate, AIR_DRIFT_SPEED, flakZone);
   bombs.update(deltaSec);
+  const bombBursts = bombs.takeImpacts();
+  for (const impact of bombBursts) puffs.emit('bombBurst', impact, false, stopMotion.random);
+  const fighterSmoking = fighters.smoke(fighterSmokeEmitter[0]);
+  fighterSmoke.update(deltaSec, AIR_DRIFT_SPEED, fighterSmokeEmitter, stopMotion.random, fighterSmoking);
+  const crash = fighters.takeCrash();
+  if (crash) puffs.emit('crash', crash, false, stopMotion.random);
   ui.update(leadState);
 
   formation[0].holder.updateMatrixWorld(true);
@@ -1251,6 +1280,7 @@ function exposeFrame(exposureSec: number): void {
     foley.expose({
       enginesRunning: leadEngines, sputtering: leadState.engineSputtering, fire: leadState.engineFire,
       gunfire: leadState.gunfire, flakBursts: flak.takeBurstCount(),
+      fighter: fighterHeard(deltaSec), fighterGuns: fighters.firing, bombBursts: bombBursts.length, crashed: crash !== null,
     }, stopMotion.random);
   }
   renderer.shadowMap.needsUpdate = !shadowMapHeld;

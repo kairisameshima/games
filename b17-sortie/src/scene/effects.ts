@@ -207,6 +207,8 @@ export interface TrailLook {
 const CONTRAIL_LOOK: TrailLook = { colour: CONTRAIL_COLOR, girth: 1 };
 /** Oil smoke from a hit engine: the same cotton on its wire, dyed charcoal and pulled out thicker. */
 export const ENGINE_SMOKE_LOOK: TrailLook = { colour: { lab: '#1e1e20', studio: '#19191b' }, girth: 3.0 };
+/** A shot-down fighter's smoke: a thinner trail, the fighter being a third the bomber's size. */
+export const FIGHTER_SMOKE_LOOK: TrailLook = { colour: { lab: '#262422', studio: '#1f1d1b' }, girth: 1.4 };
 const ARMATURE_WIRE_RADIUS = 0.003;
 
 interface TrailPoint {
@@ -454,15 +456,19 @@ export class EngineFire {
 }
 
 // Puffs: a single breath of cotton set at a point and teased bigger and thinner over a second or two, then taken away.
-// White for the CO2 cloud of an engine's fire extinguisher, black for the cough of an engine catching on start.
+// White for the CO2 cloud of an engine's fire extinguisher, black for the cough of an engine catching on start, brown
+// dust where a bomb bursts on the set floor, and oily black where a shot-down fighter hits it.
 
-export type PuffKind = 'extinguisher' | 'cough';
+export type PuffKind = 'extinguisher' | 'cough' | 'bombBurst' | 'crash';
 
 const PUFF_LOOKS: Record<PuffKind, { colour: string; size: number; life: number; rise: number }> = {
   extinguisher: { colour: '#f2f4f6', size: 0.3, life: 2.8, rise: 0.04 },
   cough: { colour: '#1c1c1d', size: 0.3, life: 1.8, rise: 0.25 },
+  bombBurst: { colour: '#7d7263', size: 0.45, life: 2.4, rise: 0.3 },
+  crash: { colour: '#232120', size: 0.65, life: 4, rise: 0.35 },
 };
-const PUFF_POOL = 8;
+/** Enough for a train of bombs from each ship bursting a beat apart. */
+const PUFF_POOL = 24;
 const PUFF_TUFTS = 4;
 
 interface Puff {
@@ -572,6 +578,8 @@ export class BombTrain {
   readonly root = new THREE.Group();
   private readonly pitchAxis = new THREE.Vector3();
   private readonly falling: FallingBomb[] = [];
+  /** Where bombs have hit the floor since the last `takeImpacts`. */
+  private readonly impacts: THREE.Vector3[] = [];
 
   private readonly rodGeometry = new THREE.CylinderGeometry(BOMB_ROD_RADIUS, BOMB_ROD_RADIUS, 1, 10, 1).translate(0, 0.5, 0);
   private readonly rodMaterial = glassMaterial({ opacity: 0.32, roughness: 0.04, envMapIntensity: 1.4 });
@@ -608,6 +616,7 @@ export class BombTrain {
       bomb.object.rotateOnWorldAxis(axis, 0.35 * deltaSec);
       this.standRod(bomb);
       if (bomb.object.position.y < this.floorClearance) {
+        this.impacts.push(bomb.object.position.clone().setY(0));
         this.root.remove(bomb.object, bomb.rod);
         this.falling.splice(index, 1);
       }
@@ -617,6 +626,12 @@ export class BombTrain {
   reset(): void {
     for (const bomb of this.falling) this.root.remove(bomb.object, bomb.rod);
     this.falling.length = 0;
+    this.impacts.length = 0;
+  }
+
+  /** The floor points bombs have burst on since the last call. */
+  takeImpacts(): THREE.Vector3[] {
+    return this.impacts.splice(0);
   }
 }
 

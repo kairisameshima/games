@@ -19,6 +19,8 @@ interface FighterPass {
   path: THREE.Vector3[];
   /** Roll the pilot adds over the pass, keyed by how far along it (radians, positive right wing down). */
   roll: readonly (readonly [number, number])[];
+  /** How far along the pass the box's gunners hit it, where they do: from there it smokes and goes down to the floor. */
+  hitAt?: number;
 }
 
 const FIGHTER_COUNT = 3;
@@ -43,11 +45,16 @@ const PASSES: FighterPass[] = [
     path: [new THREE.Vector3(30, 7, -13), new THREE.Vector3(14, 6.4, -7), new THREE.Vector3(5, 6.2, -1.4), new THREE.Vector3(-4, 6.1, 0.6), new THREE.Vector3(-14, 4.6, 2.5), new THREE.Vector3(-45, 2.5, 6)],
     roll: [[0, 0], [0.55, 0.3], [0.8, 1.2], [1, 0.8]],
   },
-  // The first fighter back round: diving in from the starboard bow, outside the lead's starboard wingtip.
+  // The first fighter back round: diving in from the starboard bow, outside the lead's starboard wingtip. The box's
+  // gunners hit it as it breaks; it rolls over trailing smoke and goes down onto the set floor.
   {
-    fighter: 0, start: 19.4, duration: 3.6,
-    path: [new THREE.Vector3(30, 11, 8), new THREE.Vector3(16, 8.5, 5), new THREE.Vector3(7, 5.6, 3.5), new THREE.Vector3(-5, 4.2, 9), new THREE.Vector3(-16, 2.6, 10), new THREE.Vector3(-45, 1.5, 13)],
-    roll: [[0, 0], [0.45, -0.5], [0.6, 0.2], [1, 0.6]],
+    fighter: 0, start: 19.4, duration: 4.6,
+    path: [
+      new THREE.Vector3(30, 11, 8), new THREE.Vector3(16, 8.5, 5), new THREE.Vector3(7, 5.6, 3.5), new THREE.Vector3(-1, 4, 7),
+      new THREE.Vector3(-7, 2.2, 10), new THREE.Vector3(-11, 0.8, 12), new THREE.Vector3(-13, 0.15, 13),
+    ],
+    roll: [[0, 0], [0.4, -0.5], [0.5, 0.4], [1, Math.PI * 3]],
+    hitAt: 0.42,
   },
 ];
 
@@ -62,6 +69,13 @@ const FIRING = [0.12, 0.42] as const;
 const FLASH_CHANCE = 0.55;
 /** Where the rig's two wires are tied on, over each wing, model metres. */
 const WIRE_ANCHORS = [new THREE.Vector3(0.6, 0.2, -1.8), new THREE.Vector3(0.6, 0.2, 1.8)] as const;
+
+/** The smoke streams from the engine, under the cowling, model metres. */
+const SMOKE_FROM = new THREE.Vector3(2.4, -0.5, 0);
+/** How far the hit engine's propeller windmills round each exposure. */
+const WINDMILL_TURN = 0.35;
+/** A pass that ended longer ago than this before an update was skipped over (a jump), not flown: no crash. */
+const CRASH_WINDOW_SECONDS = 0.5;
 
 interface FighterRig {
   model: Fw190;
@@ -82,6 +96,15 @@ export class FighterAttack {
   private readonly anchor = new THREE.Vector3();
   /** World positions of the fighters on a pass this exposure, for the gunners to track. */
   private readonly flying: THREE.Vector3[] = [];
+  /** Where the hit fighter's smoke streams from this exposure, while it is going down. */
+  private readonly smokePoint = new THREE.Vector3();
+  private smokingNow = false;
+  /** Where the hit fighter struck the floor, until `takeCrash` collects it. */
+  private crash: THREE.Vector3 | null = null;
+  /** The sortie time of the last update, to see a pass end between two exposures. */
+  private lastTime = -Infinity;
+  /** Some fighter's guns flashed this exposure. */
+  firing = false;
 
   constructor(scale: number) {
     const wireGeometry = new THREE.CylinderGeometry(RIG_WIRE.radius, RIG_WIRE.radius, 1, 5, 1, true).translate(0, 0.5, 0);
@@ -113,6 +136,16 @@ export class FighterAttack {
    */
   update(time: number, deltaSec: number, random: () => number): void {
     this.flying.length = 0;
+    this.smokingNow = false;
+    if (deltaSec > 0) this.firing = false;
+    for (const pass of this.passes) {
+      // A hit fighter that reached the end of its pass since the last exposure has hit the floor there.
+      const end = pass.start + pass.duration;
+      if (pass.hitAt !== undefined && this.lastTime < end && time >= end && time - this.lastTime < CRASH_WINDOW_SECONDS) {
+        this.crash = pass.path[pass.path.length - 1].clone();
+      }
+    }
+    this.lastTime = time;
     for (const rig of this.rigs) {
       rig.model.root.visible = false;
       for (const wire of rig.wires) wire.visible = false;
@@ -126,10 +159,17 @@ export class FighterAttack {
       root.visible = true;
       root.updateMatrixWorld(true);
       this.flying.push(root.position);
+      const hit = pass.hitAt !== undefined && along >= pass.hitAt;
+      if (hit) {
+        this.smokingNow = true;
+        root.localToWorld(this.smokePoint.copy(SMOKE_FROM));
+      }
       if (deltaSec > 0) {
-        propeller.rotation.x = random() * Math.PI * 2;
-        const firing = along >= FIRING[0] && along <= FIRING[1];
+        // A hit engine windmills slowly; a running one strobes to a new angle each exposure.
+        propeller.rotation.x = hit ? propeller.rotation.x + WINDMILL_TURN : random() * Math.PI * 2;
+        const firing = !hit && along >= FIRING[0] && along <= FIRING[1];
         for (const flash of flashes) flash.visible = firing && random() < FLASH_CHANCE;
+        if (flashes.some((flash) => flash.visible)) this.firing = true;
       }
       rig.wires.forEach((wire, index) => {
         root.localToWorld(this.anchor.copy(WIRE_ANCHORS[index]));
@@ -138,6 +178,19 @@ export class FighterAttack {
         wire.visible = true;
       });
     }
+  }
+
+  /** Where the hit fighter's smoke comes from, written to `out`; false while no fighter is going down. */
+  smoke(out: THREE.Vector3): boolean {
+    if (this.smokingNow) out.copy(this.smokePoint);
+    return this.smokingNow;
+  }
+
+  /** Where the hit fighter struck the floor, once, since the last call; null if it has not. */
+  takeCrash(): THREE.Vector3 | null {
+    const crash = this.crash;
+    this.crash = null;
+    return crash;
   }
 
   /** The nearest fighter on a pass to `from` within `range`, written to `out`; false when none is. */
