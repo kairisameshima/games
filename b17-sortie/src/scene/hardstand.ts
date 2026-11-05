@@ -5,6 +5,7 @@ import { figureMesh, type CrewMember, type Outfit } from './crew/figure';
 import { meshFigureInWorker } from './crew/figure-pool';
 import type { HandTarget, Pose, Side } from './crew/skeleton';
 import { FACING, plantedFoot, pose } from './interior/poses';
+import { CircuitPath } from './circuit';
 
 /**
  * The prologue on the hardstand: the lead stands on its wheels on a painted card on the studio floor while four of the
@@ -33,41 +34,42 @@ const HARDSTAND_ORIGIN = new THREE.Vector3(-12, 0, 11);
 const HARDSTAND_CARD = { radius: 14, taxiLength: 24, taxiWidth: 9 } as const;
 
 /**
- * The take-off run and climb in world units from the run's start: along the taxiway, off, and a climbing turn to port
- * that brings it in over its stand; the path ends on the lead's slot, arriving level and heading forward.
+ * The take-off, in world units from the run's start, laid out as a circuit (see `CircuitPath`): the run and climb-out
+ * along the taxiway's line, a climbing quarter turn to port, a straight leg, and a quarter turn to starboard onto a
+ * short straight run in to the lead's slot, so it arrives level and heading forward. Turns of `radius`; `climbOut` is
+ * the height reached by the end of the first turn and `legRise` the fraction of the slot's height by the end of the leg.
  */
-const FLIGHT_PATH = [
-  new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0), new THREE.Vector3(9, 0.25, -0.4),
-  new THREE.Vector3(11.4, 1.7, -3.2), new THREE.Vector3(11.2, 3.0, -7.0), new THREE.Vector3(10.6, 3.6, -9.9),
-];
+const TAKEOFF_CIRCUIT = { radius: 2.5, final: 2, climbOut: 1, legRise: 0.85 } as const;
+/** World units either side of lift-off over which the nose comes up off the ground into the climb. */
+const ROTATION_DISTANCE = 1;
 /**
- * The way home in world units from the run's start, after the point where the lead leaves its slot: on out ahead of the
- * box, a wide turn onto the taxiway's line, the approach, and touchdown on the taxiway's far end.
+ * The way home, in world units from the run's start, laid out as a pilot flies a circuit so the animator can chart it
+ * evenly: straight on ahead of the box from the slot, a level-banked half circle to starboard onto the taxiway's line,
+ * and a straight final down onto its far end. `turnX` is where the turn begins; its radius brings the ship out of it on
+ * the taxiway's centreline. The height falls through `turnEntryDrop` by the turn, to `finalHeight` coming out of it,
+ * and to the ground at `touchdownX`.
  */
-const LANDING_APPROACH = [
-  new THREE.Vector3(20, 3.2, -8), new THREE.Vector3(25, 2.2, -3), new THREE.Vector3(22, 1.2, 0), new THREE.Vector3(15, 0.35, 0), new THREE.Vector3(10, 0, 0),
-];
+const LANDING_CIRCUIT = { turnX: 24, touchdownX: 10, turnEntryDrop: 0.3, finalHeight: 1.2 } as const;
 /**
- * Seconds of the landing: it leaves its stand, the wheels come down, it touches down, rolls out to the pan, is swung
- * round on it, and has its engines cut one by one in the order 1, 2, 4 (No. 3 is feathered).
+ * Seconds of the landing: it leaves its stand, the wheels come down, it touches down; the roll-out, the swing round on
+ * the pan and the engines being cut one by one (1, 2, 4: No. 3 is feathered) follow at the pace the touchdown speed sets.
  */
-const LANDING_BEATS = { leave: 0.5, gearDown: [3, 5.5], touchdown: 9, rolledOut: 12, swing: [12.4, 13.6], enginesCut: 14.4, cutInterval: 0.6 } as const;
-export const LANDING_TOUCHDOWN_SECONDS = LANDING_BEATS.touchdown;
-/** The approach eases in from formation speed over this fraction of it, then holds its speed to touchdown. */
-const APPROACH_EASE = 0.2;
-/** Over the end of the approach the nose comes up from the glide into the three-point attitude. */
-const FLARE_FROM = 0.88;
+const LANDING_BEATS = { leave: 0.5, gearDown: [3, 5.5], touchdown: 9, swingDelay: 0.4, swingSeconds: 2, cutDelay: 0.8, cutInterval: 0.6 } as const;
+/** World units it takes to come up to speed leaving its stand, from a standstill. */
+const APPROACH_EASE_DISTANCE = 3;
+/** Over this much of the final before touchdown, world units, the nose comes up from the glide into the three-point attitude. */
+const FLARE_DISTANCE = 3;
+/** The glide is drawn at this fraction of the path's angle: a model swooping at the true angle reads as a dive. */
+const GLIDE_PITCH_FRACTION = 0.5;
+/** World units over which the bank rolls in entering a turn and out leaving it. */
+const BANK_RAMP = 4;
 /** No. 3, by engine number less one: feathered over the target, so never cut on the pan. */
 const FEATHERED_ENGINE = 2;
 
-/** Climb attitude; bank per radian of turn per world unit flown, and the most it banks. */
+/** Most nose-up in the climb; bank per radian of turn per world unit flown, and the most it banks. */
 const CLIMB_PITCH = 0.12;
 const BANK_PER_TURN_RATE = 2.2;
 const MAX_BANK = 0.5;
-/** How far ahead along the path the turn rate is measured, as a fraction of the path. */
-const TURN_SAMPLE = 0.02;
-/** Over the end of the run in, yaw and bank settle to the slot's level pose. */
-const SETTLE_FROM = 0.86;
 
 /** A walking man changes pose every this many film seconds, a stride each. */
 const STRIDE_SECONDS = 0.42;
@@ -121,13 +123,17 @@ export interface HardstandFrame {
 export class Hardstand {
   readonly root = new THREE.Group();
   private readonly rigs: BoarderRig[];
-  private readonly path: THREE.CatmullRomCurve3;
-  private readonly approach: THREE.CatmullRomCurve3;
+  private readonly takeoff: CircuitPath;
+  /** How far along the take-off it lifts off: where it is at the lift-off beat. */
+  private readonly liftOffAt: number;
+  private readonly landingPath: CircuitPath;
+  /** The landing's steady speed, world units a second, from the end of its ease to touchdown. */
+  private readonly landingSpeed: number;
+  /** When the roll-out is done, seconds after the lead left its stand. */
+  readonly rolledOutSeconds: number;
   private readonly frame: HardstandFrame = {
     position: new THREE.Vector3(), rotation: new THREE.Euler(0, 0, 0, 'YZX'), gearExtension: 1, engines: ['cold', 'cold', 'cold', 'cold'], crewAboard: false, finished: false,
   };
-  private readonly tangent = new THREE.Vector3();
-  private readonly ahead = new THREE.Vector3();
   /** World offset of the take-off run's start: the ship's holder on its wheels at the hardstand. */
   private readonly groundOrigin: THREE.Vector3;
 
@@ -138,8 +144,43 @@ export class Hardstand {
     this.root.scale.setScalar(scale);
     this.root.add(buildCard());
     this.groundOrigin = HARDSTAND_ORIGIN.clone().add(new THREE.Vector3(0, ground.height * scale, 0));
-    this.path = new THREE.CatmullRomCurve3([...FLIGHT_PATH, slot.clone().sub(this.groundOrigin)], false, 'centripetal');
-    this.approach = new THREE.CatmullRomCurve3([slot.clone().sub(this.groundOrigin), ...LANDING_APPROACH], false, 'centripetal');
+    const inSlot = slot.clone().sub(this.groundOrigin);
+
+    const { radius, final, climbOut, legRise } = TAKEOFF_CIRCUIT;
+    const run = inSlot.x - 2 * radius - final;
+    const leg = -inSlot.z - 2 * radius;
+    if (run <= 0 || leg <= 0) throw new Error('The lead\'s slot is too close to the hardstand for the take-off circuit');
+    const quarter = (radius * Math.PI) / 2;
+    const takeoffLength = run + quarter + leg + quarter + final;
+    this.liftOffAt = takeoffLength * THREE.MathUtils.smootherstep((BEATS.liftOff - BEATS.rollStart) / (BEATS.docked - BEATS.rollStart), 0, 1);
+    this.takeoff = new CircuitPath(new THREE.Vector3(), 0, [
+      { kind: 'straight', length: run },
+      { kind: 'turn', radius, angle: Math.PI / 2, side: -1 },
+      { kind: 'straight', length: leg },
+      { kind: 'turn', radius, angle: Math.PI / 2, side: 1 },
+      { kind: 'straight', length: final },
+    ], {
+      at: [0, this.liftOffAt, run + quarter, run + quarter + leg, takeoffLength],
+      height: [0, 0, climbOut, inSlot.y * legRise, inSlot.y],
+    });
+
+    // The landing's half circle has the slot's offset from the taxiway's line for its diameter.
+    const straight = LANDING_CIRCUIT.turnX - inSlot.x;
+    const turnRadius = -inSlot.z / 2;
+    const arc = Math.PI * turnRadius;
+    const finalLeg = LANDING_CIRCUIT.turnX - LANDING_CIRCUIT.touchdownX;
+    this.landingPath = new CircuitPath(inSlot, 0, [
+      { kind: 'straight', length: straight },
+      { kind: 'turn', radius: turnRadius, angle: Math.PI, side: 1 },
+      { kind: 'straight', length: finalLeg },
+    ], {
+      at: [0, straight, straight + arc, straight + arc + finalLeg],
+      height: [inSlot.y, inSlot.y - LANDING_CIRCUIT.turnEntryDrop, LANDING_CIRCUIT.finalHeight, 0],
+    });
+    // A standstill to steady speed over the ease takes as long as twice its distance at that speed.
+    this.landingSpeed = (this.landingPath.length + APPROACH_EASE_DISTANCE) / (LANDING_BEATS.touchdown - LANDING_BEATS.leave);
+    // Braking evenly from touchdown speed to a stop in the taxiway's length takes twice that length at that speed.
+    this.rolledOutSeconds = LANDING_BEATS.touchdown + (2 * LANDING_CIRCUIT.touchdownX) / this.landingSpeed;
 
     const onGround = new THREE.Matrix4().makeRotationZ(ground.pitch).setPosition(0, ground.height, 0);
     const hatch = entries.forwardHatch.clone().applyMatrix4(onGround);
@@ -183,20 +224,12 @@ export class Hardstand {
     frame.finished = time >= BEATS.docked;
     const { ground } = this.lead.landingGear;
     const run = THREE.MathUtils.clamp((time - BEATS.rollStart) / (BEATS.docked - BEATS.rollStart), 0, 1);
-    // Accelerating along the card, then a steady climb and an easing in onto the stand.
-    const along = THREE.MathUtils.smootherstep(run, 0, 1) ** 1.3;
-    this.path.getPointAt(along, frame.position).add(this.groundOrigin);
-    this.path.getTangentAt(along, this.tangent);
-    this.path.getTangentAt(Math.min(along + TURN_SAMPLE, 1), this.ahead);
-    const airborne = THREE.MathUtils.smoothstep(time, BEATS.liftOff - 0.6, BEATS.liftOff + 0.8);
-    const settle = THREE.MathUtils.smoothstep(along, SETTLE_FROM, 1);
-    const yaw = Math.atan2(-this.tangent.z, this.tangent.x) * (1 - settle);
-    const turnRate = (Math.atan2(-this.ahead.z, this.ahead.x) - Math.atan2(-this.tangent.z, this.tangent.x)) / (TURN_SAMPLE * this.path.getLength());
-    const climb = Math.asin(THREE.MathUtils.clamp(this.tangent.y, -1, 1));
-    const pitch = THREE.MathUtils.lerp(ground.pitch, Math.min(climb, CLIMB_PITCH), airborne) * (1 - settle);
-    // A turn to port puts the port wing down, which is negative bank.
-    const bank = THREE.MathUtils.clamp(-turnRate * BANK_PER_TURN_RATE, -MAX_BANK, MAX_BANK) * airborne * (1 - settle);
-    frame.rotation.set(bank, yaw, pitch, 'YZX');
+    // Accelerating along the card from a standstill, and easing to a stop on the stand.
+    const along = this.takeoff.length * THREE.MathUtils.smootherstep(run, 0, 1);
+    this.takeoff.point(along, frame.position).add(this.groundOrigin);
+    const airborne = THREE.MathUtils.smoothstep(along, this.liftOffAt - ROTATION_DISTANCE, this.liftOffAt + ROTATION_DISTANCE);
+    const pitch = THREE.MathUtils.lerp(ground.pitch, Math.min(Math.atan(this.takeoff.slope(along)), CLIMB_PITCH), airborne);
+    frame.rotation.set(this.takeoff.bank(along, BANK_PER_TURN_RATE, MAX_BANK, BANK_RAMP), this.takeoff.heading(along), pitch, 'YZX');
     frame.gearExtension = 1 - THREE.MathUtils.smoothstep(time, BEATS.liftOff + 1.2, BEATS.liftOff + 4);
     return frame;
   }
@@ -211,34 +244,36 @@ export class Hardstand {
     const { ground } = this.lead.landingGear;
     frame.crewAboard = true;
     frame.gearExtension = THREE.MathUtils.smoothstep(time, LANDING_BEATS.gearDown[0], LANDING_BEATS.gearDown[1]);
+    const swingStart = this.rolledOutSeconds + LANDING_BEATS.swingDelay;
+    const swingEnd = swingStart + LANDING_BEATS.swingSeconds;
     frame.engines.forEach((_, engine) => {
       const cutOrder = engine < FEATHERED_ENGINE ? engine : engine - 1;
-      const cut = engine === FEATHERED_ENGINE || time >= LANDING_BEATS.enginesCut + cutOrder * LANDING_BEATS.cutInterval;
+      const cut = engine === FEATHERED_ENGINE || time >= swingEnd + LANDING_BEATS.cutDelay + cutOrder * LANDING_BEATS.cutInterval;
       frame.engines[engine] = cut ? 'cold' : 'running';
     });
-    frame.finished = time >= LANDING_BEATS.swing[1];
+    frame.finished = time >= swingEnd;
+    const speed = this.landingSpeed;
+    const path = this.landingPath;
     if (time < LANDING_BEATS.touchdown) {
-      const flown = THREE.MathUtils.clamp((time - LANDING_BEATS.leave) / (LANDING_BEATS.touchdown - LANDING_BEATS.leave), 0, 1);
-      // Eased in from its stand, then a steady approach, so it meets the taxiway at the speed it rolls out from.
-      const along = (flown < APPROACH_EASE ? (flown * flown) / (2 * APPROACH_EASE) : flown - APPROACH_EASE / 2) / (1 - APPROACH_EASE / 2);
-      this.approach.getPointAt(along, frame.position).add(this.groundOrigin);
-      this.approach.getTangentAt(along, this.tangent);
-      this.approach.getTangentAt(Math.min(along + TURN_SAMPLE, 1), this.ahead);
-      const heading = Math.atan2(-this.tangent.z, this.tangent.x);
-      // On final it flies toward −x, where the heading sits at ±π: the change is taken the short way round.
-      const turn = THREE.MathUtils.euclideanModulo(Math.atan2(-this.ahead.z, this.ahead.x) - heading + Math.PI, Math.PI * 2) - Math.PI;
-      const turnRate = turn / (TURN_SAMPLE * this.approach.getLength());
-      const glide = Math.asin(THREE.MathUtils.clamp(this.tangent.y, -1, 1));
-      const bank = THREE.MathUtils.clamp(-turnRate * BANK_PER_TURN_RATE, -MAX_BANK, MAX_BANK) * (1 - THREE.MathUtils.smoothstep(along, 0.7, 0.85));
-      frame.rotation.set(bank, heading, THREE.MathUtils.lerp(glide * 0.5, ground.pitch, THREE.MathUtils.smoothstep(along, FLARE_FROM, 1)));
+      // Up to speed over the ease from a standstill on its stand, then steady all the way down.
+      const flying = Math.max(time - LANDING_BEATS.leave, 0);
+      const easeSeconds = (2 * APPROACH_EASE_DISTANCE) / speed;
+      const flown = flying < easeSeconds
+        ? (speed * speed * flying * flying) / (4 * APPROACH_EASE_DISTANCE)
+        : APPROACH_EASE_DISTANCE + speed * (flying - easeSeconds);
+      const along = Math.min(flown, path.length);
+      path.point(along, frame.position).add(this.groundOrigin);
+      const flare = THREE.MathUtils.smoothstep(along, path.length - FLARE_DISTANCE, path.length);
+      const pitch = THREE.MathUtils.lerp(Math.atan(path.slope(along)) * GLIDE_PITCH_FRACTION, ground.pitch, flare);
+      frame.rotation.set(path.bank(along, BANK_PER_TURN_RATE, MAX_BANK, BANK_RAMP), path.heading(along), pitch);
       return frame;
     }
-    // Rolling out along the taxiway to the pan, slowing all the way, then swung round on it to face out as it started.
-    const rolled = THREE.MathUtils.clamp((time - LANDING_BEATS.touchdown) / (LANDING_BEATS.rolledOut - LANDING_BEATS.touchdown), 0, 1);
-    const touchdownX = LANDING_APPROACH[LANDING_APPROACH.length - 1].x;
-    frame.position.set(touchdownX * (1 - rolled) ** 2, 0, 0).add(this.groundOrigin);
-    const swung = THREE.MathUtils.smoothstep(time, LANDING_BEATS.swing[0], LANDING_BEATS.swing[1]);
-    frame.rotation.set(0, Math.PI * (1 + swung), ground.pitch);
+    // Rolling out down the taxiway to the pan, braking evenly to a stop, then swung round on it to face out as it started.
+    const rolling = Math.min(time - LANDING_BEATS.touchdown, this.rolledOutSeconds - LANDING_BEATS.touchdown);
+    const rolled = speed * rolling - (speed * speed * rolling * rolling) / (4 * LANDING_CIRCUIT.touchdownX);
+    frame.position.set(LANDING_CIRCUIT.touchdownX - rolled, 0, 0).add(this.groundOrigin);
+    const swung = THREE.MathUtils.smoothstep(time, swingStart, swingEnd);
+    frame.rotation.set(0, -Math.PI + Math.PI * 2 * swung, ground.pitch);
     return frame;
   }
 

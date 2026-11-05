@@ -26,6 +26,11 @@ export class StopMotionClock {
    * the tripod knocked as a move begins, and the frame weaving in the gate. Off, the film moves evenly and sits still.
    */
   jitter = true;
+  /**
+   * A charted move: a fast one across the set, which an animator plans on an exposure sheet and spaces evenly, since
+   * uneven spacing or a held frame there shows as a stutter. The other touches of the hand stay.
+   */
+  charted = false;
   private pending = 0;
   private exposures = 0;
   private jitterState = 7919;
@@ -54,7 +59,7 @@ export class StopMotionClock {
 
   /** How far the film moves on an exposure covering `exposureSec` of wall time, with the animator's uneven hand. */
   space(exposureSec: number): number {
-    if (!this.jitter) return exposureSec;
+    if (!this.jitter || this.charted) return exposureSec;
     this.owed += exposureSec;
     if (this.random() < SPACING.holdChance) return 0;
     const step = this.owed * (SPACING.min + this.random() * (SPACING.max - SPACING.min));

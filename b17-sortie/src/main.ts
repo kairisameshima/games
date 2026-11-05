@@ -9,7 +9,7 @@ import { buildB17, createBomb, type B17 } from './scene/b17';
 import { LEAD_LIVERY, WINGMAN_LIVERIES } from './scene/livery';
 import type { CrewStation } from './scene/interior';
 import { Walkthrough } from './walkthrough';
-import { Hardstand, LANDING_TOUCHDOWN_SECONDS, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart, type HardstandFrame } from './scene/hardstand';
+import { Hardstand, PROLOGUE_LIFT_OFF_SECONDS, type EngineStart, type HardstandFrame } from './scene/hardstand';
 import { Foley } from './audio/foley';
 import { KitBench } from './scene/kit-bench';
 import { fittingHotspots } from './scene/interior/hotspots';
@@ -540,6 +540,8 @@ const FORMATION_SHOT = { target: new THREE.Vector3(0.3, 3.9, 0), spherical: new 
 /** On load the prologue holds this long first, while the boarding men are still being meshed. */
 const PROLOGUE_LOAD_HOLD = 3;
 
+/** The shot the landing's camera is on or moving to, null when the lead is not landing. */
+let landingCameraShot: typeof LANDING_SHOT | null = null;
 /** The co-pilot's No. 3 figure is in. */
 let coPilotReacting = false;
 /** The lead is off its stand landing, or on the hardstand after it. */
@@ -560,19 +562,24 @@ function holdStoppedPropellers(frame: HardstandFrame, featheredEngine: number | 
 }
 
 /** Poses the lead on its way home and on the hardstand, `seconds` after it left its stand, over the formation's pose. */
-function stepLanding(seconds: number, previousSeconds: number | null): void {
+function stepLanding(seconds: number): void {
   const { aircraft, holder, stand } = formation[0];
   if (!landingShown) {
     landingShown = true;
     hardstand.setShown(true);
     stand.root.visible = false;
-    tweenCamera(seconds >= LANDING_TOUCHDOWN_SECONDS ? HARDSTAND_SHOT : LANDING_SHOT);
-  } else if (previousSeconds !== null && previousSeconds < LANDING_TOUCHDOWN_SECONDS && seconds >= LANDING_TOUCHDOWN_SECONDS) {
-    tweenCamera(HARDSTAND_SHOT);
+  }
+  // Panning with the ship until it has stopped, then in close on the pan; a jump back into the landing pans again.
+  const shot = seconds >= hardstand.rolledOutSeconds ? HARDSTAND_SHOT : LANDING_SHOT;
+  if (shot !== landingCameraShot) {
+    landingCameraShot = shot;
+    tweenCamera(shot);
   }
   const frame = hardstand.landing(seconds);
   holder.position.copy(frame.position);
-  if (seconds < LANDING_TOUCHDOWN_SECONDS) controls.target.copy(frame.position);
+  // The camera pans with the ship all the way down and along the taxiway, then moves in once it has stopped.
+  // While the camera swings round to its spot it already looks at the ship, so the pan never jumps when it gets there.
+  if (seconds < hardstand.rolledOutSeconds) controls.target.copy(frame.position);
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
   holdStoppedPropellers(frame, NO_3_ENGINE);
@@ -583,6 +590,7 @@ function stepLanding(seconds: number, previousSeconds: number | null): void {
 /** Back in the air from the hardstand: the lead on its stand again, unless the prologue has it. */
 function endLanding(): void {
   landingShown = false;
+  landingCameraShot = null;
   if (prologueTime !== null) return;
   hardstand.setShown(false);
   formation[0].stand.root.visible = true;
@@ -1175,6 +1183,8 @@ let lastDrawnAt = 0;
  * exploded view still move, as an animator would move them).
  */
 function exposeFrame(exposureSec: number): void {
+  // The ship's flights on and off its stand are charted: spaced evenly, never held, as an animator plans a fast move.
+  stopMotion.charted = prologueTime !== null || landingShown;
   const deltaSec = playing ? stopMotion.space(exposureSec) : 0;
   filmTime += deltaSec;
   const previousTime = sortieTime;
@@ -1184,7 +1194,6 @@ function exposeFrame(exposureSec: number): void {
   if (sortieTime >= SORTIE_LOOP_SECONDS) startPrologue();
   if (sortieTime < previousTime) resetEffects();
   const leadState = sortieStateAt(sortieTime);
-  const previousLanding = sortieStateAt(previousTime).landingSeconds;
   exploded.update(exposureSec);
 
   fighters.update(leadState.time, deltaSec, stopMotion.random);
@@ -1196,7 +1205,7 @@ function exposeFrame(exposureSec: number): void {
   });
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
   if (prologueTime !== null) stepPrologue(deltaSec);
-  else if (leadState.landingSeconds !== null && kitTime === null) stepLanding(leadState.landingSeconds, previousLanding);
+  else if (leadState.landingSeconds !== null && kitTime === null) stepLanding(leadState.landingSeconds);
   // While No. 3 burns the co-pilot's replacement figure is in, holding its feathering button and looking out at it.
   const reacting = leadState.engineFire > 0;
   if (reacting !== coPilotReacting) {
