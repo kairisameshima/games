@@ -88,6 +88,8 @@ interface AircraftMaterials {
   canopy: THREE.MeshPhysicalMaterial;
   /** The top turret's dome: Plexiglas yellowed by sun and cleaning, a warmer tint than the rest of the glazing. */
   turretDome: THREE.MeshPhysicalMaterial;
+  /** The top turret's flat windscreen: thick laminated glass, green at its edges. */
+  armourGlass: THREE.MeshPhysicalMaterial;
   /** Bare metal where the paint has worn off the top turret's frames. */
   paintChip: THREE.MeshStandardMaterial;
   /** Kit flaws on the glazing: cement fog where glue touched it, and a thumbprint. */
@@ -245,6 +247,10 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
     turretDome: applyStudioShading(new THREE.MeshPhysicalMaterial({
       color: '#f2eedc', roughness: 0.07, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false,
       clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.5, side: THREE.DoubleSide,
+    })),
+    armourGlass: applyStudioShading(new THREE.MeshPhysicalMaterial({
+      color: '#cfe7dc', roughness: 0.05, metalness: 0, transparent: true, opacity: 0.3, depthWrite: false,
+      clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.7, side: THREE.DoubleSide,
     })),
     paintChip: metalMaterial('#8e9295', { roughness: 0.5, metalness: 0.7 }),
     windowPane: applyStudioShading(new THREE.MeshPhysicalMaterial({
@@ -974,6 +980,81 @@ const TOP_TURRET = {
   chips: { perMetre: 8, size: [0.003, 0.01], seed: 917 },
 } as const;
 
+/** Azimuth steps round the top turret's profile cam. */
+const PROFILE_CAM_STEPS = 360;
+/**
+ * How near the line of fire nothing of the aircraft may come, metres: the guns' half-spread and a margin for the
+ * barrels and the tracer's dispersion.
+ */
+const LINE_OF_FIRE_CLEARANCE = 0.3;
+/** Parts this near the turret's axis in plan are its own ring and the roof round it, all below the guns. */
+const PROFILE_CAM_NEAREST = 0.6;
+const PROPELLER_DISC_SAMPLES = 48;
+
+/**
+ * The A-1A's profile cam, cut from the model: for each azimuth round the turret, the least elevation at which the line
+ * of fire clears the aircraft (the fin and tailplane aft, the propeller discs out on the wings, the cockpit roof ahead).
+ * Every part above the guns is taken into account, the propellers as the whole discs their blades sweep.
+ */
+function topTurretProfileCam(root: THREE.Object3D, turretYaw: THREE.Object3D, propellers: THREE.Object3D[]): Float32Array {
+  const cam = new Float32Array(PROFILE_CAM_STEPS);
+  root.updateMatrixWorld(true);
+  const toModel = root.matrixWorld.clone().invert();
+  const guns = turretYaw.position.clone().add(new THREE.Vector3(0, TOP_TURRET.gunPivot.y, 0));
+  const offset = new THREE.Vector3();
+  const mark = (point: THREE.Vector3) => {
+    offset.subVectors(point, guns);
+    const plan = Math.hypot(offset.x, offset.z);
+    if (offset.y <= 0 || plan < PROFILE_CAM_NEAREST) return;
+    const reach = Math.hypot(plan, offset.y);
+    const elevation = Math.atan2(offset.y, plan) + Math.atan2(LINE_OF_FIRE_CLEARANCE, reach);
+    const azimuth = Math.atan2(-offset.z, offset.x);
+    const spread = Math.atan2(LINE_OF_FIRE_CLEARANCE, plan);
+    const from = Math.floor(((azimuth - spread) / (Math.PI * 2)) * PROFILE_CAM_STEPS);
+    const to = Math.ceil(((azimuth + spread) / (Math.PI * 2)) * PROFILE_CAM_STEPS);
+    for (let step = from; step <= to; step++) {
+      const index = THREE.MathUtils.euclideanModulo(step, PROFILE_CAM_STEPS);
+      cam[index] = Math.max(cam[index], elevation);
+    }
+  };
+  const isUnder = (object: THREE.Object3D, ancestors: THREE.Object3D[]) => {
+    for (let node: THREE.Object3D | null = object; node; node = node.parent) if (ancestors.includes(node)) return true;
+    return false;
+  };
+  const vertex = new THREE.Vector3();
+  const toPart = new THREE.Matrix4();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || isUnder(object, [turretYaw, ...propellers])) return;
+    // The men are meshed later in workers and stand inside, below the guns: their empty geometry is passed over.
+    const positions = object.geometry.getAttribute('position');
+    if (!positions) return;
+    toPart.multiplyMatrices(toModel, object.matrixWorld);
+    for (let index = 0; index < positions.count; index++) mark(vertex.fromBufferAttribute(positions, index).applyMatrix4(toPart));
+  });
+  // A spinning propeller is a disc as wide as its blades reach.
+  for (const propeller of propellers) {
+    const hub = propeller.getWorldPosition(new THREE.Vector3()).applyMatrix4(toModel);
+    const axis = new THREE.Vector3(1, 0, 0).transformDirection(propeller.matrixWorld).transformDirection(toModel);
+    let radius = 0;
+    propeller.traverse((object) => {
+      const positions = object instanceof THREE.Mesh ? object.geometry.getAttribute('position') : undefined;
+      if (!positions) return;
+      toPart.multiplyMatrices(toModel, object.matrixWorld);
+      for (let index = 0; index < positions.count; index++) {
+        vertex.fromBufferAttribute(positions, index).applyMatrix4(toPart).sub(hub);
+        radius = Math.max(radius, vertex.addScaledVector(axis, -vertex.dot(axis)).length());
+      }
+    });
+    const across = new THREE.Vector3().crossVectors(axis, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(across, axis).normalize();
+    for (let sample = 0; sample < PROPELLER_DISC_SAMPLES; sample++) {
+      const angle = (sample / PROPELLER_DISC_SAMPLES) * Math.PI * 2;
+      mark(hub.clone().addScaledVector(across, Math.cos(angle) * radius).addScaledVector(up, Math.sin(angle) * radius));
+    }
+  }
+  return cam;
+}
+
 /** The dome's radius at height `y` above its foot: a vertical wall, then a quarter-ellipse up to the crown. */
 function topTurretDomeRadius(y: number): number {
   const { radius, wall, height } = TOP_TURRET.dome;
@@ -1048,6 +1129,66 @@ function buildTurretRingGeometry(d: number, base: number): THREE.BufferGeometry 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** Rows and columns of the dome's band round the windscreen. */
+const DOME_BAND = { rows: 10, columns: 48 } as const;
+/** The armoured windscreen's thickness, metres. */
+const WINDSCREEN_THICKNESS = 0.02;
+
+/**
+ * The dome's Plexiglas between heights `from` and `to`, all the way round but for the opening `gapHalfWidth` either
+ * side of the centreline ahead, its edges following the planes of the frames that border it.
+ */
+function domeBandGeometry(from: number, to: number, gapHalfWidth: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const { rows, columns } = DOME_BAND;
+  for (let row = 0; row <= rows; row++) {
+    const y = THREE.MathUtils.lerp(from, to, row / rows);
+    const radius = topTurretDomeRadius(y);
+    const edge = Math.asin(Math.min(gapHalfWidth / radius, 1));
+    for (let column = 0; column <= columns; column++) {
+      const azimuth = THREE.MathUtils.lerp(edge, Math.PI * 2 - edge, column / columns);
+      positions.push(Math.cos(azimuth) * radius, y, Math.sin(azimuth) * radius);
+    }
+  }
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const a = row * (columns + 1) + column;
+      const b = a + columns + 1;
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * The flat armoured windscreen, a slab of laminated glass across the opening between the heavy arches, its corners where
+ * the arches meet the sill and the header, its outer face in their plane.
+ */
+function windscreenGeometry(): THREE.BufferGeometry {
+  const { sill, header, archZ } = TOP_TURRET.frame;
+  const corner = (y: number, z: number) => new THREE.Vector3(Math.sqrt(topTurretDomeRadius(y) ** 2 - archZ ** 2), y, z);
+  const outer = [corner(sill, -archZ), corner(sill, archZ), corner(header, archZ), corner(header, -archZ)];
+  const inward = new THREE.Vector3().crossVectors(outer[3].clone().sub(outer[0]), outer[1].clone().sub(outer[0])).normalize();
+  if (inward.x > 0) inward.negate();
+  const inner = outer.map((point) => point.clone().addScaledVector(inward, WINDSCREEN_THICKNESS));
+  const points = [...outer, ...inner];
+  // Outer and inner faces, then the four edges.
+  const faces = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]];
+  const positions: number[] = [];
+  for (const [a, b, c, d] of faces) {
+    for (const index of [a, b, c, a, c, d]) positions.push(points[index].x, points[index].y, points[index].z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -1187,7 +1328,11 @@ function addTopTurretBody(turret: THREE.Object3D, materials: AircraftMaterials, 
     return new THREE.Vector2(Math.max(topTurretDomeRadius(y), 0.001), y);
   });
   part(turret, new THREE.LatheGeometry(profile(0, dome.metalEdge), 48), materials.upperPaint, 0, base, 0, { castShadow: false });
-  part(turret, new THREE.LatheGeometry(profile(dome.metalEdge, dome.height), 48), materials.turretDome, 0, base, 0, { castShadow: false });
+  // The Plexiglas, open between the heavy arches from the sill to the header, where the flat armoured windscreen sits.
+  part(turret, new THREE.LatheGeometry(profile(dome.metalEdge, frame.sill), 48), materials.turretDome, 0, base, 0, { castShadow: false });
+  part(turret, domeBandGeometry(frame.sill, frame.header, frame.archZ), materials.turretDome, 0, base, 0, { castShadow: false });
+  part(turret, new THREE.LatheGeometry(profile(frame.header, dome.height), 48), materials.turretDome, 0, base, 0, { castShadow: false });
+  part(turret, windscreenGeometry(), materials.armourGlass, 0, base, 0, { castShadow: false });
 
   const straps: { path: THREE.Vector3[]; width: number }[] = [];
   const strap = (path: THREE.Vector3[], width: number) => {
@@ -1954,6 +2099,15 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
   const interiorMeshes = collectInteriorMeshes(root);
   const crewMeshes = new Set<THREE.Object3D>(interior.crew.map((man) => man.mesh));
   const cabinFittings = interiorMeshes.filter((mesh) => !crewMeshes.has(mesh) && mesh.material !== interiorMaterials().skin);
+  // The top turret's guns hold fire wherever its profile cam says the line of fire crosses the ship.
+  const profileCam = topTurretProfileCam(root, topTurretYaw, propellers);
+  for (const mounted of interior.guns) {
+    if (!topTurretGuns.includes(mounted.gun)) continue;
+    mounted.interrupted = () => {
+      const step = Math.floor((THREE.MathUtils.euclideanModulo(topTurretYaw.rotation.y, Math.PI * 2) / (Math.PI * 2)) * PROFILE_CAM_STEPS);
+      return topTurretPitch.rotation.z < profileCam[step % PROFILE_CAM_STEPS];
+    };
+  }
   const crewStations = interior.stations.map((station) => {
     const man = interior.crew.find((entry) => entry.station.label === station.role);
     return { ...station, space: man ? assemblies.of(man.mesh) : assemblies.get(fuselageSectionAt(toX(station.anchor.x))) };
@@ -1971,9 +2125,9 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     assemblies,
     crew: interior.crew,
     // The chin turret's belts run up from the nose boxes out of sight, and its cases chute overboard.
-    guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null, casesBagged: false }))],
+    guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null, casesBagged: false, interrupted: null }))],
     cutawayMaterials: [
-      materials.hull, materials.upperPaint, materials.canopy, materials.turretDome, materials.paintChip, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
+      materials.hull, materials.upperPaint, materials.canopy, materials.turretDome, materials.armourGlass, materials.paintChip, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
       materials.noseArt.pinup, materials.noseArt.card, materials.missionTally, materials.nextMission,
       materials.lowerPaint, ballWindowMaskMaterial(materials.lowerPaint), materials.tailHousing, ...interior.clipMaterials,
     ],

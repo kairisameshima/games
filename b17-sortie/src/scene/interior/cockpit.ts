@@ -124,13 +124,49 @@ const TOP_TURRET_BASKET = {
   },
   /** The lightened platform of SP-1653 on: an hourglass across the turret, a lobe under each foot. */
   platform: { centreX: -0.04, lobeHalfLength: 0.17, waistHalfLength: 0.07, lobeZ: 0.14, endRadius: 0.12, thickness: 0.025 },
-  /** The stirrups on the platform: a heel cup and a toe strap for each boot, clamped to the rail at its height. */
-  stirrup: { toeX: 0.05, heelX: -0.135, footZ: 0.12, strapRadius: 0.085, strapRise: 1.6, strap: 0.009, cup: [0.015, 0.05, 0.1] as [number, number, number] },
+  /**
+   * The stirrups on the platform: a heel cup for each boot, clamped to the rail at its height, and a webbing toe strap
+   * arched over the boot's instep, which is turned out and stands 11 cm high there.
+   */
+  stirrup: {
+    heelX: -0.135, footZ: 0.12, cup: [0.015, 0.05, 0.1] as [number, number, number],
+    toeStrap: { x: 0.1, z: 0.15, halfSpan: 0.068, rise: 0.125, width: 0.03, thickness: 0.006 },
+  },
   /** The double power unit hung under the platform: the motor across it, a hydraulic transmission at each end. */
   powerUnit: { x: 0.06, drop: 0.09, motorRadius: 0.05, motorLength: 0.15, transmission: [0.09, 0.1, 0.07] as [number, number, number] },
   /** The oxygen swivel under the platform's centre, down to its bearing on the flight deck. */
   swivel: { radius: 0.03 },
 } as const;
+
+/** Steps along an arched strap. */
+const ARCHED_STRAP_STEPS = 16;
+
+/**
+ * A strap of webbing arched across z from one side to the other, `halfSpan` out and `rise` up at its crown, `width`
+ * along x and `thickness` through: a half-ellipse band standing on y = 0.
+ */
+function archedStrapGeometry(halfSpan: number, rise: number, width: number, thickness: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let step = 0; step <= ARCHED_STRAP_STEPS; step++) {
+    const angle = (step / ARCHED_STRAP_STEPS) * Math.PI;
+    // Inner and outer faces of the band, each at both its edges.
+    for (const [span, height] of [[halfSpan, rise], [halfSpan + thickness, rise + thickness]] as const) {
+      for (const x of [-width / 2, width / 2]) positions.push(x, Math.sin(angle) * height, Math.cos(angle) * span);
+    }
+  }
+  for (let step = 0; step < ARCHED_STRAP_STEPS; step++) {
+    const a = step * 4;
+    const b = a + 4;
+    // Inner face, outer face, and the two edges.
+    for (const [p, q] of [[0, 1], [3, 2], [2, 0], [1, 3]] as const) indices.push(a + p, b + p, a + q, a + q, b + p, b + q);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 /** Where a rail is at height `y` in turret space, for a basket whose platform is at `platformY`. */
 function railPoint(side: 1 | -1, y: number, platformY: number): THREE.Vector3 {
@@ -200,10 +236,8 @@ function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vect
   part(topTurretYaw, platformGeometry(), materials.aluminium, platform.centreX, platformY, 0);
   for (const side of [-1, 1] as const) {
     rod(topTurretYaw, railPoint(side, tub.bottom, platformY), railPoint(side, platformY, platformY), rail.radius, materials.aluminium);
-    const strap = part(topTurretYaw, new THREE.TorusGeometry(stirrup.strapRadius, stirrup.strap, 6, 12, Math.PI), materials.duck, stirrup.toeX, platformY, side * stirrup.footZ);
-    strap.rotation.y = Math.PI / 2;
-    // Arched high enough to clear the boot over its instep.
-    strap.scale.y = stirrup.strapRise;
+    const { toeStrap } = stirrup;
+    part(topTurretYaw, archedStrapGeometry(toeStrap.halfSpan, toeStrap.rise, toeStrap.width, toeStrap.thickness), materials.duck, toeStrap.x, platformY, side * toeStrap.z);
     const cup = new THREE.Vector3(stirrup.heelX, platformY + stirrup.cup[1] / 2, side * stirrup.footZ);
     box(topTurretYaw, cup, stirrup.cup, materials.aluminium, 0, 0.004);
     // The stirrup's bar runs out to its clamp on the rail; the clamp slides to set the gunner's height.
@@ -241,7 +275,7 @@ function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vect
       beltGun: { parent: pitch, gun: { origin: gunInPitch, direction: FORWARD, side } },
     });
     const path = bag.path.map((point) => point.clone().setZ(side * point.z));
-    context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: topTurretYaw.position.y + path[0].y, casesBagged: true });
+    context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: topTurretYaw.position.y + path[0].y, casesBagged: true, interrupted: null });
     const curve = new THREE.CatmullRomCurve3(path);
     part(topTurretYaw, new THREE.TubeGeometry(curve, 24, bag.radius, 10, false), materials.duck, 0, 0, 0);
     // A stiffened mouth to catch the cases, and the bag's closed bottom.

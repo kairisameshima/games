@@ -17,6 +17,11 @@ export interface MountedGun {
    * piling up: the bag turns with its turret, a heap on the floor would not.
    */
   casesBagged: boolean;
+  /**
+   * The gun's fire interrupter, where it has one (the top turret's profile cam): true while its line of fire crosses the
+   * aircraft, when it holds fire. Null for a gun that may always fire.
+   */
+  interrupted: (() => boolean) | null;
 }
 
 /**
@@ -193,6 +198,11 @@ export class Gunnery {
     if (window !== state.burstWindow) {
       state.burstWindow = window;
       state.lastShot = -1;
+    }
+    // Held by the interrupter, the rounds due go unfired; the gun takes up the burst again where it stands when clear.
+    if (state.mounted.interrupted?.()) {
+      state.lastShot = shot;
+      return null;
     }
     // A frame can span several rounds; a paused or rewound clock fires none.
     const first = Math.max(state.lastShot + 1, shot - 2);

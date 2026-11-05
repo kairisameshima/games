@@ -49,7 +49,7 @@ function addWaistGun(context: CompartmentContext, d: number, side: 1 | -1): { gr
     gun: { origin: mount, direction: outward, side: receiverSideToward(mount, outward, ammunitionBox) },
   });
   // The waist floor was ankle-deep in brass after a long fight.
-  context.guns.push({ gun, belt, caseFloorY: waistFloorHeight(d), casesBagged: false });
+  context.guns.push({ gun, belt, caseFloorY: waistFloorHeight(d), casesBagged: false, interrupted: null });
   // The gunner faces the window: his yaw turns him to look out along the gun.
   return { grips: [m2Point(mount, outward, M2_GRIPS.left), m2Point(mount, outward, M2_GRIPS.right)], yaw: Math.atan2(-outward.z, outward.x) };
 }
@@ -142,7 +142,7 @@ function addBallTurretInterior(context: CompartmentContext): [THREE.Vector3, THR
       rise: 0.25,
     });
     // Cases and links leave the ball through chutes into the slipstream.
-    context.guns.push({ gun: context.ballTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: null, casesBagged: false });
+    context.guns.push({ gun: context.ballTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: null, casesBagged: false, interrupted: null });
   }
   // K-4 computing sight hanging under the boxes, its reflector glass on the line from his eye to the window.
   part(pitch, roundedBox(0.17, 0.13, 0.12, 0.01), materials.crinkle, -0.1, 0.09, 0);
@@ -242,7 +242,7 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
       ],
     });
     // The Cheyenne mount chutes its cases and links overboard.
-    context.guns.push({ gun: tailGunHandles[side < 0 ? 0 : 1], belt, caseFloorY: null, casesBagged: false });
+    context.guns.push({ gun: tailGunHandles[side < 0 ? 0 : 1], belt, caseFloorY: null, casesBagged: false, interrupted: null });
   }
   // One regulator on each side wall (Pilot's Manual section XI).
   for (const side of [-1, 1] as const) oxygenStation(parent, materials, { d: TAIL.gunnerD - 0.4, y: tailFloor + 0.45, side });
