@@ -929,6 +929,101 @@ function decalOrientation(normal: THREE.Vector3, along: THREE.Vector3): THREE.Eu
 const MAIN_GEAR = { pivotD: 5.2, pivotDrop: 0.5, axleD: 5.55, axleY: -2.3, wheelRadius: 0.71, tyre: 0.19, retractTurn: 1.45 } as const;
 const TAIL_GEAR = { forkTopAbove: 0.05, axleBelow: 0.36, axleAft: 0.12, wheelRadius: 0.33, tyre: 0.09, retractTurn: 1.2 } as const;
 
+/**
+ * The Sperry A-1A upper turret's shape, in its own space (y up from the fixed ring's top, +x forward): the fixed ring
+ * round the opening in the roof; the turret's sheet-metal drum, its guns out through two vertical slots in its front,
+ * each closed by a dark canvas boot; and the Plexiglas dome on the drum, framed by meridians and a ring at mid height,
+ * the front panel between the guns left clear for the sight.
+ */
+const TOP_TURRET = {
+  ring: { width: 0.07, top: 0.03 },
+  // A low drum: the guns ride in it, below the gunner's eye, which is up in the dome at the sight's height.
+  drum: { bottom: 0.0, top: 0.14, radius: 0.5 },
+  dome: { radius: 0.5, height: 0.44 },
+  slot: { width: 0.075, bottom: 0.015 },
+  /** The guns' trunnions, forward of the turret's axis and low in the drum, so the barrels leave through its slots. */
+  gunPivot: { x: 0.18, y: 0.06 },
+  frame: { tube: 0.012, meridians: [Math.PI / 6, Math.PI / 2, (5 * Math.PI) / 6, (7 * Math.PI) / 6, (3 * Math.PI) / 2, (11 * Math.PI) / 6], ringAt: 0.45 },
+} as const;
+
+/**
+ * The fixed ring the turret turns in: a flat lip round the opening, and a skirt from it down to the fuselage's curved
+ * roof, so no gap shows under it at the sides where the roof falls away.
+ */
+function buildTurretRingGeometry(d: number, base: number): THREE.BufferGeometry {
+  const { width, top } = TOP_TURRET.ring;
+  const inner = TOP_TURRET.drum.radius + 0.01;
+  const outer = inner + width;
+  const segments = 64;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const centreX = toX(d);
+  for (let step = 0; step <= segments; step++) {
+    const angle = (step / segments) * Math.PI * 2;
+    const x = centreX + Math.cos(angle) * outer;
+    const z = Math.sin(angle) * outer;
+    const roof = hullSurfaceHeight(toX(x), z, true) - 0.01;
+    positions.push(centreX + Math.cos(angle) * inner, base + top, Math.sin(angle) * inner, x, base + top, z, x, roof, z);
+  }
+  for (let step = 0; step < segments; step++) {
+    const a = step * 3;
+    const b = a + 3;
+    // Lip: inner to outer edge; skirt: outer edge down to the roof.
+    indices.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** The turning part of the top turret, added to its yaw group: drum with gun slots and boots, framed dome. */
+function addTopTurretBody(turret: THREE.Object3D, materials: AircraftMaterials): void {
+  const { drum, dome, slot, frame } = TOP_TURRET;
+  const gunZ = STATIONS.topTurret.gunSpacing / 2;
+  // Three's cylinders sweep θ from +z toward +x; each slot is centred where a gun's line crosses the drum.
+  const slotTheta = (z: number) => Math.atan2(Math.sqrt(drum.radius ** 2 - z ** 2), z);
+  const halfSlot = slot.width / 2 / drum.radius;
+  const slots = [slotTheta(gunZ), slotTheta(-gunZ)].sort((a, b) => a - b);
+  const drumHeight = drum.top - drum.bottom;
+  // The drum's wall in three sectors round the two slots, and the short wall under each slot.
+  const sectors: [number, number][] = [
+    [slots[1] + halfSlot, slots[0] - halfSlot + Math.PI * 2],
+    [slots[0] + halfSlot, slots[1] - halfSlot],
+  ];
+  for (const [from, to] of sectors) {
+    part(turret, new THREE.CylinderGeometry(drum.radius, drum.radius, drumHeight, 48, 1, true, from, to - from), materials.upperPaint, 0, drum.bottom + drumHeight / 2, 0);
+  }
+  for (const centre of slots) {
+    const below = slot.bottom - drum.bottom;
+    part(turret, new THREE.CylinderGeometry(drum.radius, drum.radius, below, 4, 1, true, centre - halfSlot, halfSlot * 2), materials.upperPaint, 0, drum.bottom + below / 2, 0);
+    // The canvas boot closing the slot round the barrel, set just inside the wall.
+    const bootHeight = drum.top - slot.bottom;
+    part(turret, new THREE.CylinderGeometry(drum.radius - 0.012, drum.radius - 0.012, bootHeight, 4, 1, true, centre - halfSlot, halfSlot * 2), materials.canvas, 0, slot.bottom + bootHeight / 2, 0, { castShadow: false });
+    // Lips down each side of the slot.
+    for (const edge of [centre - halfSlot, centre + halfSlot]) {
+      part(turret, new THREE.BoxGeometry(0.012, drumHeight, 0.012), materials.gunmetal, Math.sin(edge) * drum.radius, drum.bottom + drumHeight / 2, Math.cos(edge) * drum.radius, { castShadow: false });
+    }
+  }
+  // Riveted band where the dome sits on the drum.
+  part(turret, new THREE.TorusGeometry(drum.radius, 0.014, 6, 48), materials.gunmetal, 0, drum.top, 0, { rotation: [Math.PI / 2, 0, 0], castShadow: false });
+
+  const glass = part(turret, new THREE.SphereGeometry(dome.radius, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2), materials.canopy, 0, drum.top, 0, { castShadow: false });
+  glass.scale.y = dome.height / dome.radius;
+  // Meridian frames, apex to rim, skipping the panel straight ahead; a ring round the dome at `ringAt` of its height.
+  for (const angle of frame.meridians) {
+    const meridian = part(turret, new THREE.TorusGeometry(dome.radius, frame.tube, 6, 24, Math.PI / 2), materials.upperPaint, 0, drum.top, 0, { castShadow: false });
+    meridian.rotation.set(0, angle, 0);
+    meridian.scale.set(1, dome.height / dome.radius, 1);
+  }
+  const ringY = frame.ringAt * dome.height;
+  const ringRadius = dome.radius * Math.sqrt(1 - frame.ringAt ** 2);
+  part(turret, new THREE.TorusGeometry(ringRadius, frame.tube, 6, 48), materials.upperPaint, 0, drum.top + ringY, 0, { rotation: [Math.PI / 2, 0, 0], castShadow: false });
+  // The cap at the apex where the meridians meet.
+  part(turret, new THREE.CylinderGeometry(0.06, 0.07, 0.02, 20), materials.upperPaint, 0, drum.top + dome.height - 0.004, 0, { castShadow: false });
+}
+
 function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): LandingGear {
   const legs: { group: THREE.Group; turn: number }[] = [];
   const thrustLine = NACELLES[0].thrustLineH;
@@ -1500,22 +1595,17 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     bombBayDoors.push({ hinge, side: side > 0 ? -1 : 1 });
   }
 
-  // Top turret: Sperry A-1 behind the cockpit.
+  // Top turret: Sperry A-1 behind the cockpit. The fixed ring is part of the fuselage; the rest turns with the turret.
   const topTurretSpec = STATIONS.topTurret;
+  const turretBase = hullSectionAt(topTurretSpec.d).top - 0.03;
+  part(airframe, buildTurretRingGeometry(topTurretSpec.d, turretBase), materials.upperPaint, 0, 0, 0);
   const topTurretYaw = assignAssembly(new THREE.Group(), 'top-turret');
   topTurretYaw.userData.unmerged = true;
-  topTurretYaw.position.set(toX(topTurretSpec.d), hullSectionAt(topTurretSpec.d).top - 0.03, 0);
-  part(topTurretYaw, new THREE.CylinderGeometry(topTurretSpec.radius + 0.04, topTurretSpec.radius + 0.06, 0.12, 32, 1, true), materials.gunmetal, 0, 0.04, 0);
-  const dome = part(topTurretYaw, new THREE.SphereGeometry(topTurretSpec.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), materials.canopy, 0, 0.08, 0, { castShadow: false });
-  dome.scale.y = topTurretSpec.domeHeight / topTurretSpec.radius;
-  for (let rib = 0; rib < 4; rib++) {
-    const ribMesh = part(topTurretYaw, new THREE.TorusGeometry(topTurretSpec.radius, 0.014, 6, 32, Math.PI), materials.upperPaint, 0, 0.08, 0, { rotation: [0, (rib * Math.PI) / 4, 0] });
-    ribMesh.scale.y = topTurretSpec.domeHeight / topTurretSpec.radius;
-  }
-  part(topTurretYaw, roundedBox(0.5, 0.2, 0.7, 0.06), materials.upperPaint, -0.4, 0.1, 0);
+  topTurretYaw.position.set(toX(topTurretSpec.d), turretBase, 0);
+  addTopTurretBody(topTurretYaw, materials);
   const topTurretPitch = new THREE.Group();
   topTurretPitch.userData.unmerged = true;
-  topTurretPitch.position.set(0.18, 0.24, 0);
+  topTurretPitch.position.set(TOP_TURRET.gunPivot.x, TOP_TURRET.gunPivot.y, 0);
   const topTurretGuns = [-1, 1].map((side) => addM2(topTurretPitch, new THREE.Vector3(0, 0, (side * topTurretSpec.gunSpacing) / 2), FORWARD, 'turret'));
   topTurretYaw.add(topTurretPitch);
   root.add(topTurretYaw);
