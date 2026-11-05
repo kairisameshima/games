@@ -1726,6 +1726,8 @@ export interface B17 {
   rackedBombs: THREE.Object3D[];
   crewStations: CrewStation[];
   crew: B17Interior['crew'];
+  /** Men with a replacement figure for the No. 3 hit (the lead's co-pilot), swapped in while it burns. */
+  crewReactions: B17Interior['reactions'];
   /** All thirteen guns, for the gunnery. */
   guns: MountedGun[];
   /** Materials a cutaway clips: the fuselage skin and everything mounted on it. */
@@ -2124,6 +2126,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     crewStations,
     assemblies,
     crew: interior.crew,
+    crewReactions: interior.reactions,
     // The chin turret's belts run up from the nose boxes out of sight, and its cases chute overboard.
     guns: [...interior.guns, ...chinGuns.map((gun) => ({ gun, belt: null, caseFloorY: null, casesBagged: false, interrupted: null }))],
     cutawayMaterials: [

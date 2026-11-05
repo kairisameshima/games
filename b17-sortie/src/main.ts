@@ -29,6 +29,7 @@ import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
 import { Ui, type ShowMode, type ViewMode } from './ui/ui';
+import { updateInstrumentPanel, type InstrumentReadings } from './scene/interior/panels';
 import { ExplodedView } from './scene/exploded';
 import { fuselageSectionAt } from './scene/assemblies';
 import { runAudits } from './debug/audits';
@@ -444,6 +445,7 @@ let kitTime: number | null = null;
 const KIT_SHOT = { target: KitBench.focus, spherical: new THREE.Spherical(21, 1.05, 0.5) };
 
 function setKitBench(shown: boolean): void {
+  if (shown) setGunnerView(false);
   if (shown && prologueTime !== null) finishPrologue();
   if (shown && landingShown) endLanding();
   if (shown && show !== 'exterior') setShow('exterior');
@@ -492,6 +494,37 @@ const STARTER_TURN = 0.45;
 const prologueEngines: EngineStart[] = ['cold', 'cold', 'cold', 'cold'];
 /** Each engine's propeller angle while it is cold or being cranked, by engine number less one. */
 const crankAngles = [0, 0, 0, 0];
+/** A starting engine's speed on the tachometer while its starter turns it over. */
+const CRANKING_SPEED = 0.12;
+/** How far No. 3's speed falls on a rough exposure between the hit and its feathering. */
+const SPUTTER_DROP = 0.45;
+
+/** Engine speeds from stopped (0) to cruise (1), from whichever of the hardstand, the landing or the mission has the lead. */
+function leadEngineSpeeds(state: SortieState): [number, number, number, number] {
+  const speedOf = (engine: EngineStart) => (engine === 'running' ? 1 : engine === 'cranking' ? CRANKING_SPEED : 0);
+  if (prologueTime !== null) return [speedOf(prologueEngines[0]), speedOf(prologueEngines[1]), speedOf(prologueEngines[2]), speedOf(prologueEngines[3])];
+  if (landingShown) return [speedOf(landingEngines[0]), speedOf(landingEngines[1]), 0, speedOf(landingEngines[3])];
+  const no3 = state.propellerFeathered ? 0 : state.engineSputtering ? 1 - stopMotion.random() * SPUTTER_DROP : 1;
+  return [1, 1, no3, 1];
+}
+
+/** What the lead's live instruments read this exposure. */
+function instrumentReadings(state: SortieState): InstrumentReadings {
+  const aSecondAgo = sortieStateAt(Math.max(state.time - 1, 0));
+  return {
+    headingDegrees: state.headingDegrees,
+    bankRadians: state.bankRadians,
+    pitchRadians: state.pitchRadians,
+    altitudeFeet: state.altitudeFeet,
+    airspeedMph: state.airspeedMph,
+    // Over the last second of film, as feet a minute.
+    climbFeetPerMinute: (state.altitudeFeet - aSecondAgo.altitudeFeet) * 60,
+    engines: leadEngineSpeeds(state),
+    // The pilot holds No. 3's button in from the hit until its propeller is feathered.
+    featheringEngine: state.engineSputtering ? NO_3_ENGINE : null,
+  };
+}
+
 /** No. 3, by engine number less one: the engine the flak hit and the pilot feathered. */
 const NO_3_ENGINE = 2;
 /** Engines the lead has running, for the foley: all four in flight until No. 3 is feathered. */
@@ -507,8 +540,12 @@ const FORMATION_SHOT = { target: new THREE.Vector3(0.3, 3.9, 0), spherical: new 
 /** On load the prologue holds this long first, while the boarding men are still being meshed. */
 const PROLOGUE_LOAD_HOLD = 3;
 
+/** The co-pilot's No. 3 figure is in. */
+let coPilotReacting = false;
 /** The lead is off its stand landing, or on the hardstand after it. */
 let landingShown = false;
+/** Each engine's state on the landing's last exposure, No. 1 first. */
+const landingEngines: EngineStart[] = ['running', 'running', 'running', 'running'];
 
 /**
  * Engines the frame has stopped hold their propellers still where they were left; No. 3, feathered, is posed by the
@@ -539,6 +576,7 @@ function stepLanding(seconds: number, previousSeconds: number | null): void {
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
   holdStoppedPropellers(frame, NO_3_ENGINE);
+  frame.engines.forEach((engine, index) => { landingEngines[index] = engine; });
   leadEnginesRunning = frame.engines.filter((engine) => engine === 'running').length;
 }
 
@@ -553,6 +591,7 @@ function endLanding(): void {
 }
 
 function startPrologue(hold = 0): void {
+  setGunnerView(false);
   if (kitTime !== null) setKitBench(false);
   if (show !== 'exterior') setShow('exterior');
   jumpToPhase(0);
@@ -634,6 +673,7 @@ let show: ShowMode = 'exterior';
 function setShow(mode: ShowMode): void {
   if (prologueTime !== null && mode !== 'exterior') finishPrologue();
   if (kitTime !== null && mode !== 'exterior') setKitBench(false);
+  if (gunnerView && mode !== 'exterior') setGunnerView(false);
   // The cutaway and the exploded view are of the ship on its stand: from the field it goes back up to the box.
   if (landingShown && mode !== 'exterior') jumpToPhase(0);
   show = mode;
@@ -655,6 +695,43 @@ function setShow(mode: ShowMode): void {
 }
 
 /** Opens the cutaway and walks the camera along the crew's route to the station whose callout was clicked. */
+/** The engineer's eye behind the K-3's reflector glass, in the top turret's yaw space, model metres. */
+const GUNNER_EYE = new THREE.Vector3(0.1, 0.37, 0);
+/** How far along the guns the gunner's view looks, world units: where a fighter comes into the reticle. */
+const GUNNER_LOOK_DISTANCE = 12;
+let gunnerView = false;
+/** Hidden in the gunner's view: the camera is where his head is. */
+const engineerMesh = formation[0].aircraft.crew.find(({ station }) => station.member.role === 'Flight engineer')?.mesh ?? null;
+const gunnerAhead = new THREE.Vector3();
+
+/** Looks out through the top turret's sight, along its guns, with the reticle over the frame; off returns to the box. */
+function setGunnerView(on: boolean): void {
+  if (on === gunnerView) return;
+  if (on && prologueTime !== null) finishPrologue();
+  if (on && kitTime !== null) setKitBench(false);
+  if (on && show !== 'exterior') setShow('exterior');
+  gunnerView = on;
+  controls.enabled = !on;
+  controls.minDistance = on ? ORBIT_MIN_DISTANCE.inside : ORBIT_MIN_DISTANCE.outside;
+  walkthrough.cancel();
+  cameraTween = null;
+  document.body.classList.toggle('is-gunner', on);
+  if (engineerMesh) engineerMesh.visible = !on;
+  if (on) placeGunnerCamera();
+  else tweenCamera(landingShown ? HARDSTAND_SHOT : FORMATION_SHOT);
+  cameraMoved = true;
+}
+
+/** Puts the camera at the engineer's eye, looking along the guns as they lie this exposure. */
+function placeGunnerCamera(): void {
+  const { topTurret } = formation[0].aircraft;
+  topTurret.pitch.updateWorldMatrix(true, false);
+  topTurret.yaw.localToWorld(camera.position.copy(GUNNER_EYE));
+  gunnerAhead.set(1, 0, 0).transformDirection(topTurret.pitch.matrixWorld);
+  controls.target.copy(camera.position).addScaledVector(gunnerAhead, GUNNER_LOOK_DISTANCE);
+  camera.lookAt(controls.target);
+}
+
 function walkToStation(station: CrewStation): void {
   if (show !== 'cutaway') setShow('cutaway');
   cameraTween = null;
@@ -716,6 +793,8 @@ addEventListener('keydown', (event) => {
     setJitter(!stopMotion.jitter);
   } else if (event.key === 'f' || event.key === 'F') {
     setFilmRate(stopMotion.fps === 12 ? 24 : 12);
+  } else if (event.key === 'g' || event.key === 'G') {
+    setGunnerView(!gunnerView);
   } else if (event.key === 'k' || event.key === 'K') {
     setKitBench(kitTime === null);
   } else if (event.key === 'p' || event.key === 'P') {
@@ -1118,6 +1197,15 @@ function exposeFrame(exposureSec: number): void {
   gunnery.update(deltaSec, AIR_DRIFT_SPEED);
   if (prologueTime !== null) stepPrologue(deltaSec);
   else if (leadState.landingSeconds !== null && kitTime === null) stepLanding(leadState.landingSeconds, previousLanding);
+  // While No. 3 burns the co-pilot's replacement figure is in, holding its feathering button and looking out at it.
+  const reacting = leadState.engineFire > 0;
+  if (reacting !== coPilotReacting) {
+    coPilotReacting = reacting;
+    for (const { calm, reacting: figure } of formation[0].aircraft.crewReactions) {
+      calm.visible = !reacting;
+      figure.mesh.visible = reacting;
+    }
+  }
   const nextMissionBomb = formation[0].aircraft.nextMissionBomb;
   if (nextMissionBomb) nextMissionBomb.visible = leadState.tallyAdded;
   stepKitBench(deltaSec);
@@ -1130,6 +1218,8 @@ function exposeFrame(exposureSec: number): void {
 
   formation[0].holder.updateMatrixWorld(true);
   cutaway.update(exposureSec);
+  // The panel is only seen with the ship opened up; its face is redrawn and uploaded on those exposures alone.
+  if (deltaSec > 0 && (cutaway.amount > 0 || exploded.amount > 0)) updateInstrumentPanel(instrumentReadings(leadState));
   updateLeadCabinShadows();
   updateCabinBulbs();
   // No trails while the lead is on the ground or climbing out; the box forms up behind it.
@@ -1171,7 +1261,8 @@ function frame(timestamp: number): void {
     cameraMoved = true;
   }
   liftTripodBump();
-  controls.update();
+  // In the gunner's view the camera rides the turret: it moves on exposures, never between them.
+  if (!gunnerView) controls.update();
   applyTripodBump(exposureSec > 0);
   if (exposureSec === 0 && !cameraMoved) return;
   cameraMoved = false;
@@ -1181,6 +1272,7 @@ function frame(timestamp: number): void {
   lastDrawnAt = timestamp;
   fpsMeter.record(drawnSec);
   if (exposureSec > 0) exposeFrame(exposureSec);
+  if (gunnerView) placeGunnerCamera();
 
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   focusPoint.copy(controls.target);
@@ -1200,15 +1292,48 @@ function frame(timestamp: number): void {
 if (import.meta.env.DEV) {
   Object.assign(window, {
     b17Debug: {
-      THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, fighters, jumpToPhase, switchView, setShow, exploded, pinQuality,
+      THREE, renderer, scene, camera, controls, formation, cutaway, gunnery, fighters, renderLog, jumpToPhase, switchView, setShow, exploded, pinQuality,
       setPlaying: (value: boolean) => { playing = value; },
+      setGunnerView,
       seek: (time: number) => { sortieTime = time; },
       /** Every man is meshed: his figure is built in a worker and arrives after load. */
-      crewMeshed: () => formation.every((ship) => ship.aircraft.crew.every(({ mesh }) => mesh.geometry.getAttribute('position')?.count > 0)),
+      crewMeshed: () => formation.every(({ aircraft }) => [...aircraft.crew, ...aircraft.crewReactions.map(({ reacting }) => reacting)].every(({ mesh }) => mesh.geometry.getAttribute('position')?.count > 0)),
       audit: () => runAudits(formation[0].aircraft, formation[1].aircraft),
     },
   });
 }
 
+/** Side of the scratch target the warm-up frames are drawn into. */
+const WARM_UP_TARGET_SIZE = 64;
+
+/**
+ * Draws one throwaway frame of everything, hidden or out of shot (the fighters, the hardstand, flak, the kit bench), with
+ * its shadows, so every shader and shadow variant is compiled before the film starts rather than on an exposure the
+ * first time something is seen.
+ */
+function warmUpShaders(): void {
+  const hidden: THREE.Object3D[] = [];
+  const culled: THREE.Object3D[] = [];
+  scene.traverse((object) => {
+    if (!object.visible) hidden.push(object);
+    if (object.frustumCulled) culled.push(object);
+  });
+  for (const object of hidden) object.visible = true;
+  for (const object of culled) object.frustumCulled = false;
+  const target = new THREE.WebGLRenderTarget(WARM_UP_TARGET_SIZE, WARM_UP_TARGET_SIZE);
+  renderer.setRenderTarget(target);
+  renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  target.dispose();
+  for (const object of hidden) object.visible = false;
+  for (const object of culled) object.frustumCulled = true;
+}
+
+// In both views: each lights and reflects the set differently.
+applyView('studio');
+warmUpShaders();
+applyView('lab');
+warmUpShaders();
 requestAnimationFrame(frame);
 ui.hideLoading();

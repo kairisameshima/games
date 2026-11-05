@@ -42,6 +42,11 @@ export interface StationCrew {
   /** Callout label; several men can share one (pilots, waist gunners), so only the first of a label is pinned. */
   label: string;
   placement: 'above' | 'below';
+  /**
+   * His replacement figure for when No. 3 is hit and burning, where he has one: swapped in for the moment, as an
+   * animator swaps a figure for a new pose.
+   */
+  reaction?: CrewMember;
 }
 
 export interface CompartmentResult {

@@ -19,7 +19,7 @@ export const PHASES: readonly Phase[] = [
   { id: 'fighters', label: 'Fighter attack', detail: 'Fighters press in on the box. Every gun that bears answers; the box holds formation for mutual fire.', start: 10, end: 24 },
   { id: 'initial-point', label: 'Initial point', detail: 'Turn onto the bomb-run heading. Bomb bay doors open.', start: 24, end: 32 },
   { id: 'bomb-run', label: 'Bomb run', detail: 'Bombardier flies the aircraft through the Norden sight. No evasive action through the flak.', start: 32, end: 39 },
-  { id: 'flak-hit', label: 'Flak hit', detail: 'A burst under the right wing holes the skin and sets No. 3 engine on fire. The pilot feathers it and fires its extinguisher; it trails black smoke. The run holds.', start: 39, end: 44 },
+  { id: 'flak-hit', label: 'Flak hit', detail: 'A burst under the right wing holes the skin and sets No. 3 engine on fire. The co-pilot leans to the panel and holds its feathering button in, then its extinguisher is fired; it trails black smoke. The run holds.', start: 39, end: 44 },
   { id: 'bombs-away', label: 'Bombs away', detail: 'Twelve 500 lb bombs released in train.', start: 44, end: 48 },
   { id: 'rally', label: 'Rally', detail: 'Doors closed, diving turn off the target to re-form.', start: 48, end: 58 },
   { id: 'withdrawal', label: 'Withdrawal', detail: 'Heading home, flak thinning out behind.', start: 58, end: 72 },

@@ -135,3 +135,9 @@ body.is-photo #ui-root .photo-hint { display: block; }
   display: none; position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 5px 12px; border-radius: 8px;
   background: var(--chip); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #eef2fa; pointer-events: none;
 }
+
+/* Gunner's view: the reflector glass's reticle over the frame, and the station callouts out of the way. */
+.gunsight { display: none; position: absolute; left: 50%; top: 50%; width: min(34vh, 320px); aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none; }
+.gunsight svg { width: 100%; height: 100%; fill: #ff7a3d; filter: drop-shadow(0 0 4px #ff7a3daa); opacity: 0.85; }
+body.is-gunner .gunsight { display: block; }
+body.is-gunner #callouts { display: none; }

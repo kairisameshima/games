@@ -41,11 +41,18 @@ function outsideSkin(point: THREE.Vector3): number {
   return (radius ** (1 / HULL_EXPONENT) - 1) * Math.min(section.halfWidth, halfHeight);
 }
 
+/** The suffix a replacement figure's role carries in the audit, to tell it from the man's usual figure. */
+const REACTION_SUFFIX = ' · No. 3 hit';
+
 function auditCrew(ship: B17): CrewAudit[] {
   ship.root.updateMatrixWorld(true);
   const toFuselage = ship.root.matrixWorld.clone().invert();
   const vertex = new THREE.Vector3();
-  return ship.crew.map(({ station, mesh }) => {
+  const figures = [
+    ...ship.crew.map((figure) => ({ ...figure, label: figure.station.member.role })),
+    ...ship.crewReactions.map(({ reacting }) => ({ ...reacting, label: reacting.station.member.role + REACTION_SUFFIX })),
+  ];
+  return figures.map(({ station, mesh, label }) => {
     const { pose, role } = station.member;
     const skeleton = buildSkeleton(pose);
     const reach = (side: Side): number => {
@@ -68,7 +75,7 @@ function auditCrew(ship: B17): CrewAudit[] {
       if (!inTopTurret && outsideSkin(vertex) > CREW_SKIN_TOLERANCE) hullOut++;
     }
     return {
-      role,
+      role: label,
       reachCm: {
         left: toCm(reach('left')),
         right: toCm(reach('right')),

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { figureMesh, type FigureDetail } from '../crew/figure';
+import { figureMesh, type CrewMember, type FigureDetail } from '../crew/figure';
 import { meshFigureInWorker } from '../crew/figure-pool';
 import type { MountedGun } from '../gunnery';
 import type { M2Gun } from '../m2';
@@ -45,6 +45,11 @@ export interface B17Interior {
   clipMaterials: THREE.Material[];
   /** Each man, his figure mesh, and the group carrying it: what the fit audit checks against the hull. */
   crew: { station: StationCrew; mesh: THREE.Mesh }[];
+  /**
+   * The men with a replacement figure for the No. 3 hit: the figure he flies in, and the reacting one, hidden until the
+   * film swaps it in. Built on the fully detailed ship only, which the cutaway opens.
+   */
+  reactions: { calm: THREE.Mesh; reacting: { station: StationCrew; mesh: THREE.Mesh } }[];
   /** The guns the interior built or fed, with their belts and where their cases fall. */
   guns: MountedGun[];
 }
@@ -59,14 +64,14 @@ const STARBOARD_WALL_MIN_Z = 0.5;
 const figureGeometries = new Map<string, Promise<THREE.BufferGeometry>>();
 
 /** The man's mesh, empty until his figure comes back from the meshing worker. */
-function crewMesh(crew: StationCrew, detail: FigureDetail): THREE.Mesh {
-  const key = `${crew.member.role}|${detail}`;
+function crewMesh(member: CrewMember, variant: 'calm' | 'reacting', detail: FigureDetail): THREE.Mesh {
+  const key = `${member.role}|${variant}|${detail}`;
   let geometry = figureGeometries.get(key);
   if (!geometry) {
-    geometry = meshFigureInWorker(crew.member, detail);
+    geometry = meshFigureInWorker(member, detail);
     figureGeometries.set(key, geometry);
   }
-  const mesh = figureMesh(crew.member, detail, new THREE.BufferGeometry());
+  const mesh = figureMesh(member, detail, new THREE.BufferGeometry());
   void geometry.then((meshed) => {
     mesh.geometry.dispose();
     mesh.geometry = meshed;
@@ -117,15 +122,24 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
   hosts.root.add(starboardWall);
 
   const crew = compartments.flatMap((compartment) => compartment.crew);
-  const figures = crew.map((station) => {
-    const mesh = crewMesh(station, detail);
+  const placeFigure = (station: StationCrew, member: CrewMember, variant: 'calm' | 'reacting'): THREE.Mesh => {
+    const mesh = crewMesh(member, variant, detail);
     // The figure's mesh sits at the origin; its pelvis says which compartment it is in.
-    mesh.userData.stationX = buildSkeleton(station.member.pose).pelvis.position.x * (station.member.stature ?? 1);
+    mesh.userData.stationX = buildSkeleton(member.pose).pelvis.position.x * (member.stature ?? 1);
     // Its geometry arrives later from a worker, so no merge may fold it in.
     mesh.userData.unmerged = true;
     (station.host ?? hosts.root).add(mesh);
-    return { station, mesh };
-  });
+    return mesh;
+  };
+  const figures = crew.map((station) => ({ station, mesh: placeFigure(station, station.member, 'calm') }));
+  const reactions = detail === 'high'
+    ? figures.flatMap(({ station, mesh }) => {
+      if (!station.reaction) return [];
+      const reacting = placeFigure(station, station.reaction, 'reacting');
+      reacting.visible = false;
+      return [{ calm: mesh, reacting: { station: { ...station, member: station.reaction }, mesh: reacting } }];
+    })
+    : [];
 
   const stations: CrewStation[] = compartments.flatMap((compartment) => compartment.stations);
   const byLabel = new Map<string, { anchors: THREE.Vector3[]; placement: 'above' | 'below' }>();
@@ -139,7 +153,7 @@ export function buildInterior(hosts: InteriorHosts, detail: FigureDetail): B17In
     stations.push({ role, anchor, placement: entry.placement, showsBombLoad: false });
   }
   return {
-    rackedBombs: bombBay.rackedBombs, stations, crew: figures, starboardWall, guns,
+    rackedBombs: bombBay.rackedBombs, stations, crew: figures, reactions, starboardWall, guns,
     clipMaterials: [materials.frame, materials.frameGreen, materials.bulkheadWeb],
   };
 }

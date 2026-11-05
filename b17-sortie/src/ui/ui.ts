@@ -21,6 +21,26 @@ export interface UiCallbacks {
   onJitterToggle: () => void;
 }
 
+/** Range diamonds round the K-3 reticle, and the circle they sit on, in the reticle's 200-unit drawing. */
+const RETICLE = { diamonds: 6, radius: 62, diamond: 7 } as const;
+
+/**
+ * The K-3 computing sight's reticle as the engineer sees it in the reflector glass: a centre dot inside a ring of range
+ * diamonds, which close in on a fighter to frame it. Shown in the gunner's view.
+ */
+function gunsightReticle(): HTMLElement {
+  const reticle = element('div', 'gunsight');
+  const { diamonds, radius, diamond } = RETICLE;
+  const marks = Array.from({ length: diamonds }, (_, index) => {
+    const angle = (index / diamonds) * Math.PI * 2 - Math.PI / 2;
+    const x = 100 + Math.cos(angle) * radius;
+    const y = 100 + Math.sin(angle) * radius;
+    return `<path d="M${x} ${y - diamond}L${x + diamond * 0.6} ${y}L${x} ${y + diamond}L${x - diamond * 0.6} ${y}Z"/>`;
+  }).join('');
+  reticle.innerHTML = `<svg viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="2.6"/>${marks}</svg>`;
+  return reticle;
+}
+
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.className = className;
@@ -112,6 +132,7 @@ export class Ui {
     hintRow('M', 'sound on / off');
     hintRow('P', 'photo: save a still · Esc back');
     hintRow('K', 'kit box and turntable');
+    hintRow('G', "gunner's view: top turret sight");
     hintRow('L', 'record render log');
     hintRow('Drag', 'orbit · scroll to zoom');
     hintRow('Click', 'crew label: walk there');
@@ -159,7 +180,7 @@ export class Ui {
     hints.append(viewToggle, showToggle, noseArtToggle, filmRateToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
 
     this.loading = element('div', 'loading', 'RIGGING THE FORMATION…');
-    root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'));
+    root.append(titlePanel, phasePanel, hints, this.loading, element('div', 'photo-hint', 'Photo mode · P saves another still · Esc returns'), gunsightReticle());
   }
 
   update(state: SortieState): void {

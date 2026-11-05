@@ -99,6 +99,16 @@
         "rightFoot": 0
       },
       "hullOut": 0
+    },
+    {
+      "role": "Co-pilot · No. 3 hit",
+      "reachCm": {
+        "left": 1.7,
+        "right": 0,
+        "leftFoot": 0,
+        "rightFoot": 0
+      },
+      "hullOut": 0
     }
   ],
   "equipment": {

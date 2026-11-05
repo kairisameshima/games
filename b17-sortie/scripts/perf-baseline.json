@@ -1,0 +1,29 @@
+{
+  "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version) · 1400×900",
+  "segments": {
+    "live": {
+      "p50": 11,
+      "p95": 14.1
+    },
+    "full quality": {
+      "p50": 9.8,
+      "p95": 10.5
+    },
+    "cotton hidden (clouds, contrails, flak)": {
+      "p50": 9.1,
+      "p95": 10.7
+    },
+    "wingmen hidden": {
+      "p50": 6.1,
+      "p95": 6.7
+    },
+    "shadow map held": {
+      "p50": 8.6,
+      "p95": 11.3
+    },
+    "pixel ratio 1, no reflection, MSAA or AO": {
+      "p50": 7.2,
+      "p95": 9.7
+    }
+  }
+}

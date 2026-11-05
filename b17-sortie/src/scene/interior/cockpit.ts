@@ -5,9 +5,9 @@ import { hullHalfWidthAtHeight, hullSectionAt, toX } from '../hull';
 import { part, roundedBox } from '../kit';
 import { feedGun } from './ammunition';
 import { BULKHEADS, COCKPIT, FLIGHT_DECK, FLOORS } from './layout';
-import { applyPanelUvs, instrumentPanelTexture, panelOutline, PANEL_HEIGHT, PANEL_WIDTH } from './panels';
+import { applyPanelUvs, featheringButtonOnPanel, instrumentPanelTexture, panelOutline, PANEL_HEIGHT, PANEL_WIDTH } from './panels';
 import { box, oxygenBottle, rod, type CompartmentContext, type CompartmentResult } from './parts';
-import { FACING, palmDown, plantedFoot, pose, seatedPelvis, verticalGrip } from './poses';
+import { FACING, knobGrip, palmDown, plantedFoot, pose, seatedPelvis, verticalGrip } from './poses';
 import { oxygenStation } from './fittings';
 import { addBulkhead, addSparTruss } from './structure';
 
@@ -15,6 +15,10 @@ const v = (d: number, y: number, z: number) => new THREE.Vector3(toX(d), y, z);
 const WHEEL_TUBE = 0.017;
 const FORWARD = new THREE.Vector3(1, 0, 0);
 const THROTTLE_COUNT = 4;
+/** No. 3, by engine number less one: the engine the flak hits. */
+const NO_3_ENGINE = 2;
+/** The grip of a hand pressing a button sits this far back from the button, metres: the fingers reach the rest. */
+const FINGERTIP_REACH = 0.12;
 
 function addInstrumentPanel(context: CompartmentContext): void {
   const { parent, materials } = context;
@@ -361,6 +365,27 @@ export function buildCockpit(context: CompartmentContext): CompartmentResult {
     regulator: v(4.05, 0.77, hullHalfWidthAtHeight(4.05, 0.77) - 0.06),
     faceSeed: 4,
   };
+  // When No. 3 is hit the co-pilot leans to the panel and holds its feathering button in, looking out at the engine.
+  const featherButton = featheringButtonOnPanel(NO_3_ENGINE);
+  const featherButtonAt = v(COCKPIT.panelD, COCKPIT.panel.bottomY + PANEL_HEIGHT - featherButton.y, featherButton.x - PANEL_WIDTH / 2);
+  const copilotReaction: CrewMember = {
+    ...copilotMember,
+    pose: pose({
+      pelvis: seatedPelvis(copilot.seat, yaw),
+      yaw,
+      pelvisTilt: 0.15,
+      spineBend: 0.9,
+      spineTwist: 0.45,
+      spineSide: -0.3,
+      headYaw: -0.75,
+      headPitch: 0.1,
+      hands: {
+        left: knobGrip(featherButtonAt.clone().add(new THREE.Vector3(-FINGERTIP_REACH, 0, 0)), 'left', yaw, new THREE.Vector3(1, 0, 0), 0.4),
+        right: verticalGrip(copilot.rightGrip, 'right', yaw, { curl: 0.85, inward: 0.3 }),
+      },
+      feet: copilotMember.pose.feet,
+    }),
+  };
   // The engineer stands on the turret platform in turret space; his eye level is the sight's.
   const engineerFeetY = basket.platformY + 0.075;
   const engineer: CrewMember = {
@@ -386,7 +411,7 @@ export function buildCockpit(context: CompartmentContext): CompartmentResult {
   return {
     crew: [
       { member: pilotMember, host: null, label: 'Pilot and co-pilot', placement: 'above' },
-      { member: copilotMember, host: null, label: 'Pilot and co-pilot', placement: 'above' },
+      { member: copilotMember, host: null, label: 'Pilot and co-pilot', placement: 'above', reaction: copilotReaction },
       { member: engineer, host: context.topTurretYaw, label: 'Flight engineer · top turret', placement: 'above' },
     ],
     stations: [],

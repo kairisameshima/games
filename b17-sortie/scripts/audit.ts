@@ -1,16 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
-import { createServer } from 'vite';
 import type { AuditReport } from '../src/debug/audits';
+import { LOAD_TIMEOUT_MS, withAppPage } from './app-page.ts';
 
-const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = fileURLToPath(new URL('./audit-baseline.json', import.meta.url));
 /** A reach or a part outside the skin may grow by this much before it counts as a regression, centimetres. */
 const TOLERANCE_CM = 0.5;
-/** The page builds the formation and meshes the crew in workers: generous, for a software-rendered CI browser. */
-const LOAD_TIMEOUT_MS = 180_000;
-const VIEWPORT = { width: 1400, height: 900 } as const;
 
 type Baseline = AuditReport;
 
@@ -50,31 +45,17 @@ function improvements(report: AuditReport, baseline: Baseline): string[] {
   return found;
 }
 
-async function auditInBrowser(): Promise<{ report: AuditReport; pageErrors: string[] }> {
-  const server = await createServer({ root: PROJECT_ROOT, logLevel: 'error', server: { port: 0, strictPort: false } });
-  await server.listen();
-  const url = server.resolvedUrls?.local[0];
-  if (!url) throw new Error('Vite dev server has no local URL');
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
-  try {
-    const page = await browser.newPage({ viewport: VIEWPORT });
-    const pageErrors: string[] = [];
-    page.on('pageerror', (error) => pageErrors.push(error.message));
-    await page.goto(url);
-    await page.waitForFunction('"b17Debug" in window', undefined, { timeout: LOAD_TIMEOUT_MS });
+async function auditInBrowser(): Promise<{ result: AuditReport; pageErrors: string[] }> {
+  return withAppPage(async (page) => {
     // Held still, so the audit sees one pose of everything.
     await page.evaluate('window.b17Debug.setPlaying(false)');
     await page.waitForFunction('window.b17Debug.crewMeshed()', undefined, { timeout: LOAD_TIMEOUT_MS, polling: 500 });
-    const report = await page.evaluate<AuditReport>('window.b17Debug.audit()');
-    return { report, pageErrors };
-  } finally {
-    await browser.close();
-    await server.close();
-  }
+    return page.evaluate<AuditReport>('window.b17Debug.audit()');
+  });
 }
 
 const update = process.argv.includes('--update');
-const { report, pageErrors } = await auditInBrowser();
+const { result: report, pageErrors } = await auditInBrowser();
 if (update && pageErrors.length > 0) {
   for (const message of pageErrors) console.error(`page error: ${message}`);
   console.error('Baseline not written: the page threw while loading.');

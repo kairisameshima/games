@@ -65,7 +65,55 @@ interface Segment {
 
 interface PendingQuery { query: WebGLQuery; record: FrameRecord }
 
-interface Stats { mean: number; p50: number; p95: number; max: number }
+export interface Stats { mean: number; p50: number; p95: number; max: number }
+
+export interface PassReport { pass: string; renders: number; cpuMs: number; drawCalls: number; triangles: number }
+
+/** One segment of a recording: the live viewing, or a probe. */
+export interface SegmentReport {
+  label: string;
+  context: RenderLogContext;
+  frames: number;
+  fps: number | null;
+  frameMs: Stats | null;
+  cpuMs: Stats | null;
+  costMs: Stats | null;
+  gpuMs: Stats | null;
+  drawCalls: Stats | null;
+  triangles: Stats | null;
+  passesPerFrame: PassReport[];
+}
+
+export interface RenderLogReport {
+  app: string;
+  recordedAt: string;
+  machine: {
+    userAgent: string;
+    platform: string;
+    cpuThreads: number;
+    memoryGb: number | null;
+    devicePixelRatio: number;
+    window: [number, number];
+    screen: [number, number];
+    drawingBuffer: [number, number];
+  };
+  gpu: {
+    vendor: string;
+    renderer: string;
+    timerQueries: boolean;
+    maxSamples: number;
+    maxTextureSize: number;
+    programs: number | null;
+    geometries: number;
+    textures: number;
+  };
+  notes: string[];
+  segments: SegmentReport[];
+  timeline: (RenderLogContext & { t: number })[];
+  events: { t: number; kind: string; detail: Record<string, unknown> }[];
+  longTasks: { t: number; ms: number }[];
+  frames: FrameRecord[];
+}
 
 function stats(values: number[]): Stats | null {
   if (values.length === 0) return null;
@@ -102,6 +150,8 @@ export class RenderLog {
   private longTaskObserver: PerformanceObserver | null = null;
   private originalRender: THREE.WebGLRenderer['render'] | null = null;
   private readonly readBack = new Uint8Array(4);
+  /** The last finished recording, also saved as a download; null until one finishes. */
+  lastReport: RenderLogReport | null = null;
 
   constructor(private readonly renderer: THREE.WebGLRenderer, private readonly hooks: RenderLogHooks) {
     this.gl = renderer.getContext() as WebGL2RenderingContext;
@@ -115,6 +165,7 @@ export class RenderLog {
   start(): void {
     if (this.active) return;
     this.active = true;
+    this.lastReport = null;
     this.startedAt = performance.now();
     this.lastFrameAt = 0;
     this.frames = [];
@@ -236,7 +287,8 @@ export class RenderLog {
     window.setTimeout(() => {
       this.collectQueries();
       const name = `b17-render-log-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-      download(name, JSON.stringify(this.report(), null, 1));
+      this.lastReport = this.report();
+      download(name, JSON.stringify(this.lastReport, null, 1));
       this.hooks.onStatus(`Saved ${name}`);
     }, 300);
   }
@@ -288,7 +340,7 @@ export class RenderLog {
     });
   }
 
-  private report(): Record<string, unknown> {
+  private report(): RenderLogReport {
     const debugInfo = this.gl.getExtension('WEBGL_debug_renderer_info');
     const drawingBuffer = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     const navigatorWithMemory = navigator as Navigator & { deviceMemory?: number };
@@ -332,8 +384,8 @@ export class RenderLog {
         drawingBuffer: [drawingBuffer.x, drawingBuffer.y],
       },
       gpu: {
-        vendor: debugInfo ? this.gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : this.gl.getParameter(this.gl.VENDOR),
-        renderer: debugInfo ? this.gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : this.gl.getParameter(this.gl.RENDERER),
+        vendor: String(debugInfo ? this.gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : this.gl.getParameter(this.gl.VENDOR)),
+        renderer: String(debugInfo ? this.gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : this.gl.getParameter(this.gl.RENDERER)),
         timerQueries: this.timer !== null,
         maxSamples: this.gl.getParameter(this.gl.MAX_SAMPLES),
         maxTextureSize: this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE),
