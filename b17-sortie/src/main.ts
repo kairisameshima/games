@@ -595,7 +595,12 @@ function stepLanding(seconds: number): void {
   holder.position.copy(frame.position);
   // The camera pans with the ship all the way down and along the taxiway, then moves in once it has stopped.
   // While the camera swings round to its spot it already looks at the ship, so the pan never jumps when it gets there.
-  if (seconds < hardstand.rolledOutSeconds) controls.target.copy(frame.position);
+  if (seconds < hardstand.rolledOutSeconds) {
+    controls.target.copy(frame.position);
+    // Aimed now, for this exposure's frame: the orbit controls only re-aim on the next, so the ship would be drawn
+    // off-centre and then snap back, a stutter on every exposure.
+    camera.lookAt(controls.target);
+  }
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
   holdStoppedPropellers(frame, NO_3_ENGINE);
