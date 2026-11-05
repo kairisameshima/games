@@ -31,6 +31,8 @@ export interface InteriorMaterials {
   bakelite: THREE.MeshStandardMaterial;
   gunBlack: THREE.MeshStandardMaterial;
   ammunitionBox: THREE.MeshStandardMaterial;
+  /** Olive drab duck: the top turret's sling seat and spent-round bags. */
+  duck: THREE.MeshStandardMaterial;
   brass: THREE.MeshStandardMaterial;
   chartPaper: THREE.MeshStandardMaterial;
   bulkheadWeb: THREE.MeshStandardMaterial;
@@ -325,6 +327,7 @@ export function interiorMaterials(): InteriorMaterials {
     bakelite: glossyMaterial('#2b1e17', { roughness: 0.38, clearcoat: 0.4 }),
     gunBlack: metalMaterial('#15171b', { roughness: 0.46, metalness: 0.55 }),
     ammunitionBox: matteMaterial('#575a42', { roughness: 0.7 }),
+    duck: matteMaterial('#5f5b42', { roughness: 0.95 }),
     brass: metalMaterial('#b38a45', { roughness: 0.32, metalness: 1 }),
     chartPaper: matteMaterial('#ddd6c0', { roughness: 0.9 }),
     bulkheadWeb: metalMaterial('#868c90', { roughness: 0.6, metalness: 0.45, envMapIntensity: 0.5, side: THREE.DoubleSide }),

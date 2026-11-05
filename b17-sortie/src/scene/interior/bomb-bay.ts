@@ -143,7 +143,7 @@ export function buildRadioRoom(context: CompartmentContext): CompartmentResult {
     box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
     gun: { origin: mount, direction: elevation, side: receiverSideToward(mount, elevation, ammunitionBox) },
   });
-  context.guns.push({ gun, belt, caseFloorY: floor });
+  context.guns.push({ gun, belt, caseFloorY: floor, casesBagged: false });
 
   // Oxygen bottles under the starboard wall, a regulator for the operator, extinguisher on the forward bulkhead.
   for (let bottle = 0; bottle < 2; bottle++) {

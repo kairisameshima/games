@@ -44,7 +44,7 @@ The `*-raw.json` files are the column traces, and `fuselage-stations.json` is th
 ## Top turret sources
 
 - *Handbook of Operation and Service Instructions, Sperry Upper Turret* (AN 11-45C-1), [Hangar Thirteen copy](http://hangarthirteen.org/wp-content/uploads/2020/08/11-45C-1-Handbook-for-Sperry-Turrets-Pt-1-Upper-Turret.pdf).
-- Hangar Thirteen, ["Lucky Thirteen's Turrets In Detail, Pt. 1"](http://hangarthirteen.org/lucky-thirteens-turrets-in-detail/): the A-1, A-1A and A-1B and which B-17 blocks carried them (the A-1A from B-17F-80-BO to B-17G-90-BO), and the six dome types; the Type 6 "Ainsworth" dome is the one both makers fitted to A-1As.
+- Hangar Thirteen, ["Lucky Thirteen's Turrets In Detail, Pt. 1"](http://hangarthirteen.org/lucky-thirteens-turrets-in-detail/): the A-1, A-1A and A-1B and which B-17 blocks carried them (the A-1A from B-17F-80-BO to B-17G-90-BO), and the six dome types; the Type 6 "Ainsworth" dome is the one both makers fitted to A-1As. Also the A-1 series' changes used for the basket: the all-metal gun shutters from SP-1641 and E-2700, the stirrups, sling seat and V rails holding the stainless ammunition cans, the padded cushion, the lightening holes in the tub, the hourglass platform of SP-1653 on, the oxygen swivel, and the double power unit.
 - Photographs of a restored A-1A with a Type 6 dome and a cutaway drawing of the turret (dome, gun cradle, radial support, sight), supplied for this project: the heavy flat frames arching over the crown either side of the windscreen, the metal shutter panels the guns leave through just outside them, and the sheet-metal ring under the dome.
 
 ## Markings and production sources

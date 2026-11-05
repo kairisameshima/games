@@ -101,28 +101,155 @@ function addPilotControls(context: CompartmentContext, side: 1 | -1): { leftGrip
 }
 
 /**
- * The Sperry top turret's interior, carried by the turret's yaw group: the engineer's platform, the K-3 computing sight
- * in front of his face, the two hand grips under it, and the ammunition boxes either side.
+ * The Sperry A-1A's basket, hung from the turret ring and turning with it (AN 11-45C-1; Hangar Thirteen, "Lucky
+ * Thirteen's Turrets In Detail"), in turret space: y up from the ring, +x forward.
+ */
+const TOP_TURRET_BASKET = {
+  /** The tub under the ring, its sheet cut to a lattice of triangles to save weight; clear of the skin at its top. */
+  tub: { radius: 0.45, top: -0.08, bottom: -0.3, rim: 0.035, struts: 24, strutWidth: 0.03, strutThickness: 0.006 },
+  /** The V of rails either side of the gunner, from the tub's rim down to the platform, aft of his hips. */
+  rail: { x: -0.12, topZ: 0.38, bottomZ: 0.22, radius: 0.018 },
+  /** The stainless ammunition can on each rail, forward of it under the tub, so its chute rises inside the dome. */
+  can: { centre: new THREE.Vector3(0.05, -0.5, 0.34), size: [0.26, 0.3, 0.12] as [number, number, number] },
+  /** The padded sling seat behind the gunner's hips, hung from the rails by a strap at each end. */
+  seat: { centre: new THREE.Vector3(-0.19, -0.47, 0), size: [0.15, 0.045, 0.26] as [number, number, number], strapRadius: 0.011 },
+  /**
+   * Each gun's spent-round bag: its mouth under the gun's ejection port, the bag running aft and outboard round the
+   * gunner's elbow and down beside the rail.
+   */
+  bag: {
+    path: [new THREE.Vector3(0.04, 0.06, 0.2), new THREE.Vector3(-0.1, -0.02, 0.26), new THREE.Vector3(-0.24, -0.3, 0.34), new THREE.Vector3(-0.27, -0.8, 0.32)],
+    mouthRadius: 0.055,
+    radius: 0.048,
+  },
+  /** The lightened platform of SP-1653 on: an hourglass across the turret, a lobe under each foot. */
+  platform: { centreX: -0.04, lobeHalfLength: 0.17, waistHalfLength: 0.07, lobeZ: 0.14, endRadius: 0.12, thickness: 0.025 },
+  /** The stirrups on the platform: a heel cup and a toe strap for each boot, clamped to the rail at its height. */
+  stirrup: { toeX: 0.05, heelX: -0.135, footZ: 0.12, strapRadius: 0.085, strapRise: 1.6, strap: 0.009, cup: [0.015, 0.05, 0.1] as [number, number, number] },
+  /** The double power unit hung under the platform: the motor across it, a hydraulic transmission at each end. */
+  powerUnit: { x: 0.06, drop: 0.09, motorRadius: 0.05, motorLength: 0.15, transmission: [0.09, 0.1, 0.07] as [number, number, number] },
+  /** The oxygen swivel under the platform's centre, down to its bearing on the flight deck. */
+  swivel: { radius: 0.03 },
+} as const;
+
+/** Where a rail is at height `y` in turret space, for a basket whose platform is at `platformY`. */
+function railPoint(side: 1 | -1, y: number, platformY: number): THREE.Vector3 {
+  const { tub } = TOP_TURRET_BASKET;
+  const { x, topZ, bottomZ } = TOP_TURRET_BASKET.rail;
+  const along = (tub.bottom - y) / (tub.bottom - platformY);
+  return new THREE.Vector3(x, y, side * THREE.MathUtils.lerp(topZ, bottomZ, along));
+}
+
+/** The platform's half-length fore and aft at `z` across it: the waist on the centreline, the lobes either side. */
+function platformHalfLength(z: number): number {
+  const { lobeHalfLength, waistHalfLength, lobeZ, endRadius } = TOP_TURRET_BASKET.platform;
+  const across = Math.abs(z);
+  if (across <= lobeZ) return THREE.MathUtils.lerp(waistHalfLength, lobeHalfLength, THREE.MathUtils.smoothstep(across, 0, lobeZ));
+  return lobeHalfLength * Math.sqrt(Math.max(1 - ((across - lobeZ) / endRadius) ** 2, 0));
+}
+
+function platformGeometry(): THREE.BufferGeometry {
+  const { lobeZ, endRadius, thickness } = TOP_TURRET_BASKET.platform;
+  const reach = lobeZ + endRadius;
+  const steps = 24;
+  const zs = Array.from({ length: steps + 1 }, (_, step) => THREE.MathUtils.lerp(-reach, reach, step / steps));
+  // The outline in the shape's (x, y) plane, y standing for z: forward edge port to starboard, back edge returning.
+  const outline = [...zs.map((z) => new THREE.Vector2(platformHalfLength(z), z)), ...zs.reverse().map((z) => new THREE.Vector2(-platformHalfLength(z), z))];
+  const geometry = new THREE.ExtrudeGeometry(new THREE.Shape(outline), { depth: thickness, bevelEnabled: false });
+  // Shape y onto z, the extrusion downward from the top face.
+  return geometry.rotateX(Math.PI / 2);
+}
+
+/** A flat strut of the tub's lattice, lying in the tub's wall from `from` to `to`. */
+function latticeStrut(parent: THREE.Object3D, material: THREE.Material, from: THREE.Vector3, to: THREE.Vector3): void {
+  const { strutWidth, strutThickness } = TOP_TURRET_BASKET.tub;
+  const along = to.clone().sub(from);
+  const middle = from.clone().add(to).multiplyScalar(0.5);
+  const outward = new THREE.Vector3(middle.x, 0, middle.z).normalize();
+  const length = along.length();
+  along.normalize();
+  const across = new THREE.Vector3().crossVectors(along, outward).normalize();
+  const strut = part(parent, roundedBox(strutWidth, length, strutThickness, 0.002), material, middle.x, middle.y, middle.z);
+  strut.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(across, along, new THREE.Vector3().crossVectors(across, along)));
+}
+
+/**
+ * The Sperry A-1A's basket, carried by the turret's yaw group: the lattice tub under the ring, the V rails down to the
+ * hourglass platform with its stirrups, the stainless ammunition cans on the rails, the sling seat, a spent-round bag
+ * under each gun, the double power unit under the platform, and the K-3 computing sight with the hand grips under it.
  */
 function addTopTurretBasket(context: CompartmentContext): { leftGrip: THREE.Vector3; rightGrip: THREE.Vector3; platformY: number } {
   const { topTurretYaw, materials } = context;
+  const { tub, rail, can, seat, bag, platform, stirrup, powerUnit, swivel } = TOP_TURRET_BASKET;
   const platformY = FLIGHT_DECK.platformY - topTurretYaw.position.y;
-  part(topTurretYaw, new THREE.CylinderGeometry(0.3, 0.3, 0.03, 28), materials.aluminium, 0, platformY - 0.015, 0);
-  rod(topTurretYaw, new THREE.Vector3(-0.22, platformY, 0), new THREE.Vector3(-0.3, 0.02, 0), 0.03, materials.aluminium);
-  // Ammunition boxes either side below the guns, chutes rising to each gun's outboard feedway. The chutes are routed
-  // with the guns level; the belts ride with the guns.
+
+  // The tub: a rim top and bottom, joined by a zigzag of struts that leaves the triangular lightening holes.
+  for (const y of [tub.top - tub.rim / 2, tub.bottom + tub.rim / 2]) {
+    part(topTurretYaw, new THREE.CylinderGeometry(tub.radius, tub.radius, tub.rim, 40, 1, true), materials.frameGreen, 0, y, 0, { castShadow: false });
+  }
+  const strutTop = tub.top - tub.rim;
+  const strutBottom = tub.bottom + tub.rim;
+  for (let index = 0; index < tub.struts; index++) {
+    const angle = (index / tub.struts) * Math.PI * 2;
+    const next = ((index + 1) / tub.struts) * Math.PI * 2;
+    const [fromY, toY] = index % 2 === 0 ? [strutTop, strutBottom] : [strutBottom, strutTop];
+    latticeStrut(topTurretYaw, materials.frameGreen, new THREE.Vector3(Math.cos(angle) * tub.radius, fromY, Math.sin(angle) * tub.radius), new THREE.Vector3(Math.cos(next) * tub.radius, toY, Math.sin(next) * tub.radius));
+  }
+
+  // The platform and its stirrups, the rails, and the swivel and power unit under it.
+  part(topTurretYaw, platformGeometry(), materials.aluminium, platform.centreX, platformY, 0);
+  for (const side of [-1, 1] as const) {
+    rod(topTurretYaw, railPoint(side, tub.bottom, platformY), railPoint(side, platformY, platformY), rail.radius, materials.aluminium);
+    const strap = part(topTurretYaw, new THREE.TorusGeometry(stirrup.strapRadius, stirrup.strap, 6, 12, Math.PI), materials.duck, stirrup.toeX, platformY, side * stirrup.footZ);
+    strap.rotation.y = Math.PI / 2;
+    // Arched high enough to clear the boot over its instep.
+    strap.scale.y = stirrup.strapRise;
+    const cup = new THREE.Vector3(stirrup.heelX, platformY + stirrup.cup[1] / 2, side * stirrup.footZ);
+    box(topTurretYaw, cup, stirrup.cup, materials.aluminium, 0, 0.004);
+    // The stirrup's bar runs out to its clamp on the rail; the clamp slides to set the gunner's height.
+    const clamp = railPoint(side, platformY + 0.12, platformY);
+    rod(topTurretYaw, cup.clone().setY(platformY + 0.03).setZ(side * (stirrup.footZ + stirrup.cup[2] / 2)), clamp, 0.008, materials.aluminium);
+    box(topTurretYaw, clamp, [0.05, 0.04, 0.05], materials.crinkle, 0, 0.006);
+  }
+  const floorY = FLOORS.flightDeck.y - topTurretYaw.position.y;
+  const underside = platformY - platform.thickness;
+  rod(topTurretYaw, new THREE.Vector3(platform.centreX, underside, 0), new THREE.Vector3(platform.centreX, floorY, 0), swivel.radius, materials.crinkle);
+  const unitY = platformY - powerUnit.drop;
+  part(topTurretYaw, new THREE.CylinderGeometry(powerUnit.motorRadius, powerUnit.motorRadius, powerUnit.motorLength, 18), materials.crinkle, powerUnit.x, unitY, 0, { rotation: [Math.PI / 2, 0, 0] });
+  for (const side of [-1, 1]) {
+    const transmission = new THREE.Vector3(powerUnit.x, unitY, side * (powerUnit.motorLength / 2 + powerUnit.transmission[2] / 2));
+    box(topTurretYaw, transmission, powerUnit.transmission, materials.crinkle, 0, 0.01);
+    rod(topTurretYaw, transmission.clone().setY(unitY + powerUnit.transmission[1] / 2), transmission.clone().setY(underside), 0.012, materials.crinkle);
+  }
+
+  // Sling seat behind his hips, a strap from each end up to the rail.
+  box(topTurretYaw, seat.centre, seat.size, materials.seatCushion, 0, 0.015);
+  for (const side of [-1, 1] as const) {
+    const end = seat.centre.clone().add(new THREE.Vector3(0, 0, (side * seat.size[2]) / 2));
+    rod(topTurretYaw, end, railPoint(side, seat.centre.y + 0.08, platformY), seat.strapRadius, materials.duck, 6);
+  }
+
+  // The ammunition cans on the rails, chutes rising to each gun's outboard feedway. The chutes are routed with the guns
+  // level; the belts ride with the guns. The cases fall into the bags under the guns.
   const pitch = context.topTurretPitch;
   for (const side of [-1, 1] as const) {
     const gunInPitch = new THREE.Vector3(0, 0, (side * STATIONS.topTurret.gunSpacing) / 2);
     const belt = feedGun(materials, {
       boxParent: topTurretYaw,
-      box: { centre: new THREE.Vector3(-0.04, -0.42, side * 0.36), size: [0.26, 0.3, 0.13], material: materials.ammunitionBox },
+      box: { centre: can.centre.clone().setZ(side * can.centre.z), size: can.size, material: materials.aluminium },
       gun: { origin: gunInPitch.clone().add(pitch.position), direction: FORWARD, side },
       beltGun: { parent: pitch, gun: { origin: gunInPitch, direction: FORWARD, side } },
     });
-    // Empty cases drop out of the receivers through the basket onto the flight deck.
-    context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: FLOORS.flightDeck.y });
+    const path = bag.path.map((point) => point.clone().setZ(side * point.z));
+    context.guns.push({ gun: context.topTurretGuns[side < 0 ? 0 : 1], belt, caseFloorY: topTurretYaw.position.y + path[0].y, casesBagged: true });
+    const curve = new THREE.CatmullRomCurve3(path);
+    part(topTurretYaw, new THREE.TubeGeometry(curve, 24, bag.radius, 10, false), materials.duck, 0, 0, 0);
+    // A stiffened mouth to catch the cases, and the bag's closed bottom.
+    part(topTurretYaw, new THREE.TorusGeometry(bag.mouthRadius, 0.007, 6, 16), materials.crinkle, path[0].x, path[0].y, path[0].z, { rotation: [Math.PI / 2, 0, 0] });
+    const end = path[path.length - 1];
+    part(topTurretYaw, new THREE.SphereGeometry(bag.radius, 10, 6), materials.duck, end.x, end.y, end.z);
   }
+
   // Computing sight: housing, reflector glass, and the hand grips below.
   part(topTurretYaw, roundedBox(0.12, 0.13, 0.1, 0.015), materials.crinkle, 0.24, 0.29, 0);
   part(topTurretYaw, roundedBox(0.004, 0.07, 0.07, 0.002), materials.glass, 0.18, 0.37, 0).rotation.z = -0.5;

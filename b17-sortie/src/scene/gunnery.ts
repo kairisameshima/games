@@ -12,6 +12,11 @@ export interface MountedGun {
    * and links leave through chutes into the slipstream (ball, chin and tail guns).
    */
   caseFloorY: number | null;
+  /**
+   * The cases fall into a spent-round bag whose mouth is at `caseFloorY` (the top turret's), so they go there instead of
+   * piling up: the bag turns with its turret, a heap on the floor would not.
+   */
+  casesBagged: boolean;
 }
 
 /**
@@ -49,6 +54,8 @@ const TRACER_LIFETIME = 1.1;
 /** Gunners fired in short bursts: 1/2 to 2 s of fire in a window, the window passing to the next with a gap. */
 const BURST_WINDOW = 2.4;
 const CASE_EJECT_SPEED = 2.2;
+/** A .50 case's radius, for where it lies on a floor. */
+const CASE_RADIUS = 0.0102;
 const FLASH_SECONDS = 0.025;
 const FLASH_LIGHT_INTENSITY = 0.25;
 
@@ -64,7 +71,7 @@ interface GunState {
 }
 
 /** `space`: for a case inside the aircraft, the assembly whose (model-space) frame its position is in. */
-interface Case { position: THREE.Vector3; velocity: THREE.Vector3; spinAxis: THREE.Vector3; spin: number; orientation: THREE.Quaternion; age: number; resting: boolean; floorY: number; space: THREE.Object3D | null }
+interface Case { position: THREE.Vector3; velocity: THREE.Vector3; spinAxis: THREE.Vector3; spin: number; orientation: THREE.Quaternion; age: number; resting: boolean; floorY: number; bagged: boolean; space: THREE.Object3D | null }
 /** `roll`: how the strip was turned about its length when it was rigged, so no two read alike. */
 interface Tracer { position: THREE.Vector3; direction: THREE.Vector3; age: number; roll: number }
 
@@ -222,7 +229,7 @@ export class Gunnery {
   }
 
   private ejectCase(ship: ShipGuns, state: GunState, shotIndex: number): void {
-    const { gun, caseFloorY } = state.mounted;
+    const { gun, caseFloorY, casesBagged } = state.mounted;
     const port = M2_EJECTION_PORT.clone().applyMatrix4(gun.barrel.matrixWorld);
     const down = new THREE.Vector3(0, -1, 0).transformDirection(gun.barrel.matrixWorld);
     const across = new THREE.Vector3(0, 0, 1).transformDirection(gun.barrel.matrixWorld);
@@ -231,7 +238,7 @@ export class Gunnery {
     const orientation = new THREE.Quaternion().setFromUnitVectors(this.up, new THREE.Vector3(0, 0, 1).transformDirection(gun.barrel.matrixWorld));
     if (caseFloorY === null) {
       const velocity = down.multiplyScalar(CASE_EJECT_SPEED * this.modelScale).addScaledVector(across, jitter(11) * 0.4 * this.modelScale);
-      this.pushCase(this.overboard, MAX_OVERBOARD_CASES, { position: port, velocity, spinAxis, spin: 18 + jitter(12) * 10, orientation, age: 0, resting: false, floorY: 0, space: null });
+      this.pushCase(this.overboard, MAX_OVERBOARD_CASES, { position: port, velocity, spinAxis, spin: 18 + jitter(12) * 10, orientation, age: 0, resting: false, floorY: 0, bagged: false, space: null });
       return;
     }
     // Inside: in the frame of the gun's assembly, which is model space moved by the exploded view, so the floors are
@@ -242,7 +249,7 @@ export class Gunnery {
     const velocity = down.applyQuaternion(shipQuaternion).multiplyScalar(CASE_EJECT_SPEED).addScaledVector(across.applyQuaternion(shipQuaternion), jitter(11) * 0.6);
     this.pushCase(ship.insideCases, MAX_INSIDE_CASES, {
       position: port.applyMatrix4(inverse), velocity, spinAxis, spin: 18 + jitter(12) * 10,
-      orientation: orientation.premultiply(shipQuaternion), age: 0, resting: false, floorY: caseFloorY, space,
+      orientation: orientation.premultiply(shipQuaternion), age: 0, resting: false, floorY: caseFloorY, bagged: casesBagged, space,
     });
   }
 
@@ -285,6 +292,7 @@ export class Gunnery {
         continue;
       }
       this.integrate(spent, deltaSec, GRAVITY, 0);
+      if (spent.bagged && spent.position.y <= spent.floorY + CASE_RADIUS) cases.splice(index, 1);
     }
     this.writeInstances(ship.insideMesh, cases, 1);
   }
@@ -296,7 +304,7 @@ export class Gunnery {
     if (airDrift > 0) spent.velocity.x += (-airDrift - spent.velocity.x) * Math.min(1, 2.5 * deltaSec);
     spent.position.addScaledVector(spent.velocity, deltaSec);
     spent.orientation.premultiply(this.scratchQuaternion.setFromAxisAngle(spent.spinAxis, spent.spin * deltaSec));
-    const radius = 0.0102 * (airDrift > 0 ? this.modelScale : 1);
+    const radius = CASE_RADIUS * (airDrift > 0 ? this.modelScale : 1);
     if (spent.position.y > spent.floorY + radius) return;
     spent.position.y = spent.floorY + radius;
     // Inside, the floor ends where the skin curves up: a case landing beyond it rolls back against the wall.

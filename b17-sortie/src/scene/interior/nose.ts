@@ -55,7 +55,7 @@ function addCheekGun(context: CompartmentContext, d: number, side: 1 | -1): void
     box: { centre: ammunitionBox, size: [0.3, 0.28, 0.16], material: materials.ammunitionBox },
     gun: { origin: mount, direction, side: receiverSideToward(mount, direction, ammunitionBox) },
   });
-  context.guns.push({ gun, belt, caseFloorY: FLOORS.nose.y });
+  context.guns.push({ gun, belt, caseFloorY: FLOORS.nose.y, casesBagged: false });
 }
 
 function addNavigatorStation(context: CompartmentContext): { table: THREE.Vector3; chart: THREE.Vector3 } {
