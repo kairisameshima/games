@@ -14,7 +14,7 @@ import { CRAWLWAY, TAIL, WAIST } from './interior/layout';
 import { rod } from './interior/parts';
 import { waistFloorHeight } from './interior/structure';
 import { interiorMaterials } from './interior/materials';
-import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt } from './assemblies';
+import { Assemblies, assignAssembly, engineAssembly, FUSELAGE_JOINTS, fuselageSectionAt, type AssemblyId } from './assemblies';
 import { addBallTurretMount, addBallTurretShell, BALL, ballGunOrigin, ballTurretCentre, ballWindowMaskMaterial } from './ball-turret';
 import type { MountedGun } from './gunnery';
 import { addM2, type M2Gun } from './m2';
@@ -90,6 +90,10 @@ interface AircraftMaterials {
   turretDome: THREE.MeshPhysicalMaterial;
   /** The top turret's flat windscreen: thick laminated glass, green at its edges. */
   armourGlass: THREE.MeshPhysicalMaterial;
+  /** The insignia's piece on the main entrance door: its own material, as the hull's insignia has the doorway cut out of it. */
+  doorInsignia: THREE.MeshStandardMaterial;
+  /** The main entrance door's panel, the side's paint, seen from inside too once it is open. */
+  entryDoor: THREE.MeshStandardMaterial;
   /** Bare metal where the paint has worn off the top turret's frames. */
   paintChip: THREE.MeshStandardMaterial;
   /** Kit flaws on the glazing: cement fog where glue touched it, and a thumbprint. */
@@ -230,6 +234,7 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
   const { finish } = livery;
   const textures = paintTextures(finish);
   const { upper, lower } = FINISH_COLOURS[finish];
+  const insigniaArt = insigniaDecal();
   const materials: AircraftMaterials = {
     hull: paintMaterial(textures.hull, undefined, finish),
     wing: paintMaterial(textures.wing, undefined, finish),
@@ -265,7 +270,8 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
       map: fingerprintTexture(), transparent: true, depthWrite: false, roughness: 0.45, envMapIntensity: 1.2,
       polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
     })),
-    insignia: decalMaterial(insigniaDecal()),
+    insignia: decalMaterial(insigniaArt),
+    doorInsignia: decalMaterial(insigniaArt),
     codes: decalMaterial(codeLettersDecal(livery.codes, finish)),
     aircraftLetter: decalMaterial(codeLettersDecal(livery.letter, finish)),
     tailMarking: decalMaterial(tailMarkingDecal(livery.tailSerial, livery.letter, finish)),
@@ -277,6 +283,7 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     })),
     bayDoor: Object.assign(paintMaterial(null, lower, finish), { side: THREE.DoubleSide }),
+    entryDoor: Object.assign(paintMaterial(null, upper, finish), { side: THREE.DoubleSide }),
     cowlLiner: matteMaterial('#1c1e1f', { roughness: 0.8, side: THREE.DoubleSide }),
     canvas: matteMaterial('#7d7255', { roughness: 0.9 }),
     oilStreak: applyStudioShading(new THREE.MeshPhysicalMaterial({
@@ -1432,8 +1439,7 @@ function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): L
   const hatchD = (hatch.start + hatch.end) / 2;
   const hatchZ = (hatch.inner + hatch.outer) / 2;
   const doorD = (WAIST.door.start + WAIST.door.end) / 2;
-  // The door's sill stands a little above the waist floor, as the interior builds it.
-  const doorSill = waistFloorHeight(doorD) + 0.05;
+  const doorSill = waistFloorHeight(doorD) + WAIST.door.sillAboveFloor;
   const setExtension = (amount: number) => {
     for (const { group, turn } of legs) {
       group.visible = amount > 0.01;
@@ -1450,6 +1456,87 @@ function buildLandingGear(root: THREE.Object3D, materials: AircraftMaterials): L
       mainDoor: new THREE.Vector3(toX(doorD), doorSill, hullHalfWidthAtHeight(doorD, doorSill)),
     },
   };
+}
+
+/** How far the main entrance door swings in, radians: round forward until it lies back against the inside of the wall. */
+const ENTRY_DOOR_OPEN_ANGLE = 2.75;
+/** How far the forward entrance hatch drops open, radians: hanging nearly straight down. */
+const FORWARD_HATCH_OPEN_ANGLE = 1.45;
+
+/** Where a decal is projected onto the skin, as `addDecal` takes it. */
+interface DecalProjector {
+  centre: THREE.Vector3;
+  normal: THREE.Vector3;
+  along: THREE.Vector3;
+  width: number;
+  height: number;
+  depth: number;
+}
+
+interface EntryHatchSpec {
+  /** On the skin at the opening's middle, model space. */
+  centre: THREE.Vector3;
+  /** Out of the skin there. */
+  normal: THREE.Vector3;
+  /** Along the fuselage, and across it. */
+  width: number;
+  height: number;
+  /** Paint for the panel, seen from both sides once it is open. */
+  panel: THREE.Material;
+  /** Markings painted across the opening, each with its own projector; the panel carries the piece inside the opening. */
+  markings: { material: THREE.MeshStandardMaterial; projector: DecalProjector }[];
+  /** Two points on the hinge line, on the skin; the panel turns about it. */
+  hinge: [THREE.Vector3, THREE.Vector3];
+  /** How far it turns about the hinge line, from the first point to the second, to stand open. */
+  openAngle: number;
+  assembly: AssemblyId;
+}
+
+/** Deep enough to take in the skin's curve over a door's height, and no more. */
+const ENTRY_HATCH_DEPTH = 0.35;
+
+/**
+ * An entrance hatch: the opening cut in the skin, and the panel that closes it, a patch of the skin's own surface with
+ * its panel line, hinge line and handle recess, hung on its hinge so it can be swung open.
+ */
+function addEntryHatch(
+  airframe: THREE.Object3D, hull: THREE.Mesh, cutouts: WindowCutouts, materials: AircraftMaterials, spec: EntryHatchSpec,
+): { hinge: THREE.Object3D; axis: THREE.Vector3; openAngle: number } {
+  // Along aft, so the outline's hinge line (its left edge) falls on the forward edge.
+  const along = FORWARD.clone().negate();
+  const orientation = decalOrientation(spec.normal, along);
+  const opening = new THREE.Vector3(spec.width, spec.height, ENTRY_HATCH_DEPTH);
+  cutouts.add(spec.centre, orientation, opening);
+  const [pivot, hingeEnd] = spec.hinge;
+  const hinge = assignAssembly(new THREE.Group(), spec.assembly);
+  hinge.userData.unmerged = true;
+  hinge.position.copy(pivot);
+  airframe.add(hinge);
+  for (const material of [spec.panel, materials.hatchOutline]) {
+    hangFromHinge(pivot, addDecal(hinge, hull, material, spec.centre, spec.normal, along, spec.width, spec.height, ENTRY_HATCH_DEPTH));
+  }
+  // Trimmed to the opening, tested in the hinge's space, where the pieces now sit.
+  const trim = new WindowCutouts('keep');
+  trim.add(spec.centre.clone().sub(pivot), orientation, opening);
+  for (const { material, projector } of spec.markings) {
+    hangFromHinge(pivot, addDecal(hinge, hull, material, projector.centre, projector.normal, projector.along, projector.width, projector.height, projector.depth));
+    trim.apply(material);
+  }
+  return { hinge, axis: hingeEnd.clone().sub(pivot).normalize(), openAngle: spec.openAngle };
+}
+
+/** The national insignia on one side of the waist. */
+function fuselageInsigniaProjector(side: 1 | -1): DecalProjector {
+  const spot = STATIONS.fuselageInsignia;
+  return {
+    centre: new THREE.Vector3(toX(spot.d), spot.h, side * hullSectionAt(spot.d).halfWidth),
+    normal: side > 0 ? STARBOARD : PORT, along: side > 0 ? FORWARD : FORWARD.clone().negate(), width: 2.55, height: 1.35, depth: 0.9,
+  };
+}
+
+/** Decals are built in model space; a hinge group at `pivot` carries the piece from the hinge line. */
+function hangFromHinge(pivot: THREE.Vector3, piece: THREE.Mesh): void {
+  piece.geometry.translate(-pivot.x, -pivot.y, -pivot.z);
 }
 
 /** The burst that hits the lead goes off under the starboard wing, outboard of No. 3. */
@@ -1722,6 +1809,8 @@ export interface B17 {
   chinTurret: THREE.Object3D;
   /** Hinge groups; rotate about x by `side * angle` to open. */
   bombBayDoors: { hinge: THREE.Object3D; side: 1 | -1 }[];
+  /** Swings the forward entrance hatch and the main entrance door from shut (0) to standing open (1). */
+  setHatchesOpen: (amount: number) => void;
   /** Racked bombs in release order; hide each as it drops. */
   rackedBombs: THREE.Object3D[];
   crewStations: CrewStation[];
@@ -1901,12 +1990,11 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
   cutouts.add(ballOpening, decalOrientation(UP.clone().negate(), FORWARD), new THREE.Vector3(BALL.openingRadius * 2, BALL.openingRadius * 2, 0.3), 'round');
 
   // National insignia, codes and the 91st BG tail marking.
-  const insignia = STATIONS.fuselageInsignia;
   for (const side of [1, -1] as const) {
     const normal = side > 0 ? STARBOARD : PORT;
     const along = side > 0 ? FORWARD : FORWARD.clone().negate();
-    const insigniaHalfWidth = hullSectionAt(insignia.d).halfWidth;
-    addDecal(airframe, hull, materials.insignia, new THREE.Vector3(toX(insignia.d), insignia.h, side * insigniaHalfWidth), normal, along, 2.55, 1.35, 0.9);
+    const insignia = fuselageInsigniaProjector(side);
+    addDecal(airframe, hull, materials.insignia, insignia.centre, insignia.normal, insignia.along, insignia.width, insignia.height, insignia.depth);
     addDecal(airframe, hull, materials.codes, new THREE.Vector3(toX(12.05), 0.05, side * hullSectionAt(12.05).halfWidth), normal, along, 1.2, 0.75, 0.6);
     addDecal(airframe, hull, materials.aircraftLetter, new THREE.Vector3(toX(17.55), -0.08, side * hullSectionAt(17.55).halfWidth), normal, along, 0.55, 0.68, 0.6);
     // Shallow projector so the marking lands on one face of the thin fin only, not mirrored through to the other.
@@ -1931,11 +2019,40 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     addDecal(airframe, hull, materials.missionTally, new THREE.Vector3(toX(tally.d), tally.h, -hullHalfWidthAtHeight(tally.d, tally.h)), PORT, FORWARD.clone().negate(), tally.width, tally.height, 0.4);
     nextMissionBomb = addNextMissionBomb(airframe, hull, materials.nextMission);
   }
-  // The forward entrance hatch in the belly under the crawlway, port of the centreline.
+  // The crew's ways in: the forward entrance hatch in the belly under the crawlway, port of the centreline, hinged on
+  // its forward edge to drop open; and the main entrance door in the starboard side aft of the waist window, hinged on
+  // its forward edge to swing in against the wall.
   const hatch = CRAWLWAY.forwardHatch;
   const hatchD = (hatch.start + hatch.end) / 2;
   const hatchZ = (hatch.inner + hatch.outer) / 2;
-  addDecal(airframe, hull, materials.hatchOutline, new THREE.Vector3(toX(hatchD), hullSurfaceHeight(hatchD, hatchZ, false), hatchZ), UP.clone().negate(), FORWARD, hatch.end - hatch.start, hatch.inner - hatch.outer, 0.3);
+  const door = WAIST.door;
+  const doorD = (door.start + door.end) / 2;
+  const doorSill = waistFloorHeight(doorD) + door.sillAboveFloor;
+  const doorMiddleY = (doorSill + door.top) / 2;
+  const entryHatches = [
+    addEntryHatch(airframe, hull, cutouts, materials, {
+      centre: new THREE.Vector3(toX(hatchD), hullSurfaceHeight(hatchD, hatchZ, false), hatchZ),
+      normal: UP.clone().negate(), width: hatch.end - hatch.start, height: hatch.inner - hatch.outer, panel: materials.bayDoor, markings: [],
+      hinge: [
+        new THREE.Vector3(toX(hatch.start), hullSurfaceHeight(hatch.start, hatch.outer, false), hatch.outer),
+        new THREE.Vector3(toX(hatch.start), hullSurfaceHeight(hatch.start, hatch.inner, false), hatch.inner),
+      ],
+      openAngle: FORWARD_HATCH_OPEN_ANGLE, assembly: fuselageSectionAt(hatchD),
+    }),
+    addEntryHatch(airframe, hull, cutouts, materials, {
+      centre: new THREE.Vector3(toX(doorD), doorMiddleY, hullHalfWidthAtHeight(doorD, doorMiddleY)),
+      normal: STARBOARD, width: door.end - door.start, height: door.top - doorSill, panel: materials.entryDoor, markings: [{ material: materials.doorInsignia, projector: fuselageInsigniaProjector(1) }],
+      hinge: [
+        new THREE.Vector3(toX(door.start), doorSill, hullHalfWidthAtHeight(door.start, doorSill)),
+        new THREE.Vector3(toX(door.start), door.top, hullHalfWidthAtHeight(door.start, door.top)),
+      ],
+      // Turning about the hinge line, bottom to top, a negative angle takes its aft edge inboard.
+      openAngle: -ENTRY_DOOR_OPEN_ANGLE, assembly: fuselageSectionAt(doorD),
+    }),
+  ];
+  const setHatchesOpen = (amount: number) => {
+    for (const { hinge, axis, openAngle } of entryHatches) hinge.quaternion.setFromAxisAngle(axis, openAngle * amount);
+  };
   const wingInsigniaSpan = 11.4;
   const wingInsigniaEdges = wingEdges(wingInsigniaSpan);
   const wingInsigniaD = (wingInsigniaEdges.leading + wingInsigniaEdges.trailing) / 2;
@@ -2072,6 +2189,8 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
   }, crewDetail);
   cutouts.apply(materials.hull);
   cutouts.apply(materials.tailHousing);
+  // The starboard insignia runs across the main door: cut from the hull's, it swings open with the door's piece.
+  cutouts.apply(materials.insignia);
 
   // Into the assemblies the exploded view pulls apart. The starboard-wall equipment goes piece by piece, to the
   // compartment each piece hangs in.
@@ -2122,6 +2241,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     ballTurret: { yaw: ballYaw, pitch: ballPitch },
     chinTurret,
     bombBayDoors,
+    setHatchesOpen,
     rackedBombs: interior.rackedBombs,
     crewStations,
     assemblies,
@@ -2132,7 +2252,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     cutawayMaterials: [
       materials.hull, materials.upperPaint, materials.canopy, materials.turretDome, materials.armourGlass, materials.paintChip, materials.windowPane, materials.insignia, materials.codes, materials.aircraftLetter,
       materials.noseArt.pinup, materials.noseArt.card, materials.missionTally, materials.nextMission,
-      materials.lowerPaint, ballWindowMaskMaterial(materials.lowerPaint), materials.tailHousing, ...interior.clipMaterials,
+      materials.lowerPaint, ballWindowMaskMaterial(materials.lowerPaint), materials.tailHousing, materials.entryDoor, materials.doorInsignia, materials.hatchOutline, ...interior.clipMaterials,
     ],
     cutawayHidden: starboardWall,
     interiorMeshes,

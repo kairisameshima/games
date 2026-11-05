@@ -182,8 +182,8 @@ export function buildWaistAndTail(context: CompartmentContext): CompartmentResul
   }
   // Entrance door frame on the starboard side, aft of the window.
   const door = WAIST.door;
-  const doorTop = 0.55;
-  const doorBottom = waistFloorHeight(door.end) + 0.05;
+  const doorTop = door.top;
+  const doorBottom = waistFloorHeight(door.end) + door.sillAboveFloor;
   for (const d of [door.start, door.end]) rod(parent, v(d, doorBottom, hullHalfWidthAtHeight(d, doorBottom) - 0.03), v(d, doorTop, hullHalfWidthAtHeight(d, doorTop) - 0.03), 0.018, materials.aluminium);
   rod(parent, v(door.start, doorTop, hullHalfWidthAtHeight(door.start, doorTop) - 0.03), v(door.end, doorTop, hullHalfWidthAtHeight(door.end, doorTop) - 0.03), 0.018, materials.aluminium);
   // Tail wheel well housing, with the retracted wheel inside it.

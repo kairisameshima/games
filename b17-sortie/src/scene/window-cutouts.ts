@@ -9,6 +9,12 @@ const patchedMaterials = new WeakSet<THREE.Material>();
  * Positions are tested in object space, which for the hull, the tail housing and the interior shells is model space.
  */
 export class WindowCutouts {
+  /**
+   * `cut` discards what falls inside any box (holes); `keep` discards what falls outside every box, trimming a marking
+   * to a door that carries its piece of it.
+   */
+  constructor(private readonly mode: 'cut' | 'keep' = 'cut') {}
+
   private readonly inverses: THREE.Matrix4[] = [];
   /** Half extents in xyz; w is 1 for a round opening (an ellipse in the box's local xy), 0 for a rectangular one. */
   private readonly halfSizes: THREE.Vector4[] = [];
@@ -41,16 +47,17 @@ varying vec3 vWindowPosition;
 uniform mat4 uWindowInverse[${count}];
 uniform vec4 uWindowHalfSize[${count}];`)
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+bool kept = false;
 for (int i = 0; i < ${count}; i++) {
   vec3 local = (uWindowInverse[i] * vec4(vWindowPosition, 1.0)).xyz;
   vec4 extent = uWindowHalfSize[i];
   bool inside = extent.w > 0.5
     ? length(local.xy / extent.xy) < 1.0 && abs(local.z) < extent.z
     : all(lessThan(abs(local), extent.xyz));
-  if (inside) discard;
-}`);
+  if (inside) ${this.mode === 'cut' ? 'discard' : 'kept = true'};
+}${this.mode === 'keep' ? '\nif (!kept) discard;' : ''}`);
     };
-    material.customProgramCacheKey = () => `${baseKey}|windows-${count}`;
+    material.customProgramCacheKey = () => `${baseKey}|windows-${this.mode}-${count}`;
     material.needsUpdate = true;
   }
 }

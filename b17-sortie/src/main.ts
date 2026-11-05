@@ -603,6 +603,7 @@ function stepLanding(seconds: number): void {
   }
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
+  aircraft.setHatchesOpen(frame.hatchesOpen);
   holdStoppedPropellers(frame, NO_3_ENGINE);
   setCrewAboard(frame.crewAboard);
   frame.engines.forEach((engine, index) => { landingEngines[index] = engine; });
@@ -623,6 +624,7 @@ function endLanding(): void {
   hardstand.setShown(false);
   formation[0].stand.root.visible = true;
   formation[0].aircraft.landingGear.setExtension(0);
+  formation[0].aircraft.setHatchesOpen(0);
   tweenCamera(FORMATION_SHOT);
 }
 
@@ -670,6 +672,7 @@ function finishPrologue(): void {
   hardstand.setShown(false);
   formation[0].stand.root.visible = true;
   formation[0].aircraft.landingGear.setExtension(0);
+  formation[0].aircraft.setHatchesOpen(0);
   for (const man of formation[0].aircraft.crew) man.mesh.visible = true;
 }
 
@@ -683,6 +686,7 @@ function stepPrologue(deltaSec: number): void {
   holder.position.copy(frame.position);
   holder.rotation.copy(frame.rotation);
   aircraft.landingGear.setExtension(frame.gearExtension);
+  aircraft.setHatchesOpen(frame.hatchesOpen);
   for (const man of aircraft.crew) man.mesh.visible = frame.crewAboard;
   frame.engines.forEach((engine, index) => {
     const propeller = ENGINE_PROPELLER[index];

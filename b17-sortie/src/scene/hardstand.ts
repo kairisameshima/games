@@ -75,6 +75,9 @@ const CLIMB_PITCH = 0.12;
 const BANK_PER_TURN_RATE = 2.2;
 const MAX_BANK = 0.5;
 
+/** Film seconds the entrance hatch and door take to swing shut once the last man is in, or open before the first climbs out. */
+const HATCH_SWING_SECONDS = 0.5;
+
 /** A walking man changes pose every this many film seconds, a stride each. */
 const STRIDE_SECONDS = 0.42;
 const STRIDE_LENGTH = 0.62;
@@ -121,6 +124,8 @@ export interface HardstandFrame {
   engines: EngineStart[];
   /** The crew inside show once the last man is aboard. */
   crewAboard: boolean;
+  /** The entrance hatch and door, shut (0) to standing open (1): open while the crew climb in or out. */
+  hatchesOpen: number;
   finished: boolean;
 }
 
@@ -138,7 +143,7 @@ export class Hardstand {
   /** When the roll-out is done, seconds after the lead left its stand. */
   readonly rolledOutSeconds: number;
   private readonly frame: HardstandFrame = {
-    position: new THREE.Vector3(), rotation: new THREE.Euler(0, 0, 0, 'YZX'), gearExtension: 1, engines: ['cold', 'cold', 'cold', 'cold'], crewAboard: false, finished: false,
+    position: new THREE.Vector3(), rotation: new THREE.Euler(0, 0, 0, 'YZX'), gearExtension: 1, engines: ['cold', 'cold', 'cold', 'cold'], crewAboard: false, hatchesOpen: 1, finished: false,
   };
   /** World offset of the take-off run's start: the ship's holder on its wheels at the hardstand. */
   private readonly groundOrigin: THREE.Vector3;
@@ -234,6 +239,7 @@ export class Hardstand {
       frame.engines[engine] = time >= catches ? 'running' : time >= catches - ENGINE_START.crank ? 'cranking' : 'cold';
     });
     frame.crewAboard = time >= BEATS.boardingEnds;
+    frame.hatchesOpen = 1 - THREE.MathUtils.smoothstep(time, BEATS.boardingEnds, BEATS.boardingEnds + HATCH_SWING_SECONDS);
     frame.finished = time >= BEATS.docked;
     const { ground } = this.lead.landingGear;
     const run = THREE.MathUtils.clamp((time - BEATS.rollStart) / (BEATS.docked - BEATS.rollStart), 0, 1);
@@ -267,6 +273,7 @@ export class Hardstand {
     const lastCut = swingEnd + LANDING_BEATS.cutDelay + (ENGINES_CUT - 1) * LANDING_BEATS.cutInterval;
     const deplaneStart = lastCut + LANDING_BEATS.deplaneDelay;
     frame.crewAboard = time < deplaneStart;
+    frame.hatchesOpen = THREE.MathUtils.smoothstep(time, deplaneStart - HATCH_SWING_SECONDS, deplaneStart);
     this.crewChief.visible = time >= swingEnd + LANDING_BEATS.chiefDelay;
     for (const rig of this.rigs) this.poseDeplaning(rig, time - deplaneStart - rig.boarder.delay);
     const speed = this.landingSpeed;

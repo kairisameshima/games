@@ -127,8 +127,8 @@ export const WAIST = {
   starboardGunD: 13.65,
   portGunD: 14.15,
   gunY: 0.12,
-  /** Crew entrance door, starboard side aft of the waist window. */
-  door: { start: 15.4, end: 16.25 },
+  /** Crew entrance door, starboard side aft of the waist window: along the fuselage, its sill over the floor, its top. */
+  door: { start: 15.4, end: 16.25, sillAboveFloor: 0.05, top: 0.55 },
   tailwheelD: 16.62,
 } as const;
 
