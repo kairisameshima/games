@@ -79,6 +79,7 @@ npm run build      # typecheck + production build into dist/
 | C | cutaway of the lead ship |
 | E | exploded view of the lead ship |
 | N | switch the nose art between Hallucinatin' Hattie and the King of Hearts card (also in the controls panel) |
+| J | switch the animator's hand jitter on or off: uneven spacing and held frames, handled models, the tripod bump and gate weave (also in the controls panel) |
 | F | switch the film between 12 fps (on twos) and 24 fps (on ones), also in the controls panel |
 | H | replay the hardstand: boarding and take-off |
 | K | kit box and turntable |

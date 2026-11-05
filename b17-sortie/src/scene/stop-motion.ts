@@ -21,6 +21,11 @@ const SPACING = { min: 0.8, max: 1.2, holdChance: 0.07 } as const;
 
 export class StopMotionClock {
   fps: StopMotionRate = 12;
+  /**
+   * The animator's hand: uneven spacing and held frames here, and (read by the scene) handled models off their pose,
+   * the tripod knocked as a move begins, and the frame weaving in the gate. Off, the film moves evenly and sits still.
+   */
+  jitter = true;
   private pending = 0;
   private exposures = 0;
   private jitterState = 7919;
@@ -49,6 +54,7 @@ export class StopMotionClock {
 
   /** How far the film moves on an exposure covering `exposureSec` of wall time, with the animator's uneven hand. */
   space(exposureSec: number): number {
+    if (!this.jitter) return exposureSec;
     this.owed += exposureSec;
     if (this.random() < SPACING.holdChance) return 0;
     const step = this.owed * (SPACING.min + this.random() * (SPACING.max - SPACING.min));

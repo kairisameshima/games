@@ -18,6 +18,7 @@ export interface UiCallbacks {
   onPhoto: () => void;
   onKitBench: () => void;
   onFilmRateChange: (fps: StopMotionRate) => void;
+  onJitterToggle: () => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -45,6 +46,7 @@ export class Ui {
   private readonly soundButton: HTMLButtonElement;
   private readonly kitButton: HTMLButtonElement;
   private readonly filmRateButtons: Record<StopMotionRate, HTMLButtonElement>;
+  private readonly jitterButton: HTMLButtonElement;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -105,6 +107,7 @@ export class Ui {
     hintRow('E', 'exploded');
     hintRow('N', 'nose art');
     hintRow('F', '12 / 24 fps');
+    hintRow('J', 'hand jitter on / off');
     hintRow('H', 'hardstand: board, take off');
     hintRow('M', 'sound on / off');
     hintRow('P', 'photo: save a still · Esc back');
@@ -146,6 +149,7 @@ export class Ui {
       12: makeToggleButton(filmRateToggle, '12 fps', () => callbacks.onFilmRateChange(12)),
       24: makeToggleButton(filmRateToggle, '24 fps', () => callbacks.onFilmRateChange(24)),
     };
+    this.jitterButton = makeToggleButton(filmRateToggle, 'Jitter on', callbacks.onJitterToggle);
     const hardstandToggle = element('div', 'view-toggle');
     makeToggleButton(hardstandToggle, 'Hardstand · take off', callbacks.onHardstand);
     this.kitButton = makeToggleButton(hardstandToggle, 'Kit box', callbacks.onKitBench);
@@ -200,6 +204,11 @@ export class Ui {
   setFilmRate(fps: StopMotionRate): void {
     this.filmRateButtons[12].classList.toggle('is-active', fps === 12);
     this.filmRateButtons[24].classList.toggle('is-active', fps === 24);
+  }
+
+  setJitter(on: boolean): void {
+    this.jitterButton.textContent = on ? 'Jitter on' : 'Jitter off';
+    this.jitterButton.classList.toggle('is-active', on);
   }
 
   setKitBench(shown: boolean): void {

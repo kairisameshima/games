@@ -66,9 +66,10 @@ export class FilmGatePass extends ShaderPass {
     (this.uniforms.uResolution.value as THREE.Vector2).set(width, height);
   }
 
-  /** A new exposure: fresh grain, and the frame lands somewhere new in the gate. */
-  advance(random: () => number): void {
+  /** A new exposure: fresh grain, and, with `weave`, the frame lands somewhere new in the gate. */
+  advance(random: () => number, weave: boolean): void {
     this.uniforms.uSeed.value = random() * 97;
-    (this.uniforms.uWeave.value as THREE.Vector2).set((random() - 0.5) * 2 * FILM.weave, (random() - 0.5) * 2 * FILM.weave);
+    const amount = weave ? FILM.weave : 0;
+    (this.uniforms.uWeave.value as THREE.Vector2).set((random() - 0.5) * 2 * amount, (random() - 0.5) * 2 * amount);
   }
 }

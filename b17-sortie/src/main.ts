@@ -263,6 +263,7 @@ const TRIPOD_BUMP_STEPS = [0.006, -0.003, 0.0012, 0];
 const tripodBump = { step: TRIPOD_BUMP_STEPS.length, direction: new THREE.Vector3(), applied: new THREE.Vector3() };
 
 function bumpTripod(): void {
+  if (!stopMotion.jitter) return;
   tripodBump.step = 0;
   const random = stopMotion.random;
   tripodBump.direction.set(random() - 0.5, -0.6 - random() * 0.4, random() - 0.5).normalize();
@@ -593,9 +594,23 @@ function walkToStation(station: CrewStation): void {
 }
 
 const ui = new Ui(uiRoot, {
-  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null), onFilmRateChange: setFilmRate,
+  onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null), onFilmRateChange: setFilmRate, onJitterToggle: () => setJitter(!stopMotion.jitter),
 });
 const fpsMeter = new FpsMeter(ui.meterSlot);
+
+/** Switches the animator's hand on or off: uneven spacing, handled models, the tripod bump and gate weave. */
+function setJitter(on: boolean): void {
+  stopMotion.jitter = on;
+  ui.setJitter(on);
+  if (!on) {
+    tripodBump.step = TRIPOD_BUMP_STEPS.length;
+    tripodBump.applied.set(0, 0, 0);
+    for (const ship of formation) {
+      ship.handling.offset.set(0, 0, 0);
+      ship.handling.turn.set(0, 0, 0);
+    }
+  }
+}
 
 /** Shoots the film on twos (12 exposures a second) or on ones (24); adaptive quality re-measures at the new rate. */
 function setFilmRate(fps: StopMotionRate): void {
@@ -628,6 +643,8 @@ addEventListener('keydown', (event) => {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
   } else if (event.key === 'n' || event.key === 'N') {
     setNoseArt(noseArt === 'pinup' ? 'card' : 'pinup');
+  } else if (event.key === 'j' || event.key === 'J') {
+    setJitter(!stopMotion.jitter);
   } else if (event.key === 'f' || event.key === 'F') {
     setFilmRate(stopMotion.fps === 12 ? 24 : 12);
   } else if (event.key === 'k' || event.key === 'K') {
@@ -710,8 +727,9 @@ function animateShip(ship: FormationShip, state: SortieState, elapsed: number, d
   // propeller angle (a stop-motion prop strobes from pose to pose, it never blurs).
   if (deltaSec > 0) {
     const random = stopMotion.random;
-    ship.handling.offset.set(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(2 * HANDLING.offset);
-    ship.handling.turn.set((random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn, (random() - 0.5) * 2 * HANDLING.turn);
+    const hand = stopMotion.jitter ? 1 : 0;
+    ship.handling.offset.set(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(2 * HANDLING.offset * hand);
+    ship.handling.turn.set((random() - 0.5) * 2 * HANDLING.turn * hand, (random() - 0.5) * 2 * HANDLING.turn * hand, (random() - 0.5) * 2 * HANDLING.turn * hand);
     for (const propeller of aircraft.propellers) {
       if (propeller === aircraft.battleDamage.propeller && damaged && state.propellerFeathered) continue;
       propeller.rotation.x = random() * Math.PI * 2;
@@ -799,6 +817,7 @@ function resize(): void {
 addEventListener('resize', resize);
 resize();
 setFilmRate(12);
+setJitter(true);
 
 // Photo mode: the film stops on the frame, the overlays step aside, and each press of P saves the frame re-rendered at
 // several times the screen's resolution with every quality feature back on.
@@ -988,7 +1007,7 @@ function exposeFrame(exposureSec: number): void {
   if (previousTime < FLAK_HIT_SECONDS && sortieTime >= FLAK_HIT_SECONDS) flak.burstAt(damage.burstPoint.getWorldPosition(scratchPosition));
   if (deltaSec > 0) {
     flickerLamps();
-    filmGate.advance(stopMotion.random);
+    filmGate.advance(stopMotion.random, stopMotion.jitter);
     const leadEngines = prologueTime !== null ? leadEnginesRunning : leadState.propellerFeathered ? 3 : 4;
     foley.expose({
       enginesRunning: leadEngines, sputtering: leadState.engineSputtering, fire: leadState.engineFire,
