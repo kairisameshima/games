@@ -23,6 +23,7 @@ import { StopMotionClock, type StopMotionRate } from './scene/stop-motion';
 import { codeLettersDecal, insigniaDecal, loadNoseArt, missionTallyDecal, MISSIONS_FLOWN, noseArtDecal, tailMarkingDecal, type NoseArtChoice } from './scene/textures';
 import { RenderLog } from './render/render-log';
 import { FilmGatePass } from './render/film-gate';
+import { OnionSkinPass } from './render/onion-skin';
 import { buildDisplayStand, buildStudioSet, buildWorkshop, driftClouds, STAND_JOINT_RADIUS, type DisplayStand } from './scene/set';
 import { hullSectionAt, toX } from './scene/hull';
 import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, STRIKE_PHOTO, type SortieState } from './sortie';
@@ -264,6 +265,9 @@ const focusPoint = new THREE.Vector3();
 const pipeline = createStudioPipeline(renderer, scene, camera, focusPoint);
 const depthOfField = pipeline.depthOfField.uniforms;
 let tiltShiftStrength: number = TILT_SHIFT_STRENGTH.initial;
+// Ahead of the film gate: the grabber mixes the frames as shot, and the grain on top is this exposure's alone.
+const onionSkin = new OnionSkinPass();
+pipeline.composer.addPass(onionSkin);
 const filmGate = new FilmGatePass();
 pipeline.composer.addPass(filmGate);
 
@@ -901,10 +905,29 @@ function walkToStation(station: CrewStation): void {
 const ui = new Ui(uiRoot, {
   onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null), onFilmRateChange: setFilmRate, onJitterToggle: () => setJitter(!stopMotion.jitter),
   onTiltShiftChange: setTiltShiftStrength,
+  onOnionSkinToggle: () => setOnionSkin(!onionSkinShown),
+  onStepFrame: shootFrame,
 });
 const fpsMeter = new FpsMeter(ui.meterSlot);
 
 /** Switches the animator's hand on or off: uneven spacing, handled models, the tripod bump and gate weave. */
+let onionSkinShown = false;
+/** Frames the animator asked to shoot while paused, taken one an exposure. */
+let framesToShoot = 0;
+let framesShot = 0;
+
+function setOnionSkin(shown: boolean): void {
+  onionSkinShown = shown;
+  onionSkin.setShown(shown);
+  ui.setOnionSkin(shown);
+  cameraMoved = true;
+}
+
+/** Shoots one frame while paused; playing, the film is already being shot. */
+function shootFrame(): void {
+  if (!playing) framesToShoot += 1;
+}
+
 function setTiltShiftStrength(strength: number): void {
   tiltShiftStrength = strength;
   (depthOfField.uCocScale.value as THREE.Vector2).set(MACRO_BLUR.near * strength, MACRO_BLUR.far * strength);
@@ -957,6 +980,10 @@ addEventListener('keydown', (event) => {
     setShow(show === 'exploded' ? 'exterior' : 'exploded');
   } else if (event.key === 'n' || event.key === 'N') {
     setNoseArt(noseArt === 'pinup' ? 'card' : 'pinup');
+  } else if (event.key === 'o' || event.key === 'O') {
+    setOnionSkin(!onionSkinShown);
+  } else if (event.key === '.') {
+    shootFrame();
   } else if (event.key === 'j' || event.key === 'J') {
     setJitter(!stopMotion.jitter);
   } else if (event.key === 'f' || event.key === 'F') {
@@ -1198,6 +1225,7 @@ addEventListener('resize', resize);
 resize();
 setFilmRate(12);
 setJitter(true);
+ui.setFramesShot(framesShot);
 
 // Photo mode: the film stops on the frame, the overlays step aside, and each press of P saves the frame re-rendered at
 // several times the screen's resolution with every quality feature back on.
@@ -1346,7 +1374,12 @@ let lastDrawnAt = 0;
 function exposeFrame(exposureSec: number): void {
   // The ship's flights on and off its stand are charted: spaced evenly, never held, as an animator plans a fast move.
   stopMotion.charted = prologueTime !== null || landingShown;
-  const deltaSec = playing ? stopMotion.space(exposureSec) : 0;
+  // Paused, the animator can still shoot one frame at a time: each moves the film one exposure, evenly.
+  const shootingOne = !playing && framesToShoot > 0;
+  if (shootingOne) framesToShoot -= 1;
+  const deltaSec = playing ? stopMotion.space(exposureSec) : shootingOne ? 1 / stopMotion.fps : 0;
+  // A held frame is still a frame shot: the counter runs while the film does.
+  if (playing || shootingOne) ui.setFramesShot(++framesShot);
   filmTime += deltaSec;
   const previousTime = sortieTime;
   // The sortie holds at the start of the cruise while the lead is still on the hardstand; after the debrief the crew
@@ -1417,6 +1450,7 @@ function exposeFrame(exposureSec: number): void {
   if (previousTime < FLAK_HIT_SECONDS && sortieTime >= FLAK_HIT_SECONDS) flak.burstAt(damage.burstPoint.getWorldPosition(scratchPosition));
   if (deltaSec > 0) {
     flickerLamps();
+    onionSkin.markExposure();
     filmGate.advance(stopMotion.random, stopMotion.jitter);
     const leadEngines = prologueTime !== null || landingShown ? leadEnginesRunning : leadState.propellerFeathered ? 3 : 4;
     foley.expose({

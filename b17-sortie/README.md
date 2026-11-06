@@ -91,6 +91,8 @@ Every shader, the hidden ones too (the fighters, the hardstand, the kit bench), 
 | C | cutaway of the lead ship |
 | E | exploded view of the lead ship |
 | N | switch the nose art between Hallucinatin' Hattie and the King of Hearts card (also in the controls panel) |
+| O | onion skin: the frame grabber mixes the last exposure over the live view, so each pose shows against the one before (also in the controls panel) |
+| . | while paused, shoot one frame: the film moves one exposure on, evenly (also **Shoot frame** in the controls panel) |
 | J | switch the animator's hand jitter on or off: uneven spacing and held frames, handled models, the tripod bump and gate weave (also in the controls panel) |
 | F | switch the film between 12 fps (on twos) and 24 fps (on ones), also in the controls panel |
 | H | replay the hardstand: boarding and take-off |
@@ -103,7 +105,7 @@ Every shader, the hidden ones too (the fighters, the hardstand, the kit bench), 
 | Drag, scroll | orbit and zoom |
 | Tilt shift slider | strength of the macro depth of field, the tilt-shift look: 0 is all in focus, 1× the film's own, up to 2× blurs harder and narrows the band in focus |
 
-Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the rate the film is locked to, 12 or 24 fps.
+The animator's counter in the controls panel counts the frames shot, held ones included, and the feet of 35 mm film they fill at 16 frames to the foot. Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the rate the film is locked to, 12 or 24 fps.
 
 ## Layout
 
