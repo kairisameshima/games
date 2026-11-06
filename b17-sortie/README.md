@@ -101,6 +101,7 @@ Every shader, the hidden ones too (the fighters, the hardstand, the kit bench), 
 | Click a crew label | walk there through the cutaway |
 | L | record a render log: about 40 s, then saves a `.json` with this machine's GPU, frame timings and what each cost adds |
 | Drag, scroll | orbit and zoom |
+| Tilt shift slider | strength of the macro depth of field, the tilt-shift look: 0 is all in focus, 1× the film's own, up to 2× blurs harder and narrows the band in focus |
 
 Under the controls, a frame-rate readout (average of the last second, and the worst frame of the last eight seconds) sits over a frame-time chart with a guide at the rate the film is locked to, 12 or 24 fps.
 

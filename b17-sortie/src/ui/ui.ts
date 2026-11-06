@@ -6,6 +6,8 @@ import { RouteMap } from './route-map';
 export type ViewMode = 'lab' | 'studio';
 /** How the lead ship is shown: whole, cut away to the crew, or exploded into its assemblies. */
 export type ShowMode = 'exterior' | 'cutaway' | 'exploded';
+/** The tilt-shift slider's range, as a multiple of the film's macro depth of field; 0 is all in focus. */
+export const TILT_SHIFT_STRENGTH = { min: 0, max: 2, step: 0.05, initial: 1 } as const;
 
 export interface UiCallbacks {
   onJumpToPhase: (index: number) => void;
@@ -20,6 +22,8 @@ export interface UiCallbacks {
   onKitBench: () => void;
   onFilmRateChange: (fps: StopMotionRate) => void;
   onJitterToggle: () => void;
+  /** Strength of the macro depth of field, the tilt-shift look, in `TILT_SHIFT_STRENGTH`'s range. */
+  onTiltShiftChange: (strength: number) => void;
 }
 
 /** Range diamonds round the K-3 reticle, and the circle they sit on, in the reticle's 200-unit drawing. */
@@ -77,6 +81,8 @@ export class Ui {
   private readonly kitButton: HTMLButtonElement;
   private readonly filmRateButtons: Record<StopMotionRate, HTMLButtonElement>;
   private readonly jitterButton: HTMLButtonElement;
+  private readonly tiltShiftSlider: HTMLInputElement;
+  private readonly tiltShiftValue: HTMLElement;
   private readonly loading: HTMLElement;
   private readonly playState: HTMLElement;
   /** Bottom row of the controls panel, for the frame-rate meter. */
@@ -181,13 +187,20 @@ export class Ui {
       24: makeToggleButton(filmRateToggle, '24 fps', () => callbacks.onFilmRateChange(24)),
     };
     this.jitterButton = makeToggleButton(filmRateToggle, 'Jitter on', callbacks.onJitterToggle);
+    const tiltShiftRow = element('label', 'slider-row');
+    tiltShiftRow.append(element('span', 'slider-label', 'Tilt shift'));
+    this.tiltShiftSlider = element('input', 'slider');
+    Object.assign(this.tiltShiftSlider, { type: 'range', min: String(TILT_SHIFT_STRENGTH.min), max: String(TILT_SHIFT_STRENGTH.max), step: String(TILT_SHIFT_STRENGTH.step) });
+    this.tiltShiftSlider.addEventListener('input', () => callbacks.onTiltShiftChange(this.tiltShiftSlider.valueAsNumber));
+    this.tiltShiftValue = element('span', 'slider-value');
+    tiltShiftRow.append(this.tiltShiftSlider, this.tiltShiftValue);
     const hardstandToggle = element('div', 'view-toggle');
     makeToggleButton(hardstandToggle, 'Hardstand · take off', callbacks.onHardstand);
     this.kitButton = makeToggleButton(hardstandToggle, 'Kit box', callbacks.onKitBench);
     const mediaToggle = element('div', 'view-toggle');
     this.soundButton = makeToggleButton(mediaToggle, 'Sound off', callbacks.onSoundToggle);
     makeToggleButton(mediaToggle, 'Photo', callbacks.onPhoto);
-    hints.append(viewToggle, showToggle, noseArtToggle, filmRateToggle, hardstandToggle, mediaToggle, this.meterSlot, logRow);
+    hints.append(viewToggle, showToggle, noseArtToggle, filmRateToggle, tiltShiftRow, hardstandToggle, mediaToggle, this.meterSlot, logRow);
 
     this.intercom = element('div', 'intercom');
     this.intercomSpeaker = element('span', 'intercom-speaker');
@@ -264,6 +277,11 @@ export class Ui {
   setFilmRate(fps: StopMotionRate): void {
     this.filmRateButtons[12].classList.toggle('is-active', fps === 12);
     this.filmRateButtons[24].classList.toggle('is-active', fps === 24);
+  }
+
+  setTiltShift(strength: number): void {
+    this.tiltShiftSlider.valueAsNumber = strength;
+    this.tiltShiftValue.textContent = `${strength.toFixed(2)}×`;
   }
 
   setJitter(on: boolean): void {

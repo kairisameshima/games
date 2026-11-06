@@ -28,7 +28,7 @@ import { hullSectionAt, toX } from './scene/hull';
 import { BOMB_COUNT, EXTINGUISHER_SECONDS, FLAK_HIT_SECONDS, PHASES, SORTIE_LOOP_SECONDS, sortieStateAt, STRIKE_PHOTO, type SortieState } from './sortie';
 import { Callouts } from './ui/callouts';
 import { FpsMeter } from './ui/fps-meter';
-import { Ui, type ShowMode, type ViewMode } from './ui/ui';
+import { TILT_SHIFT_STRENGTH, Ui, type ShowMode, type ViewMode } from './ui/ui';
 import { updateInstrumentPanel, type InstrumentReadings } from './scene/interior/panels';
 import { ExplodedView } from './scene/exploded';
 import { fuselageSectionAt } from './scene/assemblies';
@@ -255,11 +255,15 @@ const CAMERA_TWEEN_SECONDS = 1.3;
 /** In-focus depth either side of the target: shallow, as a macro lens close to a tabletop set gives. */
 const FOCUS_RANGE = { exterior: 2.6, cutaway: 5.0 } as const;
 
+/** The macro look at full strength: blur, half-res pixels per world unit out of focus (near, far), and the most it blurs. */
+const MACRO_BLUR = { near: 4.4, far: 2.4, max: 13 } as const;
+/** The gather pass's taps reach about this radius, half-res pixels; a stronger blur would leave a hard edge. */
+const MAX_REACHABLE_COC = 16;
+
 const focusPoint = new THREE.Vector3();
 const pipeline = createStudioPipeline(renderer, scene, camera, focusPoint);
 const depthOfField = pipeline.depthOfField.uniforms;
-depthOfField.uFocusRange.value = FOCUS_RANGE.exterior;
-(depthOfField.uCocScale.value as THREE.Vector2).set(4.4, 2.4);
+let tiltShiftStrength: number = TILT_SHIFT_STRENGTH.initial;
 const filmGate = new FilmGatePass();
 pipeline.composer.addPass(filmGate);
 
@@ -896,10 +900,19 @@ function walkToStation(station: CrewStation): void {
 
 const ui = new Ui(uiRoot, {
   onJumpToPhase: jumpToPhase, onViewChange: switchView, onShowChange: setShow, onRecordLog: () => renderLog.start(), onNoseArtChange: setNoseArt, onHardstand: () => startPrologue(), onSoundToggle: () => void setSound(!foley.enabled), onPhoto: takePhoto, onKitBench: () => setKitBench(kitTime === null), onFilmRateChange: setFilmRate, onJitterToggle: () => setJitter(!stopMotion.jitter),
+  onTiltShiftChange: setTiltShiftStrength,
 });
 const fpsMeter = new FpsMeter(ui.meterSlot);
 
 /** Switches the animator's hand on or off: uneven spacing, handled models, the tripod bump and gate weave. */
+function setTiltShiftStrength(strength: number): void {
+  tiltShiftStrength = strength;
+  (depthOfField.uCocScale.value as THREE.Vector2).set(MACRO_BLUR.near * strength, MACRO_BLUR.far * strength);
+  depthOfField.uMaxCoc.value = Math.min(MACRO_BLUR.max * strength, MAX_REACHABLE_COC);
+  ui.setTiltShift(strength);
+  cameraMoved = true;
+}
+
 function setJitter(on: boolean): void {
   stopMotion.jitter = on;
   ui.setJitter(on);
@@ -1322,6 +1335,7 @@ let filmTime = 0;
 /** The camera moved since the last drawn frame: a drag or a scroll draws at once, between exposures. */
 let cameraMoved = true;
 controls.addEventListener('change', () => { cameraMoved = true; });
+setTiltShiftStrength(TILT_SHIFT_STRENGTH.initial);
 let lastDrawnAt = 0;
 
 /**
@@ -1444,7 +1458,8 @@ function frame(timestamp: number): void {
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   focusPoint.copy(controls.target);
   updateWingmanCabins();
-  depthOfField.uFocusRange.value = THREE.MathUtils.lerp(FOCUS_RANGE.exterior, FOCUS_RANGE.cutaway, Math.max(cutaway.amount, exploded.amount));
+  // Stronger than the macro look also narrows the band in focus, as a wider aperture would.
+  depthOfField.uFocusRange.value = THREE.MathUtils.lerp(FOCUS_RANGE.exterior, FOCUS_RANGE.cutaway, Math.max(cutaway.amount, exploded.amount)) / Math.max(tiltShiftStrength, 1);
   depthOfField.uFocusDistance.value = camera.position.distanceTo(controls.target);
   callouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(cutaway.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);
   assemblyCallouts.update(camera, innerWidth, innerHeight, THREE.MathUtils.smoothstep(exploded.amount, 0.6, 1), BOMB_COUNT - formation[0].bombsDropped);

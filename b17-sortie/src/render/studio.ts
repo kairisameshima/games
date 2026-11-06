@@ -471,7 +471,8 @@ export class BokehDepthOfFieldPass extends Pass {
         float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
         float radius = 1.2 + jitter * 0.8;
         float angle = jitter * 6.2831853;
-        for (int i = 0; i < 72; i++) {
+        // Enough taps for the radius to reach the largest blur the strength slider allows (it grows as the square root).
+        for (int i = 0; i < 128; i++) {
           if (radius >= uMaxCoc) break;
           vec4 tap = texture2D(tHalf, vUv + vec2(cos(angle), sin(angle)) * uHalfTexel * radius);
           float tapCoc = abs(tap.a);

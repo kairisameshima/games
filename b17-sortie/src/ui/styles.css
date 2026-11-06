@@ -71,6 +71,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
 }
 .view-toggle button.is-active { background: #1b2338; color: var(--cyan); }
 .view-toggle button:focus-visible { outline: 2px solid var(--cyan); }
+.slider-row { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr 3.4em; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mute); }
+.slider { width: 100%; accent-color: var(--cyan); }
+.slider-value { font-family: var(--mono); text-align: right; text-transform: none; letter-spacing: 0; }
 
 .loading { position: absolute; inset: 0; display: grid; place-items: center; background: #0b0f1a; font-family: var(--mono); color: var(--mute); letter-spacing: 0.1em; font-size: 12px; transition: opacity 0.4s; }
 .loading.is-done { opacity: 0; pointer-events: none; }
@@ -84,6 +87,8 @@ body.is-studio .phase-chip.is-active { background: #1d2230; color: #f8f3ea; }
 body.is-studio .key { background: #00000010; color: #1d2230; }
 body.is-studio .view-toggle button { background: #ffffffb0; color: #5d6476; }
 body.is-studio .view-toggle button.is-active { background: #1d2230; color: #f8f3ea; }
+body.is-studio .slider-row { color: #5d6476; }
+body.is-studio .slider { accent-color: #1d2230; }
 body.is-studio .vignette { opacity: 0.18; }
 
 #callouts { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
