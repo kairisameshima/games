@@ -90,6 +90,9 @@ interface AircraftMaterials {
   turretDome: THREE.MeshPhysicalMaterial;
   /** The top turret's flat windscreen: thick laminated glass, green at its edges. */
   armourGlass: THREE.MeshPhysicalMaterial;
+  /** How misted the glazing is, one uniform for all of it; and the glazing it fogs. */
+  glassMist: THREE.IUniform<number>;
+  mistableGlass: MistableGlass[];
   /** The insignia's piece on the main entrance door: its own material, as the hull's insignia has the doorway cut out of it. */
   doorInsignia: THREE.MeshStandardMaterial;
   /** The main entrance door's panel, the side's paint, seen from inside too once it is open. */
@@ -272,6 +275,9 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
     })),
     insignia: decalMaterial(insigniaArt),
     doorInsignia: decalMaterial(insigniaArt),
+    glassMist: { value: 0 },
+    // Patched below, once the glazing it covers exists.
+    mistableGlass: [],
     codes: decalMaterial(codeLettersDecal(livery.codes, finish)),
     aircraftLetter: decalMaterial(codeLettersDecal(livery.letter, finish)),
     tailMarking: decalMaterial(tailMarkingDecal(livery.tailSerial, livery.letter, finish)),
@@ -308,6 +314,8 @@ function aircraftMaterials(livery: Livery): AircraftMaterials {
     bomb: paintMaterial(null, '#3e3e2e'),
     bombBand: paintMaterial(null, PALETTE.tailYellow),
   };
+  materials.mistableGlass = [materials.canopy, materials.turretDome, materials.armourGlass, materials.windowPane]
+    .map((material) => patchGlassMist(material, materials.glassMist));
   materialsByLivery.set(livery, materials);
   return materials;
 }
@@ -1534,6 +1542,45 @@ function fuselageInsigniaProjector(side: 1 | -1): DecalProjector {
   };
 }
 
+/**
+ * Fully misted glazing: frosted pale grey (linear), at least this opaque, and this rough. The glass is mostly clear by
+ * its map's alpha or its opacity, so the mist is laid on in the shader, after the map, where both are known.
+ */
+const GLASS_MIST = { colour: new THREE.Color('#e3e9ec'), opacity: 0.68, roughness: 0.55 } as const;
+
+/** A pane's own roughness, kept so the mist can be laid over it and taken off again. */
+interface MistableGlass {
+  material: THREE.MeshStandardMaterial;
+  roughness: number;
+}
+
+/**
+ * Chains the mist onto the glazing's shader patch (studio shading), sharing one `uGlassMist` uniform across a livery's
+ * glazing; set before the glass is first compiled, so the program is built once with it.
+ */
+function patchGlassMist(material: THREE.MeshStandardMaterial, mist: THREE.IUniform<number>): MistableGlass {
+  const basePatch = material.onBeforeCompile;
+  const baseKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    basePatch.call(material, shader, renderer);
+    shader.uniforms.uGlassMist = mist;
+    const colour = GLASS_MIST.colour;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uGlassMist;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+diffuseColor.a = mix(diffuseColor.a, max(diffuseColor.a, ${GLASS_MIST.opacity.toFixed(2)}), uGlassMist);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${colour.r.toFixed(3)}, ${colour.g.toFixed(3)}, ${colour.b.toFixed(3)}), uGlassMist);`);
+  };
+  material.customProgramCacheKey = () => `${baseKey}|glass-mist`;
+  return { material, roughness: material.roughness };
+}
+
+/** Uniform values only: the glass's shaders stay as compiled. */
+function mistGlass(glass: MistableGlass[], mist: THREE.IUniform<number>, amount: number): void {
+  mist.value = amount;
+  for (const pane of glass) pane.material.roughness = THREE.MathUtils.lerp(pane.roughness, GLASS_MIST.roughness, amount);
+}
+
 /** Decals are built in model space; a hinge group at `pivot` carries the piece from the hinge line. */
 function hangFromHinge(pivot: THREE.Vector3, piece: THREE.Mesh): void {
   piece.geometry.translate(-pivot.x, -pivot.y, -pivot.z);
@@ -1811,6 +1858,8 @@ export interface B17 {
   bombBayDoors: { hinge: THREE.Object3D; side: 1 | -1 }[];
   /** Swings the forward entrance hatch and the main entrance door from shut (0) to standing open (1). */
   setHatchesOpen: (amount: number) => void;
+  /** Fogs the glazing (0 clear, 1 fully misted), as cloud leaves it, and clears it again. */
+  setGlassMist: (amount: number) => void;
   /** Racked bombs in release order; hide each as it drops. */
   rackedBombs: THREE.Object3D[];
   crewStations: CrewStation[];
@@ -2242,6 +2291,7 @@ export function buildB17({ crewDetail, opensUp, livery }: B17Options): B17 {
     chinTurret,
     bombBayDoors,
     setHatchesOpen,
+    setGlassMist: (amount: number) => mistGlass(materials.mistableGlass, materials.glassMist, amount),
     rackedBombs: interior.rackedBombs,
     crewStations,
     assemblies,

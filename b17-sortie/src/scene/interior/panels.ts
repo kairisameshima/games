@@ -221,7 +221,8 @@ function liveNeedles(instrument: LiveInstrument, readings: InstrumentReadings): 
     case 'altimeter': return [(readings.altitudeFeet % DIAL_SCALES.altimeterFeet) / DIAL_SCALES.altimeterFeet, (readings.altitudeFeet / 10000) % 1];
     case 'airspeed': return [readings.airspeedMph / DIAL_SCALES.airspeedMph];
     case 'turn': return [0.5 + (readings.bankRadians / DIAL_SCALES.bankRadians) * 0.5];
-    case 'climb': return [0.5 + (readings.climbFeetPerMinute / DIAL_SCALES.climbFeetPerMinute) * 0.5];
+    // The film's climb is many times a real one's: the needle pegs at the dial's stop, as a real one would.
+    case 'climb': return [0.5 + THREE.MathUtils.clamp(readings.climbFeetPerMinute / DIAL_SCALES.climbFeetPerMinute, -1, 1) * 0.5];
     case 'manifold12': return [manifold(0), manifold(1)];
     case 'tach12': return [tach(0), tach(1)];
     case 'manifold34': return [manifold(2), manifold(3)];

@@ -12,7 +12,7 @@ function createCanvas(width: number, height: number): [HTMLCanvasElement, Canvas
   return [canvas, context];
 }
 
-function seededRandom(seed: number): () => number {
+export function seededRandom(seed: number): () => number {
   let state = seed;
   return () => {
     state = (state * 16807) % 2147483647;

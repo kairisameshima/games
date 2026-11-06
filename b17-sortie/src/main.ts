@@ -12,6 +12,7 @@ import { Walkthrough } from './walkthrough';
 import { Hardstand, PROLOGUE_FLIGHT, type EngineStart, type HardstandFrame } from './scene/hardstand';
 import { Foley } from './audio/foley';
 import { KitBench } from './scene/kit-bench';
+import { Workbench } from './scene/workbench';
 import { fittingHotspots } from './scene/interior/hotspots';
 import { Hotspots } from './ui/hotspots';
 import { Cutaway } from './scene/cutaway';
@@ -39,6 +40,8 @@ import { runAudits } from './debug/audits';
 const MODEL_SCALE = 0.32;
 /** Ground speed of the air mass past the formation, in world units per second. Slowed down so the eye can follow it. */
 const AIR_DRIFT_SPEED = 2.4;
+/** The cloud deck far below drifts aft slower than the air streaming past the ships. */
+const CLOUD_DRIFT_SPEED = AIR_DRIFT_SPEED * 0.45;
 /** The stand rod meets the belly just aft of the ball turret, clear of the bomb bay and the falling bombs. */
 const STAND_MOUNT_D = 12.7;
 const MAX_FRAME_SEC = 0.1;
@@ -108,7 +111,11 @@ await loadNoseArt();
 
 const floorReflection = new PlanarReflection(0);
 const set = buildStudioSet(floorReflection);
-scene.add(set.lab, set.sweep, set.clouds, buildWorkshop());
+// The animator's tins, brush, scalpel and next decal sheet round the cutting mat, laid out afresh for each sortie.
+const workbench = new Workbench();
+/** Sorties begun, the boarding on load the first: each finds the bench as the animator last left it. */
+let sortiesBegun = 0;
+scene.add(set.lab, set.sweep, set.clouds, set.overcast.root, buildWorkshop(), workbench.root);
 floorReflection.hiddenDuringReflection.push(set.floor);
 
 // The formation: lead ship in front, two wingmen stepped up and down behind it, each on its own display stand.
@@ -661,6 +668,7 @@ function followTakeoff(before: number, time: number, ship: THREE.Vector3): void 
 }
 
 function startPrologue(hold = 0): void {
+  workbench.arrange(sortiesBegun++);
   setGunnerView(false);
   if (kitTime !== null) setKitBench(false);
   if (show !== 'exterior') setShow('exterior');
@@ -1006,7 +1014,7 @@ addEventListener('keydown', (event) => {
 });
 
 // Render log: what this machine makes of the scene, saved as JSON to share. Each probe switches one cost off.
-const cottonSet = [set.clouds, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, flak.root];
+const cottonSet = [set.clouds, set.overcast.root, contrails.root, engineSmoke.root, fighterSmoke.root, engineFire.root, puffs.root, flak.root];
 const wingmen = formation.slice(1).flatMap((ship) => [ship.holder, ship.stand.root]);
 const renderLog = new RenderLog(renderer, {
   context: () => ({
@@ -1414,7 +1422,10 @@ function exposeFrame(exposureSec: number): void {
   stepKitBench(deltaSec);
 
   if (deltaSec > 0) setCottonFrame(stopMotion.frame);
-  driftClouds(set.clouds, deltaSec, AIR_DRIFT_SPEED * 0.45, stopMotion.random);
+  driftClouds(set.clouds, deltaSec, CLOUD_DRIFT_SPEED, stopMotion.random);
+  // Posed every exposure, held or not, so a jump while paused finds the overcast where it should be.
+  set.overcast.pose(sortieTime, CLOUD_DRIFT_SPEED, stopMotion.random, deltaSec > 0);
+  for (const ship of formation) ship.aircraft.setGlassMist(set.overcast.mistAt(ship.holder.position.y, sortieTime));
   flak.update(deltaSec, leadState.flakRate, AIR_DRIFT_SPEED, flakZone);
   bombs.update(deltaSec);
   formation.forEach((ship, index) => ship.aircraft.root.localToWorld(chaffChutesWorld[index].copy(chaffChute)));
@@ -1436,7 +1447,7 @@ function exposeFrame(exposureSec: number): void {
   updateLeadCabinShadows();
   updateCabinBulbs();
   // No trails while the lead is on the ground or climbing out; the box forms up behind it.
-  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null && !landingShown);
+  contrails.update(deltaSec, AIR_DRIFT_SPEED, contrailEmitters, stopMotion.random, prologueTime === null && kitTime === null && !landingShown && leadState.contrailing);
   const damage = formation[0].aircraft.battleDamage;
   damage.smokePort.getWorldPosition(engineSmokeEmitter[0]);
   engineSmoke.update(deltaSec, AIR_DRIFT_SPEED, engineSmokeEmitter, stopMotion.random, leadState.engineSmoking);

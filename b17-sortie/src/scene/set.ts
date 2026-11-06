@@ -25,6 +25,7 @@ export interface StudioSet {
   floor: THREE.Mesh;
   practicalLights: VirtualLight[];
   clouds: THREE.Group;
+  overcast: Overcast;
 }
 
 function floorTexture(): THREE.CanvasTexture {
@@ -224,9 +225,8 @@ function buildCloud(seed: number, material: THREE.Material): THREE.Mesh {
   return cloud;
 }
 
-function buildCloudDeck(): THREE.Group {
+function buildCloudDeck(material: THREE.Material): THREE.Group {
   const clouds = new THREE.Group();
-  const material = cottonMaterial({ color: PALETTE.paleProp, frequency: CLOUD_COTTON.frequency, fuzz: CLOUD_COTTON.fuzz });
   let seed = 41;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -260,6 +260,83 @@ export function driftClouds(clouds: THREE.Group, frameSec: number, speed: number
   }
 }
 
+/**
+ * The overcast the box climbs through at the start of the sortie, world units and film seconds: `clouds` tufts of
+ * cotton spread over `x` and `z` round the formation, in a layer `depth` deep whose middle is lowered from `top`, clear
+ * above the box, to `bottom`, just over the deck, over `lowered`.
+ */
+const OVERCAST = { clouds: 18, x: [-11, 7], z: [-11, 4], top: 9.5, bottom: 1, depth: 2.2, lowered: [0, 7.5] } as const;
+/** Glazing fogs over this fast in the cloud, holds for this long once out of it, and takes this long to clear. */
+const CLOUD_MIST = { rise: 0.8, hold: 1.2, clear: 3.5 } as const;
+
+/**
+ * A second layer of cotton hung on the rig above the formation and lowered past it as the box climbs, carried aft with
+ * the deck as it goes; once down it lies just over the deck, and each cloud is lifted off the set as it drifts out past
+ * the deck's aft end. Posed from film time alone, so a jump or a loop finds it where it should be.
+ */
+export class Overcast {
+  readonly root = new THREE.Group();
+
+  constructor(material: THREE.Material) {
+    let seed = 73;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    // Kept off the layer's faces, so its outermost tufts stay inside its depth.
+    const spread = OVERCAST.depth / 2 - 0.5;
+    for (let index = 0; index < OVERCAST.clouds; index++) {
+      const cloud = buildCloud(2000 + index * 89, material);
+      const scale = 0.85 + random() * 0.5;
+      cloud.scale.setScalar(scale);
+      cloud.rotation.y = (random() - 0.5) * 0.6;
+      cloud.userData.rest = {
+        x: THREE.MathUtils.lerp(OVERCAST.x[0], OVERCAST.x[1], random()), lift: (random() * 2 - 1) * spread, turn: cloud.rotation.y, scale,
+      };
+      cloud.position.z = THREE.MathUtils.lerp(OVERCAST.z[0], OVERCAST.z[1], random());
+      this.root.add(cloud);
+    }
+  }
+
+  /** Poses the layer at film time `time`; `boil` on a new exposure, when the animator has handled the cotton. */
+  pose(time: number, driftSpeed: number, random: () => number, boil: boolean): void {
+    const middle = this.middleAt(time);
+    for (const cloud of this.root.children) {
+      const rest = cloud.userData.rest as { x: number; lift: number; turn: number; scale: number };
+      cloud.position.x = rest.x - driftSpeed * time;
+      cloud.visible = cloud.position.x > -CLOUD_DECK_LENGTH / 2;
+      cloud.position.y = middle + rest.lift;
+      if (!boil || !cloud.visible) continue;
+      cloud.position.y += (random() - 0.5) * CLOUD_BOIL.lift;
+      cloud.rotation.y = rest.turn + (random() - 0.5) * CLOUD_BOIL.turn;
+      cloud.scale.setScalar(rest.scale * (1 + (random() - 0.5) * CLOUD_BOIL.scale));
+    }
+  }
+
+  /**
+   * How misted a ship's glazing is at film time `time` when it flies at `height`: fogging as the layer closes round it,
+   * held a moment after it comes out on top, then clearing.
+   */
+  mistAt(height: number, time: number): number {
+    const entered = this.timeAtMiddle(height + OVERCAST.depth / 2);
+    const left = this.timeAtMiddle(height - OVERCAST.depth / 2);
+    const fogged = THREE.MathUtils.smoothstep(time, entered, entered + CLOUD_MIST.rise);
+    return fogged * (1 - THREE.MathUtils.smoothstep(time, left + CLOUD_MIST.hold, left + CLOUD_MIST.hold + CLOUD_MIST.clear));
+  }
+
+  private middleAt(time: number): number {
+    const [from, to] = OVERCAST.lowered;
+    return THREE.MathUtils.lerp(OVERCAST.top, OVERCAST.bottom, THREE.MathUtils.clamp((time - from) / (to - from), 0, 1));
+  }
+
+  /** When the layer's middle is lowered through `middle`; never, if the layer stops above it. */
+  private timeAtMiddle(middle: number): number {
+    if (middle < OVERCAST.bottom) return Infinity;
+    const [from, to] = OVERCAST.lowered;
+    return from + ((OVERCAST.top - middle) / (OVERCAST.top - OVERCAST.bottom)) * (to - from);
+  }
+}
+
 export function buildStudioSet(reflection: PlanarReflection): StudioSet {
   const practicalLights: VirtualLight[] = [];
   const labStatic = buildLabSet(practicalLights);
@@ -269,7 +346,9 @@ export function buildStudioSet(reflection: PlanarReflection): StudioSet {
   lab.add(floor);
   const sweep = buildSweep();
   sweep.visible = false;
-  return { lab, sweep, floor, practicalLights, clouds: buildCloudDeck() };
+  // The deck and the overcast are the same cotton: one material, one shader.
+  const cotton = cottonMaterial({ color: PALETTE.paleProp, frequency: CLOUD_COTTON.frequency, fuzz: CLOUD_COTTON.fuzz });
+  return { lab, sweep, floor, practicalLights, clouds: buildCloudDeck(cotton), overcast: new Overcast(cotton) };
 }
 
 /** A flat strip of tape laid along a path across x (the tape's width runs along x), standing just off the surface. */

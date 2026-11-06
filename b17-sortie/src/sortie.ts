@@ -15,7 +15,7 @@ export interface Phase {
  * the landing back at the hardstand; after the debrief the film goes round to the boarding again.
  */
 export const PHASES: readonly Phase[] = [
-  { id: 'cruise', label: 'Formation cruise', detail: 'Combat box at altitude, gunners scanning for fighters.', start: 0, end: 10 },
+  { id: 'cruise', label: 'Formation cruise', detail: 'The combat box climbs up through a layer of overcast to bombing altitude, its glazing misting over in the cloud; on top, contrails start to stream. Gunners scan for fighters.', start: 0, end: 10 },
   { id: 'fighters', label: 'Fighter attack', detail: 'Fighters press in on the box. Every gun that bears answers; the box holds formation for mutual fire.', start: 10, end: 24 },
   { id: 'initial-point', label: 'Initial point', detail: 'Turn onto the bomb-run heading. Bomb bay doors open.', start: 24, end: 32 },
   { id: 'bomb-run', label: 'Bomb run', detail: 'Bombardier flies the aircraft through the Norden sight. No evasive action through the flak.', start: 32, end: 39 },
@@ -45,6 +45,10 @@ export const FLAK_HIT_SECONDS = FLAK_HIT.at;
 export const EXTINGUISHER_SECONDS = FLAK_HIT.fireOut[0];
 
 const DOORS_CLOSE = [49, 51.5] as const;
+/** The climb to bombing altitude over the cruise: from this height at the loop's start, levelling off by `levelAt`. */
+const CLIMB = { fromFeet: 21000, toFeet: 25000, levelAt: 9 } as const;
+/** Contrails form above this height: the air up there is cold enough for the exhaust's water to freeze into a trail. */
+const CONTRAIL_FEET = 24500;
 /** The landing: when the lead leaves its stand for the field, and when it is down; altitude and speed run off over it. */
 const LANDING = { start: 72, down: 81 } as const;
 /** When chaff goes down the chute: through the flak, from the IP to bombs away. */
@@ -98,6 +102,8 @@ export interface SortieState {
   chaffing: boolean;
   /** The strike photograph is up. */
   strikePhotoShown: boolean;
+  /** High enough for the box to stream contrails. */
+  contrailing: boolean;
   /** The intercom call being heard, if any. */
   intercom: IntercomCall | null;
 }
@@ -113,8 +119,9 @@ const INTERCOM_SECONDS = 3.4;
  * fighters), timed to what the film shows.
  */
 export const INTERCOM: readonly IntercomCall[] = [
-  { at: 1.5, speaker: 'Navigator', line: 'Navigator to pilot: forty minutes to the IP.' },
-  { at: 5.5, speaker: 'Pilot', line: 'Pilot to crew: oxygen check. Call in.' },
+  { at: 0.4, speaker: 'Co-pilot', line: 'Going up through the overcast. Watch your spacing.' },
+  { at: 3.6, speaker: 'Pilot', line: 'Pilot to crew: oxygen check. Call in.' },
+  { at: 6.9, speaker: 'Navigator', line: 'We\'re on top. Forty minutes to the IP.' },
   { at: 10.3, speaker: 'Top turret', line: 'Bandits, twelve o\'clock high! Coming through!' },
   { at: 14.5, speaker: 'Ball turret', line: 'One going under us, low at six.' },
   { at: 21.4, speaker: 'Tail', line: 'Got him! He\'s smoking, he\'s going down!' },
@@ -159,6 +166,9 @@ export function sortieStateAt(time: number): SortieState {
   const ipTurn = smooth(24, 28, time);
   const headingDegrees = (95 + ipTurn * 17 + turnProgress * 168 + 360) % 360;
 
+  const climbed = THREE.MathUtils.lerp(CLIMB.fromFeet, CLIMB.toFeet, smooth(0, CLIMB.levelAt, time));
+  const altitudeFeet = Math.round((climbed + Math.sin(time * 0.2) * 40 - turn * 300) * (1 - smooth(LANDING.start, LANDING.down, time)));
+
   return {
     time,
     phase: PHASES[phaseIndex],
@@ -176,13 +186,14 @@ export function sortieStateAt(time: number): SortieState {
     bankRadians,
     pitchRadians,
     headingDegrees,
-    altitudeFeet: Math.round((25000 + Math.sin(time * 0.2) * 40 - turn * 300) * (1 - smooth(LANDING.start, LANDING.down, time))),
+    altitudeFeet,
     airspeedMph: Math.round((150 + smooth(30, 34, time) * 5 - smooth(48, 52, time) * 5 + turn * 12) * (1 - smooth(LANDING.start + 4, LANDING.down + 3, time))),
     missionClockSeconds: MISSION_CLOCK_OFFSET_SECONDS + time,
     landingSeconds: time >= LANDING.start ? time - LANDING.start : null,
     tallyAdded: time >= TALLY_ADDED_AT,
     chaffing: time >= CHAFF.from && time < CHAFF.to,
     strikePhotoShown: time >= STRIKE_PHOTO.at && time < STRIKE_PHOTO.at + STRIKE_PHOTO.shownFor,
+    contrailing: altitudeFeet >= CONTRAIL_FEET,
     intercom: INTERCOM.find((call) => time >= call.at && time < call.at + INTERCOM_SECONDS) ?? null,
   };
 }
