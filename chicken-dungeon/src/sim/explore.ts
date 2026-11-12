@@ -14,7 +14,6 @@ export class UnreachableTileError extends Error {
   }
 }
 
-export const VISION_RADIUS = 5;
 export const UNSEEN = -1;
 const SPACING_WEIGHT = 6;
 const SPACING_CAP = 6;
@@ -46,11 +45,11 @@ export function isFrontier(floorState: FloorState, point: Point): boolean {
   return isFrontierAt(floorState, point.x, point.y);
 }
 
-export function revealAround(floorState: FloorState, center: Point, tick: number): void {
+export function revealAround(floorState: FloorState, center: Point, tick: number, radius: number): void {
   const { floor, lastSeenTick } = floorState;
-  for (let dy = -VISION_RADIUS; dy <= VISION_RADIUS; dy++) {
-    for (let dx = -VISION_RADIUS; dx <= VISION_RADIUS; dx++) {
-      if (dx * dx + dy * dy > VISION_RADIUS * VISION_RADIUS) continue;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx * dx + dy * dy > radius * radius) continue;
       const x = center.x + dx;
       const y = center.y + dy;
       if (x < 0 || y < 0 || x >= floor.side || y >= floor.side) continue;

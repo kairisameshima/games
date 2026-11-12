@@ -1,11 +1,13 @@
 import { MONSTER_KINDS, type MonsterKindId } from "../data/bestiary.ts";
+import { noUpgrades, UPGRADE_IDS, type UpgradeLevels } from "../data/upgrades.ts";
 import { generateFloor } from "../gen/floor.ts";
 import type { Point } from "../gen/grid.ts";
 import type { MonsterSpawn } from "../gen/population.ts";
 import { createFloorState, UNSEEN } from "../sim/explore.ts";
 import type { BankRecord, Chicken, ChickenActivity, FloorState, GameState, LootPile, Monster } from "../sim/types.ts";
 
-export const SAVE_VERSION = 1;
+// Version 1 saves predate upgrades. They are set aside on load instead of migrated.
+export const SAVE_VERSION = 2;
 
 export class SaveFormatError extends Error {
   constructor(message: string) {
@@ -41,6 +43,7 @@ export function serializeGame(state: GameState, savedAt: number): string {
       deepestDepth: state.deepestDepth,
       bankedGold: state.bankedGold,
       bankLog: state.bankLog,
+      upgradeLevels: state.upgradeLevels,
       chickens: state.chickens,
       floors: [...state.floors.values()].map((floorState) => ({
         depth: floorState.floor.depth,
@@ -81,6 +84,7 @@ export function parseSave(text: string): LoadedGame {
       deepestDepth: readNumber(game, "deepestDepth", "game"),
       bankedGold: readNumber(game, "bankedGold", "game"),
       bankLog: readArray(game, "bankLog", "game").map((value, index) => readBankRecord(value, `game.bankLog[${index}]`)),
+      upgradeLevels: readUpgradeLevels(game.upgradeLevels, "game.upgradeLevels"),
       chickens: readArray(game, "chickens", "game").map((value, index) => readChicken(value, `game.chickens[${index}]`)),
       floors,
     },
@@ -123,6 +127,7 @@ function readChicken(value: unknown, where: string): Chicken {
     defense: readNumber(saved, "defense", where),
     speed: readNumber(saved, "speed", where),
     courage: readNumber(saved, "courage", where),
+    vision: readNumber(saved, "vision", where),
     attackCooldownTicks: readNumber(saved, "attackCooldownTicks", where),
     slowedUntilTick: readNumber(saved, "slowedUntilTick", where),
     slowMultiplier: readNumber(saved, "slowMultiplier", where),
@@ -131,6 +136,17 @@ function readChicken(value: unknown, where: string): Chicken {
     lootTargetId: readNullableNumber(saved, "lootTargetId", where),
     fightTargetId: readNullableNumber(saved, "fightTargetId", where),
   };
+}
+
+function readUpgradeLevels(value: unknown, where: string): UpgradeLevels {
+  const saved = readObject(value, where);
+  const levels = noUpgrades();
+  for (const id of UPGRADE_IDS) {
+    const level = readNumber(saved, id, where);
+    if (!Number.isInteger(level) || level < 0) throw new SaveFormatError(`${where}.${id} must be a whole number, got ${level}`);
+    levels[id] = level;
+  }
+  return levels;
 }
 
 function readMonster(value: unknown, where: string): Monster {

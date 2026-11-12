@@ -20,6 +20,8 @@ function play(state: GameState, ticks: number, commandsAt: ReadonlyMap<number, C
 
 function playedGame(): GameState {
   const state = createGame(SEED, 3);
+  state.bankedGold = 500;
+  for (const upgrade of ["sharperBeaks", "thickerFeathers", "lanternOil", "braveHeart"] as const) tick(state, [{ type: "buyUpgrade", upgrade }]);
   tick(state, [{ type: "send" }]);
   play(state, 3000, new Map());
   return state;
@@ -35,6 +37,7 @@ test("a saved run, once loaded, plays on exactly like the run that was never sav
   assert.deepEqual(loaded.chickens, original.chickens);
   assert.equal(loaded.bankedGold, original.bankedGold);
   assert.deepEqual(loaded.bankLog, original.bankLog);
+  assert.deepEqual(loaded.upgradeLevels, original.upgradeLevels);
   assert.deepEqual([...loaded.floors.keys()], [...original.floors.keys()]);
   for (const [depth, floorState] of original.floors) {
     const loadedFloor = loaded.floors.get(depth);

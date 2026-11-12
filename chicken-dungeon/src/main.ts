@@ -8,6 +8,7 @@ import { TICKS_PER_SECOND } from "./sim/time.ts";
 import type { Command, GameState } from "./sim/types.ts";
 import { createGame } from "./sim/world.ts";
 import { Hud } from "./ui/hud.ts";
+import { UpgradesPanel } from "./ui/upgrades-panel.ts";
 
 const STARTING_FLOCK_SIZE = 1;
 const TICK_MS = 1000 / TICKS_PER_SECOND;
@@ -24,7 +25,9 @@ const canvasStage = stage;
 
 const pendingCommands: Command[] = [];
 const renderer = new DungeonRenderer(dungeonCanvas);
-const hud = new Hud((command) => pendingCommands.push(command), startNewRun);
+const enqueue = (command: Command) => pendingCommands.push(command);
+const hud = new Hud(enqueue, startNewRun);
+const upgradesPanel = new UpgradesPanel(enqueue);
 let state = loadOrStartGame();
 
 let lastFrameTime = performance.now();
@@ -84,6 +87,7 @@ function runFrame(now: number): void {
   if (unsimulatedMs >= TICK_MS) unsimulatedMs = 0;
   renderer.draw(state, unsimulatedMs / TICK_MS);
   hud.update(state);
+  upgradesPanel.update(state);
   requestAnimationFrame(runFrame);
 }
 

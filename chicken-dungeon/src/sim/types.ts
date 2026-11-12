@@ -1,4 +1,5 @@
 import type { MonsterKindId } from "../data/bestiary.ts";
+import type { UpgradeId, UpgradeLevels } from "../data/upgrades.ts";
 import type { Floor } from "../gen/floor.ts";
 import type { Point } from "../gen/grid.ts";
 import type { MonsterSpawn } from "../gen/population.ts";
@@ -26,6 +27,8 @@ export interface Chicken extends Mover {
   defense: number;
   speed: number;
   courage: number;
+  /** Sight radius in tiles. */
+  vision: number;
   attackCooldownTicks: number;
   slowedUntilTick: number;
   slowMultiplier: number;
@@ -80,6 +83,7 @@ export interface GameState {
   bankedGold: number;
   /** Gold banked by returning chickens over the recent window. Drives the offline gold rate. */
   bankLog: BankRecord[];
+  upgradeLevels: UpgradeLevels;
 }
 
 export interface BankRecord {
@@ -87,9 +91,10 @@ export interface BankRecord {
   gold: number;
 }
 
-export type Command = { type: "send" } | { type: "recall" };
+export type Command = { type: "send" } | { type: "recall" } | { type: "buyUpgrade"; upgrade: UpgradeId };
 
 export type GameEvent =
   | { type: "reachedFloor"; chickenId: number; depth: number }
   | { type: "returnedHome"; chickenId: number; goldBanked: number }
-  | { type: "chickenDied"; chickenId: number; depth: number; killer: MonsterKindId };
+  | { type: "chickenDied"; chickenId: number; depth: number; killer: MonsterKindId }
+  | { type: "upgradeBought"; upgrade: UpgradeId; level: number };

@@ -1,9 +1,11 @@
 import { MONSTER_KINDS, monsterAttack, monsterDefense, monsterMaxHp } from "../data/bestiary.ts";
-import { RHODE_ISLAND_RED } from "../data/breeds.ts";
+import { RHODE_ISLAND_RED, type BreedStats } from "../data/breeds.ts";
+import { noUpgrades } from "../data/upgrades.ts";
 import { generateFloor } from "../gen/floor.ts";
 import type { Point } from "../gen/grid.ts";
 import { populateFloor, type MonsterSpawn } from "../gen/population.ts";
 import { createFloorState, revealAround } from "./explore.ts";
+import { chickenStats } from "./stats.ts";
 import type { Chicken, ChickenActivity, FloorState, GameState, Monster } from "./types.ts";
 
 export const COOP_DEPTH = 0;
@@ -27,8 +29,10 @@ const CHICKEN_NAMES = [
 ];
 
 export function createGame(seed: number, flockSize: number): GameState {
-  const chickens = Array.from({ length: flockSize }, (_, id) => createChicken(id));
-  return { seed, tick: 0, nextEntityId: 0, floors: new Map(), chickens, deepestDepth: 0, bankedGold: 0, bankLog: [] };
+  const upgradeLevels = noUpgrades();
+  const stats = chickenStats(RHODE_ISLAND_RED, upgradeLevels);
+  const chickens = Array.from({ length: flockSize }, (_, id) => createChicken(id, stats));
+  return { seed, tick: 0, nextEntityId: 0, floors: new Map(), chickens, deepestDepth: 0, bankedGold: 0, bankLog: [], upgradeLevels };
 }
 
 /** Floors and their starting monsters and gold come from the seed, so they are built on first visit. */
@@ -88,10 +92,10 @@ export function placeChicken(state: GameState, chicken: Chicken, depth: number, 
   chicken.fightTargetId = null;
   chicken.activity = activity;
   state.deepestDepth = Math.max(state.deepestDepth, depth);
-  revealAround(floorStateAt(state, depth), point, state.tick);
+  revealAround(floorStateAt(state, depth), point, state.tick, chicken.vision);
 }
 
-function createChicken(id: number): Chicken {
+function createChicken(id: number, stats: BreedStats): Chicken {
   const baseName = CHICKEN_NAMES[id % CHICKEN_NAMES.length];
   const generation = Math.floor(id / CHICKEN_NAMES.length);
   return {
@@ -104,12 +108,8 @@ function createChicken(id: number): Chicken {
     previousX: 0,
     previousY: 0,
     path: [],
-    hp: RHODE_ISLAND_RED.maxHp,
-    maxHp: RHODE_ISLAND_RED.maxHp,
-    attack: RHODE_ISLAND_RED.attack,
-    defense: RHODE_ISLAND_RED.defense,
-    speed: RHODE_ISLAND_RED.speed,
-    courage: RHODE_ISLAND_RED.courage,
+    ...stats,
+    hp: stats.maxHp,
     attackCooldownTicks: 0,
     slowedUntilTick: 0,
     slowMultiplier: 1,

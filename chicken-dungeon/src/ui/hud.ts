@@ -1,6 +1,8 @@
 import { MONSTER_KINDS } from "../data/bestiary.ts";
-import type { Chicken, Command, GameEvent, GameState } from "../sim/types.ts";
+import { UPGRADES } from "../data/upgrades.ts";
+import type { Command, GameEvent, GameState } from "../sim/types.ts";
 import { isInDungeon, leadChicken } from "../sim/world.ts";
+import { requireElement, setText } from "./dom.ts";
 
 // The bible asks for a short hold so a stray click never strands the flock.
 const RECALL_HOLD_MS = 500;
@@ -70,11 +72,7 @@ export class Hud {
   }
 
   record(events: readonly GameEvent[], state: GameState): void {
-    for (const event of events) {
-      const chicken = state.chickens.find((candidate) => candidate.id === event.chickenId);
-      if (!chicken) throw new Error(`Event references unknown chicken ${event.chickenId}`);
-      this.note(describeEvent(event, chicken));
-    }
+    for (const event of events) this.note(describeEvent(event, state));
   }
 
   note(message: string): void {
@@ -90,24 +88,23 @@ export class Hud {
   }
 }
 
-function describeEvent(event: GameEvent, chicken: Chicken): string {
+function describeEvent(event: GameEvent, state: GameState): string {
   switch (event.type) {
     case "reachedFloor":
-      return `${chicken.name} reached B${event.depth}.`;
-    case "returnedHome":
-      return event.goldBanked > 0 ? `${chicken.name} made it home with ${event.goldBanked} gold.` : `${chicken.name} made it home empty-handed.`;
+      return `${chickenName(state, event.chickenId)} reached B${event.depth}.`;
+    case "returnedHome": {
+      const name = chickenName(state, event.chickenId);
+      return event.goldBanked > 0 ? `${name} made it home with ${event.goldBanked} gold.` : `${name} made it home empty-handed.`;
+    }
     case "chickenDied":
-      return `${chicken.name} was killed by a ${MONSTER_KINDS[event.killer].name} on B${event.depth}.`;
+      return `${chickenName(state, event.chickenId)} was killed by a ${MONSTER_KINDS[event.killer].name} on B${event.depth}.`;
+    case "upgradeBought":
+      return `${UPGRADES[event.upgrade].name} is now level ${event.level}.`;
   }
 }
 
-function requireElement<T extends HTMLElement>(id: string, elementType: { new (): T; prototype: T }): T {
-  const element = document.getElementById(id);
-  if (!(element instanceof elementType)) throw new Error(`Missing #${id} in index.html`);
-  return element;
-}
-
-/** Writing identical text still invalidates layout, and update() runs every frame. */
-function setText(element: HTMLElement, text: string): void {
-  if (element.textContent !== text) element.textContent = text;
+function chickenName(state: GameState, chickenId: number): string {
+  const chicken = state.chickens.find((candidate) => candidate.id === chickenId);
+  if (!chicken) throw new Error(`Event references unknown chicken ${chickenId}`);
+  return chicken.name;
 }
