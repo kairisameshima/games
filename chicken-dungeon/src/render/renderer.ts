@@ -1,9 +1,25 @@
+import type { MonsterKindId } from "../data/bestiary.ts";
 import type { Floor } from "../gen/floor.ts";
-import { isWalkable, type Point } from "../gen/grid.ts";
+import { isWalkable, toIndex, type Point } from "../gen/grid.ts";
 import { mixSeed } from "../rng.ts";
-import type { FloorState } from "../sim/explore.ts";
-import { leadChicken, type Chicken, type GameState } from "../sim/game.ts";
-import { buildChickenSprites, contextOf, SPRITE_SIZE, type FacingSprites } from "./sprites.ts";
+import { currentTile } from "../sim/movement.ts";
+import type { FloorState, GameState, Mover } from "../sim/types.ts";
+import { isInDungeon, leadChicken } from "../sim/world.ts";
+import {
+  buildChickenSprites,
+  buildFeatherPileSprite,
+  buildGoldPileSprite,
+  buildMonsterSprites,
+  contextOf,
+  SPRITE_SIZE,
+  type FacingSprites,
+} from "./sprites.ts";
+
+interface Combatant extends Mover {
+  readonly id: number;
+  hp: number;
+  maxHp: number;
+}
 
 export const VIEW_WIDTH = 480;
 export const VIEW_HEIGHT = 270;
@@ -23,6 +39,7 @@ const ROOT_CELLAR = {
   stairwell: "#0d0907",
 };
 const REMEMBERED_SHADE = "rgba(5, 3, 2, 0.6)";
+const HEALTH_BAR = { width: 12, height: 2, inset: 2, background: "#1a120c", chicken: "#7fd35a", monster: "#e2533a" };
 const BANDANA_COLORS = [
   "#e6194b",
   "#3cb44b",
@@ -41,13 +58,21 @@ const BANDANA_COLORS = [
 export class DungeonRenderer {
   private readonly context: CanvasRenderingContext2D;
   private readonly tileLayers = new Map<number, HTMLCanvasElement>();
-  private readonly spritesByBandana = new Map<string, FacingSprites>();
-  private readonly facingLeftById = new Map<number, boolean>();
+  private readonly chickenSpritesByBandana = new Map<string, FacingSprites>();
+  private readonly monsterSprites: Readonly<Record<MonsterKindId, FacingSprites>>;
+  private readonly goldPileSprite: HTMLCanvasElement;
+  private readonly featherPileSprite: HTMLCanvasElement;
+  // Chickens and monsters have separate id spaces, so each keeps its own facing memory.
+  private readonly chickenFacingLeft = new Map<number, boolean>();
+  private readonly monsterFacingLeft = new Map<number, boolean>();
 
   constructor(canvas: HTMLCanvasElement) {
     canvas.width = VIEW_WIDTH;
     canvas.height = VIEW_HEIGHT;
     this.context = contextOf(canvas);
+    this.monsterSprites = { cellarRat: buildMonsterSprites("cellarRat"), cellarSpider: buildMonsterSprites("cellarSpider") };
+    this.goldPileSprite = buildGoldPileSprite();
+    this.featherPileSprite = buildFeatherPileSprite();
   }
 
   /** `interpolation` is how far real time has moved past the last tick, from 0 to 1. */
@@ -59,26 +84,50 @@ export class DungeonRenderer {
     if (!lead) return;
     const floorState = state.floors.get(lead.depth);
     if (!floorState) return;
+    const { floor, lastSeenTick } = floorState;
 
-    const camera = cameraOrigin(floorState.floor, {
+    const camera = cameraOrigin(floor, {
       x: interpolate(lead.previousX, lead.x, interpolation) * TILE_SIZE + TILE_SIZE / 2,
       y: interpolate(lead.previousY, lead.y, interpolation) * TILE_SIZE + TILE_SIZE / 2,
     });
-    context.drawImage(this.tileLayerFor(floorState.floor), camera.x, camera.y, VIEW_WIDTH, VIEW_HEIGHT, 0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    context.drawImage(this.tileLayerFor(floor), camera.x, camera.y, VIEW_WIDTH, VIEW_HEIGHT, 0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    for (const pile of floorState.lootPiles) {
+      if (lastSeenTick[toIndex(floor.side, pile)] < 0) continue;
+      const sprite = pile.isFeatherPile ? this.featherPileSprite : this.goldPileSprite;
+      context.drawImage(sprite, pile.x * TILE_SIZE - camera.x, pile.y * TILE_SIZE - camera.y);
+    }
+    for (const monster of floorState.monsters) {
+      if (lastSeenTick[toIndex(floor.side, currentTile(monster))] !== state.tick) continue;
+      this.drawCombatant(monster, this.monsterSprites[monster.kind], this.monsterFacingLeft, HEALTH_BAR.monster, camera, interpolation);
+    }
     for (const chicken of state.chickens) {
-      if (chicken.activity !== "home" && chicken.depth === lead.depth) this.drawChicken(chicken, camera, interpolation);
+      if (!isInDungeon(chicken) || chicken.depth !== lead.depth) continue;
+      const sprites = this.chickenSpritesFor(BANDANA_COLORS[chicken.id % BANDANA_COLORS.length]);
+      this.drawCombatant(chicken, sprites, this.chickenFacingLeft, HEALTH_BAR.chicken, camera, interpolation);
     }
     this.drawFog(floorState, state.tick, camera);
   }
 
-  private drawChicken(chicken: Chicken, camera: Point, interpolation: number): void {
-    const movedX = chicken.x - chicken.previousX;
-    if (movedX !== 0) this.facingLeftById.set(chicken.id, movedX < 0);
-    const sprites = this.spritesFor(BANDANA_COLORS[chicken.id % BANDANA_COLORS.length]);
-    const sprite = this.facingLeftById.get(chicken.id) ? sprites.left : sprites.right;
-    const screenX = Math.round(interpolate(chicken.previousX, chicken.x, interpolation) * TILE_SIZE - camera.x);
-    const screenY = Math.round(interpolate(chicken.previousY, chicken.y, interpolation) * TILE_SIZE - camera.y);
-    this.context.drawImage(sprite, screenX, screenY);
+  private drawCombatant(
+    unit: Combatant,
+    sprites: FacingSprites,
+    facingLeftById: Map<number, boolean>,
+    healthColor: string,
+    camera: Point,
+    interpolation: number,
+  ): void {
+    const movedX = unit.x - unit.previousX;
+    if (movedX !== 0) facingLeftById.set(unit.id, movedX < 0);
+    const screenX = Math.round(interpolate(unit.previousX, unit.x, interpolation) * TILE_SIZE - camera.x);
+    const screenY = Math.round(interpolate(unit.previousY, unit.y, interpolation) * TILE_SIZE - camera.y);
+    this.context.drawImage(facingLeftById.get(unit.id) ? sprites.left : sprites.right, screenX, screenY);
+    if (unit.hp >= unit.maxHp) return;
+    const barX = screenX + HEALTH_BAR.inset;
+    const barY = screenY + SPRITE_SIZE;
+    this.context.fillStyle = HEALTH_BAR.background;
+    this.context.fillRect(barX, barY, HEALTH_BAR.width, HEALTH_BAR.height);
+    this.context.fillStyle = healthColor;
+    this.context.fillRect(barX, barY, Math.max(1, Math.round((HEALTH_BAR.width * unit.hp) / unit.maxHp)), HEALTH_BAR.height);
   }
 
   private drawFog(floorState: FloorState, currentTick: number, camera: Point): void {
@@ -97,11 +146,11 @@ export class DungeonRenderer {
     }
   }
 
-  private spritesFor(bandanaColor: string): FacingSprites {
-    let sprites = this.spritesByBandana.get(bandanaColor);
+  private chickenSpritesFor(bandanaColor: string): FacingSprites {
+    let sprites = this.chickenSpritesByBandana.get(bandanaColor);
     if (!sprites) {
       sprites = buildChickenSprites(bandanaColor);
-      this.spritesByBandana.set(bandanaColor, sprites);
+      this.chickenSpritesByBandana.set(bandanaColor, sprites);
     }
     return sprites;
   }

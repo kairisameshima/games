@@ -1,13 +1,6 @@
 import type { Floor } from "../gen/floor.ts";
-import { breadthFirstSearch, isWalkable, pathTo, toIndex, toPoint, type Point } from "../gen/grid.ts";
-
-export interface FloorState {
-  floor: Floor;
-  /** Tick on which each tile was last inside a chicken's vision. Equal to the current tick means visible now. */
-  lastSeenTick: Int32Array;
-  /** Distance to stairs up over explored tiles. Built when Recall is cast and shared by every chicken on the floor. */
-  exitDistance: Int32Array | null;
-}
+import { breadthFirstSearch, findPath, isWalkable, pathTo, toIndex, toPoint, type Point, type SearchResult } from "../gen/grid.ts";
+import type { FloorState } from "./types.ts";
 
 export interface ExploreTarget {
   point: Point;
@@ -27,11 +20,22 @@ const SPACING_WEIGHT = 6;
 const SPACING_CAP = 6;
 
 export function createFloorState(floor: Floor): FloorState {
-  return { floor, lastSeenTick: new Int32Array(floor.side * floor.side).fill(UNSEEN), exitDistance: null };
+  return {
+    floor,
+    lastSeenTick: new Int32Array(floor.side * floor.side).fill(UNSEEN),
+    monsters: [],
+    lootPiles: [],
+    killedThisExpedition: [],
+  };
 }
 
 export function isExplored(floorState: FloorState, index: number): boolean {
   return floorState.lastSeenTick[index] !== UNSEEN;
+}
+
+/** Vision is revealed at the end of each tick, so "now" during a tick means seen on this tick or the one before. */
+export function isVisibleNow(floorState: FloorState, point: Point, tick: number): boolean {
+  return floorState.lastSeenTick[toIndex(floorState.floor.side, point)] >= tick - 1;
 }
 
 export function exploredTileCount(floorState: FloorState): number {
@@ -50,25 +54,30 @@ export function revealAround(floorState: FloorState, center: Point, tick: number
       const x = center.x + dx;
       const y = center.y + dy;
       if (x < 0 || y < 0 || x >= floor.side || y >= floor.side) continue;
-      if (hasLineOfSight(floor, center.x, center.y, x, y)) lastSeenTick[y * floor.side + x] = tick;
+      if (hasLineOfSight(floor, center, { x, y })) lastSeenTick[y * floor.side + x] = tick;
     }
   }
+}
+
+/** Distances from `origin` over explored walkable tiles. Chickens never path through ground they have not seen. */
+export function searchExplored(floorState: FloorState, origin: Point): SearchResult {
+  const { floor } = floorState;
+  return breadthFirstSearch(floor, [origin], (index) => isWalkable(floor, index) && isExplored(floorState, index));
 }
 
 /**
  * Picks the frontier with the best fan-out score from the bible:
  * `−path_distance + 6 × min(distance to nearest tile claimed by another chicken, 6)`.
  */
-export function chooseExploreTarget(floorState: FloorState, origin: Point, claimedTargets: readonly Point[]): ExploreTarget | null {
-  const { floor } = floorState;
-  const search = breadthFirstSearch(floor, [origin], (index) => isWalkable(floor, index) && isExplored(floorState, index));
+export function chooseFrontier(floorState: FloorState, search: SearchResult, claimedTargets: readonly Point[]): ExploreTarget | null {
+  const { side } = floorState.floor;
   let bestIndex = -1;
   let bestScore = -Infinity;
   for (let index = 0; index < search.distance.length; index++) {
     const pathDistance = search.distance[index];
     if (pathDistance <= 0) continue;
-    const x = index % floor.side;
-    const y = (index - x) / floor.side;
+    const x = index % side;
+    const y = (index - x) / side;
     if (!isFrontierAt(floorState, x, y)) continue;
     const score = -pathDistance + SPACING_WEIGHT * Math.min(nearestClaimDistance(x, y, claimedTargets), SPACING_CAP);
     if (score > bestScore) {
@@ -77,22 +86,38 @@ export function chooseExploreTarget(floorState: FloorState, origin: Point, claim
     }
   }
   if (bestIndex === -1) return null;
-  return { point: toPoint(floor.side, bestIndex), path: pathTo(floor.side, search, bestIndex) };
+  return { point: toPoint(side, bestIndex), path: pathTo(side, search, bestIndex) };
 }
 
 export function pathThroughExplored(floorState: FloorState, from: Point, to: Point): Point[] {
   const { floor } = floorState;
-  const search = breadthFirstSearch(floor, [from], (index) => isWalkable(floor, index) && isExplored(floorState, index));
-  const targetIndex = toIndex(floor.side, to);
-  if (search.distance[targetIndex] < 0) {
-    throw new UnreachableTileError(`(${to.x}, ${to.y}) on B${floor.depth} is not reachable through explored tiles`);
-  }
-  return pathTo(floor.side, search, targetIndex);
+  const path = findPath(floor, from, to, (index) => isWalkable(floor, index) && isExplored(floorState, index));
+  if (!path) throw new UnreachableTileError(`(${to.x}, ${to.y}) on B${floor.depth} is not reachable through explored tiles`);
+  return path;
 }
 
-export function buildExitDistance(floorState: FloorState): Int32Array {
-  const { floor } = floorState;
-  return breadthFirstSearch(floor, [floor.stairsUp], (index) => isWalkable(floor, index) && isExplored(floorState, index)).distance;
+/** Bresenham line. Walls block sight past them, but the wall tile itself is visible. */
+export function hasLineOfSight(floor: Floor, from: Point, to: Point): boolean {
+  const deltaX = Math.abs(to.x - from.x);
+  const deltaY = -Math.abs(to.y - from.y);
+  const stepX = from.x < to.x ? 1 : -1;
+  const stepY = from.y < to.y ? 1 : -1;
+  let error = deltaX + deltaY;
+  let x = from.x;
+  let y = from.y;
+  while (x !== to.x || y !== to.y) {
+    if ((x !== from.x || y !== from.y) && !isWalkable(floor, y * floor.side + x)) return false;
+    const doubledError = 2 * error;
+    if (doubledError >= deltaY) {
+      error += deltaY;
+      x += stepX;
+    }
+    if (doubledError <= deltaX) {
+      error += deltaX;
+      y += stepY;
+    }
+  }
+  return true;
 }
 
 function isFrontierAt(floorState: FloorState, x: number, y: number): boolean {
@@ -116,28 +141,4 @@ function nearestClaimDistance(x: number, y: number, claimedTargets: readonly Poi
   let nearest = Infinity;
   for (const claim of claimedTargets) nearest = Math.min(nearest, Math.abs(claim.x - x) + Math.abs(claim.y - y));
   return nearest;
-}
-
-/** Bresenham line. Walls block sight past them, but the wall tile itself is visible. */
-function hasLineOfSight(floor: Floor, fromX: number, fromY: number, toX: number, toY: number): boolean {
-  const deltaX = Math.abs(toX - fromX);
-  const deltaY = -Math.abs(toY - fromY);
-  const stepX = fromX < toX ? 1 : -1;
-  const stepY = fromY < toY ? 1 : -1;
-  let error = deltaX + deltaY;
-  let x = fromX;
-  let y = fromY;
-  while (x !== toX || y !== toY) {
-    if ((x !== fromX || y !== fromY) && !isWalkable(floor, y * floor.side + x)) return false;
-    const doubledError = 2 * error;
-    if (doubledError >= deltaY) {
-      error += deltaY;
-      x += stepX;
-    }
-    if (doubledError <= deltaX) {
-      error += deltaX;
-      y += stepY;
-    }
-  }
-  return true;
 }

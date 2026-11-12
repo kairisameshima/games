@@ -1,6 +1,9 @@
 import "./style.css";
 import { DungeonRenderer, VIEW_HEIGHT, VIEW_WIDTH } from "./render/renderer.ts";
-import { createGame, tick, TICKS_PER_SECOND, type Command } from "./sim/game.ts";
+import { tick } from "./sim/game.ts";
+import { TICKS_PER_SECOND } from "./sim/time.ts";
+import type { Command } from "./sim/types.ts";
+import { createGame } from "./sim/world.ts";
 import { Hud } from "./ui/hud.ts";
 
 const STARTING_FLOCK_SIZE = 1;

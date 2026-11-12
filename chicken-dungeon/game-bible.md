@@ -294,7 +294,7 @@ Stats below are base values. Actual stats use the depth scaling formulas above.
 
 | Monster | Biome | HP base | ATK base | DEF base | Speed | Gold weight | Behavior |
 |---|---|---|---|---|---|---|---|
-| Cellar Rat | Root Cellar | 8 | 2 | 0 | 2.4 | 1 | Spawns in packs of 3 |
+| Cellar Rat | Root Cellar | 8 | 2 | 0 | 2.0 | 1 | Spawns in packs of 3. As fast as a Rhode Island Red, so a fleeing hen can escape |
 | Cellar Spider | Root Cellar | 12 | 2 | 1 | 1.8 | 1 | Bite slows target 40% for 3 s |
 | Weasel | Fox Burrows | 14 | 3 | 1 | 3.4 | 2 | Steals one carried item, or one egg from a nest, and flees. Killing it drops what it stole |
 | Fox | Fox Burrows | 22 | 4 | 2 | 2.8 | 3 | Targets the lowest-HP chicken in range |

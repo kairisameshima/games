@@ -77,15 +77,9 @@ export function pathTo(side: number, search: SearchResult, targetIndex: number):
   return path.reverse();
 }
 
-/** A 4-neighbor of `point` that is one step closer to the distance map's source, or null at the source or off the map. */
-export function stepDownhill(side: number, distance: Int32Array, point: Point): Point | null {
-  const here = distance[toIndex(side, point)];
-  if (here <= 0) return null;
-  for (const offset of NEIGHBOR_OFFSETS) {
-    const x = point.x + offset.x;
-    const y = point.y + offset.y;
-    if (x < 0 || y < 0 || x >= side || y >= side) continue;
-    if (distance[y * side + x] === here - 1) return { x, y };
-  }
-  return null;
+/** Shortest 4-neighbor path from `from` to `to`, excluding `from`. Null when `to` cannot be reached. */
+export function findPath(grid: Grid, from: Point, to: Point, canEnter: (index: number) => boolean): Point[] | null {
+  const search = breadthFirstSearch(grid, [from], canEnter);
+  const targetIndex = toIndex(grid.side, to);
+  return search.distance[targetIndex] === UNREACHED ? null : pathTo(grid.side, search, targetIndex);
 }
