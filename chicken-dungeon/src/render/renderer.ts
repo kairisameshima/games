@@ -57,7 +57,8 @@ const BANDANA_COLORS = [
 
 export class DungeonRenderer {
   private readonly context: CanvasRenderingContext2D;
-  private readonly tileLayers = new Map<number, HTMLCanvasElement>();
+  // Keyed by the Floor object, so a new run or a loaded save never reuses another seed's paint.
+  private readonly tileLayers = new WeakMap<Floor, HTMLCanvasElement>();
   private readonly chickenSpritesByBandana = new Map<string, FacingSprites>();
   private readonly monsterSprites: Readonly<Record<MonsterKindId, FacingSprites>>;
   private readonly goldPileSprite: HTMLCanvasElement;
@@ -157,10 +158,10 @@ export class DungeonRenderer {
 
   /** Floors never change shape, so each one is painted once and copied every frame. */
   private tileLayerFor(floor: Floor): HTMLCanvasElement {
-    let layer = this.tileLayers.get(floor.depth);
+    let layer = this.tileLayers.get(floor);
     if (!layer) {
       layer = paintTileLayer(floor);
-      this.tileLayers.set(floor.depth, layer);
+      this.tileLayers.set(floor, layer);
     }
     return layer;
   }

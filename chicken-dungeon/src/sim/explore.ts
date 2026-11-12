@@ -15,7 +15,7 @@ export class UnreachableTileError extends Error {
 }
 
 export const VISION_RADIUS = 5;
-const UNSEEN = -1;
+export const UNSEEN = -1;
 const SPACING_WEIGHT = 6;
 const SPACING_CAP = 6;
 

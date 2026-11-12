@@ -78,6 +78,13 @@ export interface GameState {
   chickens: Chicken[];
   deepestDepth: number;
   bankedGold: number;
+  /** Gold banked by returning chickens over the recent window. Drives the offline gold rate. */
+  bankLog: BankRecord[];
+}
+
+export interface BankRecord {
+  tick: number;
+  gold: number;
 }
 
 export type Command = { type: "send" } | { type: "recall" };

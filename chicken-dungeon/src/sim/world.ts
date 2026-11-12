@@ -28,7 +28,7 @@ const CHICKEN_NAMES = [
 
 export function createGame(seed: number, flockSize: number): GameState {
   const chickens = Array.from({ length: flockSize }, (_, id) => createChicken(id));
-  return { seed, tick: 0, nextEntityId: 0, floors: new Map(), chickens, deepestDepth: 0, bankedGold: 0 };
+  return { seed, tick: 0, nextEntityId: 0, floors: new Map(), chickens, deepestDepth: 0, bankedGold: 0, bankLog: [] };
 }
 
 /** Floors and their starting monsters and gold come from the seed, so they are built on first visit. */

@@ -14,17 +14,20 @@ export class Hud {
   private readonly sendButton: HTMLButtonElement;
   private readonly recallButton: HTMLButtonElement;
   private readonly speedButton: HTMLButtonElement;
+  private readonly newRunButton: HTMLButtonElement;
   private readonly eventLog: HTMLOListElement;
   private recallHoldTimer: number | undefined;
   private speedIndex = 0;
 
-  constructor(enqueue: (command: Command) => void) {
+  /** `startNewRun` is offered only once the whole flock is dead, until prestige replaces it. */
+  constructor(enqueue: (command: Command) => void, startNewRun: () => void) {
     this.flockStatus = requireElement("flock-status", HTMLElement);
     this.depthStatus = requireElement("depth-status", HTMLElement);
     this.goldStatus = requireElement("gold-status", HTMLElement);
     this.sendButton = requireElement("send-button", HTMLButtonElement);
     this.recallButton = requireElement("recall-button", HTMLButtonElement);
     this.speedButton = requireElement("speed-button", HTMLButtonElement);
+    this.newRunButton = requireElement("new-run-button", HTMLButtonElement);
     this.eventLog = requireElement("event-log", HTMLOListElement);
 
     this.sendButton.addEventListener("click", () => enqueue({ type: "send" }));
@@ -43,6 +46,7 @@ export class Hud {
       this.speedIndex = (this.speedIndex + 1) % SIMULATION_SPEEDS.length;
       this.speedButton.textContent = `SPEED ${this.simulationSpeed}x`;
     });
+    this.newRunButton.addEventListener("click", startNewRun);
   }
 
   /** Sim seconds per real second. The main loop scales elapsed time, so ticks stay fixed and the sim stays deterministic. */
@@ -62,16 +66,21 @@ export class Hud {
     setText(this.goldStatus, `Gold ${state.bankedGold} · In pouches ${carried}`);
     this.sendButton.disabled = !living.some((chicken) => chicken.activity === "home");
     this.recallButton.disabled = !deployed.some((chicken) => chicken.activity !== "recalled" && chicken.activity !== "flee");
+    this.newRunButton.hidden = living.length > 0;
   }
 
   record(events: readonly GameEvent[], state: GameState): void {
     for (const event of events) {
       const chicken = state.chickens.find((candidate) => candidate.id === event.chickenId);
       if (!chicken) throw new Error(`Event references unknown chicken ${event.chickenId}`);
-      const line = document.createElement("li");
-      line.textContent = describeEvent(event, chicken);
-      this.eventLog.prepend(line);
+      this.note(describeEvent(event, chicken));
     }
+  }
+
+  note(message: string): void {
+    const line = document.createElement("li");
+    line.textContent = message;
+    this.eventLog.prepend(line);
     while (this.eventLog.children.length > EVENT_LOG_LENGTH) this.eventLog.lastElementChild?.remove();
   }
 
