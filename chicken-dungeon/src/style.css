@@ -1,0 +1,91 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  background: #0b0806;
+  color: #f3e6c8;
+  font-family: "Jersey 10", ui-monospace, monospace;
+  font-size: 22px;
+}
+
+.top-bar,
+.action-bar {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  padding: 8px 16px;
+  background: #1a120c;
+}
+
+.top-bar {
+  border-bottom: 2px solid #3a2a1c;
+}
+
+.action-bar {
+  gap: 16px;
+  border-top: 2px solid #3a2a1c;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#dungeon-view {
+  display: block;
+  image-rendering: pixelated;
+}
+
+button {
+  position: relative;
+  overflow: hidden;
+  padding: 6px 18px;
+  font: inherit;
+  color: inherit;
+  background: #3a2a1c;
+  border: 2px solid #8a7458;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#recall-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: rgba(217, 164, 65, 0.35);
+}
+
+#recall-button.holding::after {
+  width: 100%;
+  transition: width var(--recall-hold) linear;
+}
+
+.event-log {
+  height: 8em;
+  padding: 6px 16px 10px;
+  overflow: hidden;
+  list-style: none;
+  font-size: 18px;
+  text-align: center;
+  color: #c9b48f;
+}
