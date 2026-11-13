@@ -88,6 +88,27 @@ const MONSTER_ART: Readonly<Record<MonsterKindId, PixelArt>> = {
     ],
     palette: { S: "#3b2a3f", H: "#5e4766", E: "#e23a2a" },
   },
+  monsterDen: {
+    pixels: [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      ".....MMMMMM.....",
+      "...MMMMMMMMMM...",
+      "..MMMHHHHHHMMM..",
+      "..MMHHHHHHHHMM..",
+      ".MMHHEHHHHEHHMM.",
+      ".MMHHHHHHHHHHMM.",
+      ".MMMHHHHHHHHMMM.",
+      "..MMMMMMMMMMMM..",
+      "...MMMMMMMMMM...",
+      "................",
+    ],
+    palette: { M: "#4a3a2a", H: "#0d0907", E: "#e23a2a" },
+  },
 };
 
 const GOLD_PILE_ART: PixelArt = {
@@ -134,6 +155,50 @@ const FEATHER_PILE_ART: PixelArt = {
   palette: { F: "#efe6d6", R: "#a8452a", D: "#6b2a17" },
 };
 
+const NEST_ART: PixelArt = {
+  pixels: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "....SSSSSSSS....",
+    "...SsSSsSSsSS...",
+    "..SSs......sSS..",
+    "..SSSsSSSSsSSS..",
+    "...SSSSSSSSSS...",
+    "................",
+  ],
+  palette: { S: "#d9b25a", s: "#9c7a33" },
+};
+
+const DEN_SITE_ART: PixelArt = {
+  pixels: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....dddddd.....",
+    "...dd......dd...",
+    "...dd......dd...",
+    ".....dddddd.....",
+    "................",
+  ],
+  palette: { d: "#3a2a1c" },
+};
+
 export function buildChickenSprites(bandanaColor: string): FacingSprites {
   return buildFacingSprites({ pixels: CHICKEN_PIXELS, palette: { ...CHICKEN_PALETTE, N: bandanaColor } });
 }
@@ -148,6 +213,14 @@ export function buildGoldPileSprite(): HTMLCanvasElement {
 
 export function buildFeatherPileSprite(): HTMLCanvasElement {
   return buildSprite(FEATHER_PILE_ART);
+}
+
+export function buildNestSprite(): HTMLCanvasElement {
+  return buildSprite(NEST_ART);
+}
+
+export function buildDenSiteSprite(): HTMLCanvasElement {
+  return buildSprite(DEN_SITE_ART);
 }
 
 export function contextOf(canvas: HTMLCanvasElement): CanvasRenderingContext2D {

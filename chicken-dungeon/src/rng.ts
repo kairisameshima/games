@@ -22,6 +22,10 @@ export function nextInt(rng: Rng, min: number, maxInclusive: number): number {
   return min + Math.floor((nextUint32(rng) / UINT32_RANGE) * (maxInclusive - min + 1));
 }
 
+export function rollChance(rng: Rng, probability: number): boolean {
+  return nextUint32(rng) / UINT32_RANGE < probability;
+}
+
 export function mixSeed(seed: number, salt: number): number {
   let hash = (seed ^ Math.imul(salt, GOLDEN_RATIO_32)) >>> 0;
   hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);

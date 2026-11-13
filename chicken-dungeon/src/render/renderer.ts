@@ -1,15 +1,17 @@
-import type { MonsterKindId } from "../data/bestiary.ts";
+import { MONSTER_KINDS, type MonsterKindId } from "../data/bestiary.ts";
 import type { Floor } from "../gen/floor.ts";
 import { isWalkable, toIndex, type Point } from "../gen/grid.ts";
 import { mixSeed } from "../rng.ts";
 import { currentTile } from "../sim/movement.ts";
-import type { FloorState, GameState, Mover } from "../sim/types.ts";
+import type { FloorState, GameState, Mover, Nest } from "../sim/types.ts";
 import { isInDungeon, leadChicken } from "../sim/world.ts";
 import {
   buildChickenSprites,
+  buildDenSiteSprite,
   buildFeatherPileSprite,
   buildGoldPileSprite,
   buildMonsterSprites,
+  buildNestSprite,
   contextOf,
   SPRITE_SIZE,
   type FacingSprites,
@@ -39,7 +41,9 @@ const ROOT_CELLAR = {
   stairwell: "#0d0907",
 };
 const REMEMBERED_SHADE = "rgba(5, 3, 2, 0.6)";
-const HEALTH_BAR = { width: 12, height: 2, inset: 2, background: "#1a120c", chicken: "#7fd35a", monster: "#e2533a" };
+const HEALTH_BAR = { width: 12, height: 2, inset: 2, background: "#1a120c", chicken: "#7fd35a", monster: "#e2533a", nest: "#d9b25a" };
+// Eggs sit in a row inside the nest sprite's straw ring, one pixel apart.
+const NEST_EGG = { firstX: 5, y: 11, width: 1, height: 2, color: "#f4ecd8" };
 const BANDANA_COLORS = [
   "#e6194b",
   "#3cb44b",
@@ -63,6 +67,8 @@ export class DungeonRenderer {
   private readonly monsterSprites: Readonly<Record<MonsterKindId, FacingSprites>>;
   private readonly goldPileSprite: HTMLCanvasElement;
   private readonly featherPileSprite: HTMLCanvasElement;
+  private readonly nestSprite: HTMLCanvasElement;
+  private readonly denSiteSprite: HTMLCanvasElement;
   // Chickens and monsters have separate id spaces, so each keeps its own facing memory.
   private readonly chickenFacingLeft = new Map<number, boolean>();
   private readonly monsterFacingLeft = new Map<number, boolean>();
@@ -71,9 +77,15 @@ export class DungeonRenderer {
     canvas.width = VIEW_WIDTH;
     canvas.height = VIEW_HEIGHT;
     this.context = contextOf(canvas);
-    this.monsterSprites = { cellarRat: buildMonsterSprites("cellarRat"), cellarSpider: buildMonsterSprites("cellarSpider") };
+    this.monsterSprites = {
+      cellarRat: buildMonsterSprites("cellarRat"),
+      cellarSpider: buildMonsterSprites("cellarSpider"),
+      monsterDen: buildMonsterSprites("monsterDen"),
+    };
     this.goldPileSprite = buildGoldPileSprite();
     this.featherPileSprite = buildFeatherPileSprite();
+    this.nestSprite = buildNestSprite();
+    this.denSiteSprite = buildDenSiteSprite();
   }
 
   /** `interpolation` is how far real time has moved past the last tick, from 0 to 1. */
@@ -92,14 +104,23 @@ export class DungeonRenderer {
       y: interpolate(lead.previousY, lead.y, interpolation) * TILE_SIZE + TILE_SIZE / 2,
     });
     context.drawImage(this.tileLayerFor(floor), camera.x, camera.y, VIEW_WIDTH, VIEW_HEIGHT, 0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    const isExplored = (point: Point) => lastSeenTick[toIndex(floor.side, point)] >= 0;
+    for (const site of floorState.denSites) {
+      if (isExplored(site)) context.drawImage(this.denSiteSprite, site.x * TILE_SIZE - camera.x, site.y * TILE_SIZE - camera.y);
+    }
+    for (const nest of floorState.nests) {
+      if (isExplored(nest)) this.drawNest(nest, camera);
+    }
     for (const pile of floorState.lootPiles) {
-      if (lastSeenTick[toIndex(floor.side, pile)] < 0) continue;
+      if (!isExplored(pile)) continue;
       const sprite = pile.isFeatherPile ? this.featherPileSprite : this.goldPileSprite;
       context.drawImage(sprite, pile.x * TILE_SIZE - camera.x, pile.y * TILE_SIZE - camera.y);
     }
     for (const monster of floorState.monsters) {
-      if (lastSeenTick[toIndex(floor.side, currentTile(monster))] !== state.tick) continue;
-      this.drawCombatant(monster, this.monsterSprites[monster.kind], this.monsterFacingLeft, HEALTH_BAR.monster, camera, interpolation);
+      // Dens never move, so a den once seen stays on the map. Mobile monsters show only while in sight.
+      const isDen = MONSTER_KINDS[monster.kind].spawner !== null;
+      const shown = isDen ? isExplored(monster) : lastSeenTick[toIndex(floor.side, currentTile(monster))] === state.tick;
+      if (shown) this.drawCombatant(monster, this.monsterSprites[monster.kind], this.monsterFacingLeft, HEALTH_BAR.monster, camera, interpolation);
     }
     for (const chicken of state.chickens) {
       if (!isInDungeon(chicken) || chicken.depth !== lead.depth) continue;
@@ -122,13 +143,26 @@ export class DungeonRenderer {
     const screenX = Math.round(interpolate(unit.previousX, unit.x, interpolation) * TILE_SIZE - camera.x);
     const screenY = Math.round(interpolate(unit.previousY, unit.y, interpolation) * TILE_SIZE - camera.y);
     this.context.drawImage(facingLeftById.get(unit.id) ? sprites.left : sprites.right, screenX, screenY);
-    if (unit.hp >= unit.maxHp) return;
+    this.drawHealthBar(screenX, screenY, unit.hp, unit.maxHp, healthColor);
+  }
+
+  private drawNest(nest: Nest, camera: Point): void {
+    const screenX = nest.x * TILE_SIZE - camera.x;
+    const screenY = nest.y * TILE_SIZE - camera.y;
+    this.context.drawImage(this.nestSprite, screenX, screenY);
+    this.context.fillStyle = NEST_EGG.color;
+    nest.eggs.forEach((_, index) => this.context.fillRect(screenX + NEST_EGG.firstX + index, screenY + NEST_EGG.y, NEST_EGG.width, NEST_EGG.height));
+    this.drawHealthBar(screenX, screenY, nest.hp, nest.maxHp, HEALTH_BAR.nest);
+  }
+
+  private drawHealthBar(screenX: number, screenY: number, hp: number, maxHp: number, color: string): void {
+    if (hp >= maxHp) return;
     const barX = screenX + HEALTH_BAR.inset;
     const barY = screenY + SPRITE_SIZE;
     this.context.fillStyle = HEALTH_BAR.background;
     this.context.fillRect(barX, barY, HEALTH_BAR.width, HEALTH_BAR.height);
-    this.context.fillStyle = healthColor;
-    this.context.fillRect(barX, barY, Math.max(1, Math.round((HEALTH_BAR.width * unit.hp) / unit.maxHp)), HEALTH_BAR.height);
+    this.context.fillStyle = color;
+    this.context.fillRect(barX, barY, Math.max(1, Math.round((HEALTH_BAR.width * hp) / maxHp)), HEALTH_BAR.height);
   }
 
   private drawFog(floorState: FloorState, currentTick: number, camera: Point): void {

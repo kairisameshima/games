@@ -18,13 +18,16 @@ export const UNSEEN = -1;
 const SPACING_WEIGHT = 6;
 const SPACING_CAP = 6;
 
-export function createFloorState(floor: Floor): FloorState {
+export function createFloorState(floor: Floor, wandererCooldownTicks: number): FloorState {
   return {
     floor,
     lastSeenTick: new Int32Array(floor.side * floor.side).fill(UNSEEN),
     monsters: [],
     lootPiles: [],
     killedThisExpedition: [],
+    nests: [],
+    denSites: [],
+    wandererCooldownTicks,
   };
 }
 

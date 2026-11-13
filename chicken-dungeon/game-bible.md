@@ -673,6 +673,14 @@ Each row is a design call made without the owner's input. The right column is th
 | OQ42 | Teardown takes 5 s. Eggs fill brooding hens' free slots, overflow becomes Yolk Mana, packed eggs break if the carrier dies | Overflow eggs are left behind, or packed eggs drop in the Feather Pile |
 | OQ43 | A torn-down nest leaves a reusable Den Site. A nest destroyed by raiders reverts to an active Monster Den | Every site reverts to an active Den on Recall |
 | OQ44 | Every floor has at least one Monster Den | Dens stay at 8% per room with no minimum |
+| OQ45 | A Monster Den has 20 base HP and 2 DEF, and keeps at most 3 of its spawn alive | Unlimited spawns, or dens with no HP that fall to any attack |
+| OQ46 | Wanderers appear on every visited floor every 45 s while it holds fewer monsters than rooms, out of sight and at least 8 tiles from any chicken | The cap counts only wanderers, or only floors with chickens get wanderers |
+| OQ47 | Den spawns roll for raids the same as wanderers | Only wanderers raid |
+| OQ48 | Monsters and dens act only on floors that have chickens, so an unattended nest on an empty floor is never raided | Nests are raided on empty floors too |
+| OQ49 | Lowering the Brood Quota sends surplus hens exploring and leaves their nests standing | Surplus hens tear their nests down |
+| OQ50 | A hen converting a Den Site abandons the build when a monster comes into view | She finishes the build first |
+| OQ51 | A mutation's +10% lifts HP, ATK, DEF, and speed, not Courage, vision, or carry | It lifts every stat |
+| OQ52 | Yolk Mana is capped at 50 and has no use until spells exist | Cracked eggs are simply lost until spells exist |
 
 ### Resolved by owner
 

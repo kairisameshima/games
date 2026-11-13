@@ -26,8 +26,13 @@ function runUntil(state: GameState, limit: number, isDone: () => boolean): GameE
   return events;
 }
 
+/** Empties floors of monsters and dens and stops wanderers, so a test sees only the monsters it places. */
 function clearMonsters(state: GameState, depths: readonly number[]): void {
-  for (const depth of depths) floorStateAt(state, depth).monsters = [];
+  for (const depth of depths) {
+    const floorState = floorStateAt(state, depth);
+    floorState.monsters = [];
+    floorState.wandererCooldownTicks = Number.MAX_SAFE_INTEGER;
+  }
 }
 
 /** Lets a chicken explore a monster-free floor 1 until it is well away from the stairs, so fleeing takes real walking. */
@@ -179,7 +184,7 @@ test("a dead chicken's pouch drops as a Feather Pile that a flockmate carries ho
   floorState.monsters.push(rat);
 
   const deathEvents = tick(state, []);
-  assert.deepEqual(deathEvents, [{ type: "chickenDied", chickenId: victim.id, depth: 1, killer: "cellarRat" }]);
+  assert.deepEqual(deathEvents, [{ type: "chickenDied", chickenId: victim.id, depth: 1, killer: "cellarRat", eggsLost: 0 }]);
   assert.equal(victim.activity, "dead");
   const featherPile = floorState.lootPiles.find((pile) => pile.isFeatherPile);
   assert.deepEqual(featherPile && { x: featherPile.x, y: featherPile.y, gold: featherPile.gold }, { ...deathTile, gold: 50 });

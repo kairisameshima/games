@@ -36,6 +36,21 @@ body {
   border-top: 2px solid #3a2a1c;
 }
 
+.brood-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brood-control button {
+  padding: 2px 10px;
+}
+
+#brood-quota {
+  min-width: 1.5em;
+  text-align: center;
+}
+
 .play-area {
   display: flex;
   min-height: 0;

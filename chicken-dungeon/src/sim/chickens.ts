@@ -1,7 +1,9 @@
+import { MONSTER_KINDS } from "../data/bestiary.ts";
 import { findPath, isWalkable, pathTo, toIndex, type Point } from "../gen/grid.ts";
 import { ATTACK_RANGE, peck } from "./combat.ts";
 import { chooseFrontier, isExplored, isFrontier, isVisibleNow, pathThroughExplored, searchExplored } from "./explore.ts";
 import { currentTile, distanceBetween, isOnTileCenter, moveAlongPath, pathEndsAt } from "./movement.ts";
+import { buildNest, isInNestRoom, layEggInNest } from "./nests.ts";
 import { recordBanking } from "./offline.ts";
 import { TICK_SECONDS, TICKS_PER_SECOND } from "./time.ts";
 import type { Chicken, FloorState, GameEvent, GameState, Monster } from "./types.ts";
@@ -20,12 +22,14 @@ export function updateChicken(state: GameState, chicken: Chicken, events: GameEv
   chicken.previousX = chicken.x;
   chicken.previousY = chicken.y;
   if (chicken.attackCooldownTicks > 0) chicken.attackCooldownTicks -= 1;
-  // Recalled chickens still flee below Courage. Recall does not override self-preservation.
+  // Recall does not override self-preservation, and a fleeing hen abandons her nest or build.
   if (chicken.activity !== "flee" && chicken.hp < chicken.courage * chicken.maxHp) {
     chicken.activity = "flee";
     chicken.exploreTarget = null;
     chicken.lootTargetId = null;
     chicken.fightTargetId = null;
+    chicken.nestId = null;
+    chicken.buildSite = null;
   }
 
   const floorState = floorStateAt(state, chicken.depth);
@@ -35,7 +39,17 @@ export function updateChicken(state: GameState, chicken: Chicken, events: GameEv
       adventure(state, floorState, chicken, events);
       break;
     case "fight":
-      fight(state, floorState, chicken);
+      fight(state, floorState, chicken, events);
+      break;
+    case "build":
+      build(state, floorState, chicken, events);
+      break;
+    case "brood":
+      brood(state, floorState, chicken, events);
+      break;
+    case "teardown":
+      // Packing in place. The nest's countdown hands this hen her eggs and sends her home.
+      if (!isOnTileCenter(chicken)) moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
       break;
     case "flee":
     case "recalled":
@@ -55,7 +69,7 @@ function adventure(state: GameState, floorState: FloorState, chicken: Chicken, e
     chicken.fightTargetId = threat.id;
     chicken.exploreTarget = null;
     chicken.lootTargetId = null;
-    fight(state, floorState, chicken);
+    fight(state, floorState, chicken, events);
     return;
   }
   if (isOnTileCenter(chicken)) {
@@ -123,7 +137,7 @@ function claimedFrontiers(state: GameState, chicken: Chicken): Point[] {
   return claims;
 }
 
-/** The nearest visible monster within aggro radius, or the target of an ally fighting nearby. */
+/** The nearest visible monster or den within aggro radius, or the target of an ally fighting nearby. */
 function findThreat(state: GameState, floorState: FloorState, chicken: Chicken): Monster | null {
   let nearest: Monster | null = null;
   let nearestDistance = Infinity;
@@ -144,7 +158,7 @@ function findThreat(state: GameState, floorState: FloorState, chicken: Chicken):
   return null;
 }
 
-function fight(state: GameState, floorState: FloorState, chicken: Chicken): void {
+function fight(state: GameState, floorState: FloorState, chicken: Chicken, events: GameEvent[]): void {
   const target = floorState.monsters.find((monster) => monster.id === chicken.fightTargetId) ?? findThreat(state, floorState, chicken);
   if (!target) {
     chicken.activity = "explore";
@@ -153,8 +167,13 @@ function fight(state: GameState, floorState: FloorState, chicken: Chicken): void
     return;
   }
   chicken.fightTargetId = target.id;
+  engage(state, floorState, chicken, target, events);
+}
+
+/** Pecks a target in range, otherwise closes in. */
+function engage(state: GameState, floorState: FloorState, chicken: Chicken, target: Monster, events: GameEvent[]): void {
   if (distanceBetween(chicken, target) <= ATTACK_RANGE) {
-    if (chicken.attackCooldownTicks === 0) peck(floorState, chicken, target);
+    if (chicken.attackCooldownTicks === 0) peck(state, floorState, chicken, target, events);
     return;
   }
   // Two units of equal speed that both chase each other's last tile mirror each other forever.
@@ -167,6 +186,64 @@ function fight(state: GameState, floorState: FloorState, chicken: Chicken): void
   moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
 }
 
+/** Walks to the claimed Den Site and spends 20 s converting it. A threat on the way ends the build. */
+function build(state: GameState, floorState: FloorState, chicken: Chicken, events: GameEvent[]): void {
+  const site = chicken.buildSite;
+  const siteOpen = site !== null && floorState.denSites.some((candidate) => candidate.x === site.x && candidate.y === site.y);
+  const threat = siteOpen ? findThreat(state, floorState, chicken) : null;
+  if (!site || !siteOpen || threat) {
+    chicken.activity = "explore";
+    chicken.buildSite = null;
+    moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
+    return;
+  }
+  if (chicken.x === site.x && chicken.y === site.y) {
+    chicken.taskTicksLeft -= 1;
+    if (chicken.taskTicksLeft <= 0 && !buildNest(state, floorState, chicken, site, events)) {
+      chicken.activity = "explore";
+      chicken.buildSite = null;
+    }
+    return;
+  }
+  if (isOnTileCenter(chicken) && !pathEndsAt(chicken, site)) chicken.path = pathThroughExplored(floorState, currentTile(chicken), site);
+  moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
+}
+
+/** Sits on the nest and lays on a timer. Fights only monsters inside the nest's room. */
+function brood(state: GameState, floorState: FloorState, chicken: Chicken, events: GameEvent[]): void {
+  const nest = floorState.nests.find((candidate) => candidate.id === chicken.nestId);
+  if (!nest) {
+    chicken.activity = "explore";
+    chicken.nestId = null;
+    moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
+    return;
+  }
+  let intruder: Monster | null = null;
+  let intruderDistance = Infinity;
+  for (const monster of floorState.monsters) {
+    if (MONSTER_KINDS[monster.kind].spawner || !isInNestRoom(floorState.floor, nest, currentTile(monster))) continue;
+    const distance = distanceBetween(chicken, monster);
+    if (distance < intruderDistance) {
+      intruder = monster;
+      intruderDistance = distance;
+    }
+  }
+  if (intruder) {
+    engage(state, floorState, chicken, intruder, events);
+    return;
+  }
+  if (chicken.x === nest.x && chicken.y === nest.y) {
+    chicken.layTicksLeft -= 1;
+    if (chicken.layTicksLeft <= 0) {
+      layEggInNest(state, nest, floorState.floor.depth);
+      chicken.layTicksLeft = Math.round(chicken.layIntervalSeconds * TICKS_PER_SECOND);
+    }
+    return;
+  }
+  if (isOnTileCenter(chicken) && !pathEndsAt(chicken, nest)) chicken.path = pathThroughExplored(floorState, currentTile(chicken), nest);
+  moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
+}
+
 /** Fleeing chickens never fight. Recalled chickens stand and fight only what is biting them. */
 function headForExit(state: GameState, floorState: FloorState, chicken: Chicken, events: GameEvent[]): void {
   if (chicken.activity === "recalled") {
@@ -174,7 +251,7 @@ function headForExit(state: GameState, floorState: FloorState, chicken: Chicken,
       (monster) => monster.targetChickenId === chicken.id && distanceBetween(monster, chicken) <= ATTACK_RANGE,
     );
     if (attacker) {
-      if (chicken.attackCooldownTicks === 0) peck(floorState, chicken, attacker);
+      if (chicken.attackCooldownTicks === 0) peck(state, floorState, chicken, attacker, events);
       return;
     }
   }
@@ -189,6 +266,7 @@ function headForExit(state: GameState, floorState: FloorState, chicken: Chicken,
   moveAlongPath(chicken, movementSpeed(state, chicken) * TICK_SECONDS);
 }
 
+/** Reaching the coop banks the pouch and hands any packed eggs to the coop incubator. */
 function climbOut(state: GameState, chicken: Chicken, events: GameEvent[]): void {
   if (chicken.depth !== ENTRANCE_DEPTH) {
     const aboveDepth = chicken.depth - 1;
@@ -196,7 +274,9 @@ function climbOut(state: GameState, chicken: Chicken, events: GameEvent[]): void
     return;
   }
   recordBanking(state, chicken.pouchGold);
-  events.push({ type: "returnedHome", chickenId: chicken.id, goldBanked: chicken.pouchGold });
+  events.push({ type: "returnedHome", chickenId: chicken.id, goldBanked: chicken.pouchGold, eggsCarried: chicken.carriedEggs.length });
+  state.coopEggs.push(...chicken.carriedEggs);
+  chicken.carriedEggs = [];
   chicken.pouchGold = 0;
   chicken.activity = "home";
   chicken.depth = COOP_DEPTH;

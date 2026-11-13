@@ -12,6 +12,7 @@
       <span id="flock-status"></span>
       <span id="depth-status"></span>
       <span id="gold-status"></span>
+      <span id="egg-status"></span>
     </header>
     <div class="play-area">
       <main class="stage">
@@ -25,6 +26,12 @@
     <footer class="action-bar">
       <button id="send-button" type="button">SEND</button>
       <button id="recall-button" type="button">HOLD TO RECALL</button>
+      <span class="brood-control">
+        BROOD
+        <button id="brood-down-button" type="button" aria-label="Fewer brooding hens">−</button>
+        <span id="brood-quota">0</span>
+        <button id="brood-up-button" type="button" aria-label="More brooding hens">+</button>
+      </span>
       <button id="speed-button" type="button">SPEED 1x</button>
       <button id="new-run-button" type="button" hidden>NEW RUN</button>
     </footer>

@@ -59,6 +59,18 @@ test("population keeps the entrance room free of monsters and the stairs clear",
   }
 });
 
+test("every floor has at least one Monster Den, never in the entrance room", () => {
+  for (const seed of SEEDS) {
+    for (const depth of DEPTHS) {
+      const floor = generateFloor(seed, depth);
+      const dens = populateFloor(seed, floor).monsters.filter((monster) => monster.kind === "monsterDen");
+      assert.ok(dens.length >= 1, `seed ${seed} B${depth}: no den`);
+      const entranceRoom = roomOf(floor.rooms, floor.stairsUp);
+      for (const den of dens) assert.notEqual(roomOf(floor.rooms, den), entranceRoom);
+    }
+  }
+});
+
 test("each room holds at most 1 + floor(d / 6) + 1 monster spawns and at most 2 gold piles worth gold_pile(d)", () => {
   for (const seed of SEEDS) {
     for (const depth of DEPTHS) {
@@ -66,7 +78,7 @@ test("each room holds at most 1 + floor(d / 6) + 1 monster spawns and at most 2 
       const { monsters, goldPiles } = populateFloor(seed, floor);
       for (const room of floor.rooms) {
         const packsInRoom = monsters
-          .filter((monster) => roomOf(floor.rooms, monster) === room)
+          .filter((monster) => monster.kind !== "monsterDen" && roomOf(floor.rooms, monster) === room)
           .reduce((packs, monster) => packs + 1 / MONSTER_KINDS[monster.kind].packSize, 0);
         assert.ok(Math.round(packsInRoom) <= 2 + Math.floor(depth / 6), `seed ${seed} B${depth}: ${packsInRoom} spawns in one room`);
         assert.ok(goldPiles.filter((pile) => roomOf(floor.rooms, pile) === room).length <= 2);

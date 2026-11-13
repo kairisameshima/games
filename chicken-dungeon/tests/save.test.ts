@@ -6,7 +6,7 @@ import { tick } from "../src/sim/game.ts";
 import { offlineGold } from "../src/sim/offline.ts";
 import { TICKS_PER_SECOND } from "../src/sim/time.ts";
 import type { Command, GameState } from "../src/sim/types.ts";
-import { createGame } from "../src/sim/world.ts";
+import { createGame, floorStateAt } from "../src/sim/world.ts";
 
 const SEED = 1234;
 const MINUTE = 60 * TICKS_PER_SECOND;
@@ -18,11 +18,14 @@ function play(state: GameState, ticks: number, commandsAt: ReadonlyMap<number, C
   }
 }
 
+/** Three hens with upgrades and a Den Site by the entrance, so the save holds a nest, eggs, and runtime rolls. */
 function playedGame(): GameState {
   const state = createGame(SEED, 3);
   state.bankedGold = 500;
   for (const upgrade of ["sharperBeaks", "thickerFeathers", "lanternOil", "braveHeart"] as const) tick(state, [{ type: "buyUpgrade", upgrade }]);
-  tick(state, [{ type: "send" }]);
+  const entrance = floorStateAt(state, 1).floor.stairsUp;
+  floorStateAt(state, 1).denSites.push({ x: entrance.x, y: entrance.y });
+  tick(state, [{ type: "setBroodQuota", quota: 1 }, { type: "send" }]);
   play(state, 3000, new Map());
   return state;
 }
@@ -39,12 +42,17 @@ test("a saved run, once loaded, plays on exactly like the run that was never sav
   assert.deepEqual(loaded.bankLog, original.bankLog);
   assert.deepEqual(loaded.upgradeLevels, original.upgradeLevels);
   assert.deepEqual([...loaded.floors.keys()], [...original.floors.keys()]);
+  assert.deepEqual(loaded.coopEggs, original.coopEggs);
+  assert.equal(loaded.yolkMana, original.yolkMana);
+  assert.deepEqual(loaded.rng, original.rng);
   for (const [depth, floorState] of original.floors) {
     const loadedFloor = loaded.floors.get(depth);
     assert.ok(loadedFloor);
     assert.deepEqual(loadedFloor.monsters, floorState.monsters);
     assert.deepEqual(loadedFloor.lootPiles, floorState.lootPiles);
     assert.equal(exploredTileCount(loadedFloor), exploredTileCount(floorState));
+    assert.deepEqual(loadedFloor.nests, floorState.nests);
+    assert.deepEqual(loadedFloor.denSites, floorState.denSites);
   }
 });
 

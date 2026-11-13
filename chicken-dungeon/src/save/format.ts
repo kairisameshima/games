@@ -1,13 +1,15 @@
 import { MONSTER_KINDS, type MonsterKindId } from "../data/bestiary.ts";
+import { NEST_TIERS, WANDERER_INTERVAL_SECONDS } from "../data/nests.ts";
 import { noUpgrades, UPGRADE_IDS, type UpgradeLevels } from "../data/upgrades.ts";
 import { generateFloor } from "../gen/floor.ts";
 import type { Point } from "../gen/grid.ts";
 import type { MonsterSpawn } from "../gen/population.ts";
 import { createFloorState, UNSEEN } from "../sim/explore.ts";
-import type { BankRecord, Chicken, ChickenActivity, FloorState, GameState, LootPile, Monster } from "../sim/types.ts";
+import { TICKS_PER_SECOND } from "../sim/time.ts";
+import type { BankRecord, Chicken, ChickenActivity, Egg, FloorState, GameState, LootPile, Monster, Nest } from "../sim/types.ts";
 
-// Version 1 saves predate upgrades. They are set aside on load instead of migrated.
-export const SAVE_VERSION = 2;
+// Older saves predate the fields this version adds. They are set aside on load instead of migrated.
+export const SAVE_VERSION = 3;
 
 export class SaveFormatError extends Error {
   constructor(message: string) {
@@ -26,7 +28,18 @@ type JsonObject = Record<string, unknown>;
 
 // Restored explored tiles get this tick. Any value below the save tick reads as "remembered, not visible now".
 const REMEMBERED_TICK = 0;
-const CHICKEN_ACTIVITIES: readonly ChickenActivity[] = ["home", "explore", "descend", "fight", "flee", "recalled", "dead"];
+const CHICKEN_ACTIVITIES: readonly ChickenActivity[] = [
+  "home",
+  "explore",
+  "descend",
+  "fight",
+  "flee",
+  "recalled",
+  "build",
+  "brood",
+  "teardown",
+  "dead",
+];
 
 /**
  * Floor layouts are rebuilt from the seed. Per floor, the save keeps two bitsets: explored tiles and tiles visible
@@ -39,11 +52,15 @@ export function serializeGame(state: GameState, savedAt: number): string {
     game: {
       seed: state.seed,
       tick: state.tick,
+      rngState: state.rng.state,
       nextEntityId: state.nextEntityId,
       deepestDepth: state.deepestDepth,
       bankedGold: state.bankedGold,
       bankLog: state.bankLog,
       upgradeLevels: state.upgradeLevels,
+      broodQuota: state.broodQuota,
+      coopEggs: state.coopEggs,
+      yolkMana: state.yolkMana,
       chickens: state.chickens,
       floors: [...state.floors.values()].map((floorState) => ({
         depth: floorState.floor.depth,
@@ -52,6 +69,9 @@ export function serializeGame(state: GameState, savedAt: number): string {
         monsters: floorState.monsters,
         lootPiles: floorState.lootPiles,
         killedThisExpedition: floorState.killedThisExpedition,
+        nests: floorState.nests,
+        denSites: floorState.denSites,
+        wandererCooldownTicks: floorState.wandererCooldownTicks,
       })),
     },
   });
@@ -62,7 +82,7 @@ export function parseSave(text: string): LoadedGame {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new SaveFormatError(`Save is not valid JSON: ${(error as Error).message}`);
+    throw new SaveFormatError(`Save is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
   const file = readObject(parsed, "save");
   const version = readNumber(file, "version", "save");
@@ -80,11 +100,15 @@ export function parseSave(text: string): LoadedGame {
     state: {
       seed,
       tick,
+      rng: { state: readNumber(game, "rngState", "game") },
       nextEntityId: readNumber(game, "nextEntityId", "game"),
       deepestDepth: readNumber(game, "deepestDepth", "game"),
       bankedGold: readNumber(game, "bankedGold", "game"),
       bankLog: readArray(game, "bankLog", "game").map((value, index) => readBankRecord(value, `game.bankLog[${index}]`)),
       upgradeLevels: readUpgradeLevels(game.upgradeLevels, "game.upgradeLevels"),
+      broodQuota: readNumber(game, "broodQuota", "game"),
+      coopEggs: readArray(game, "coopEggs", "game").map((value, index) => readEgg(value, `game.coopEggs[${index}]`)),
+      yolkMana: readNumber(game, "yolkMana", "game"),
       chickens: readArray(game, "chickens", "game").map((value, index) => readChicken(value, `game.chickens[${index}]`)),
       floors,
     },
@@ -95,7 +119,7 @@ function readFloor(value: unknown, seed: number, tick: number, where: string): F
   const saved = readObject(value, where);
   const depth = readNumber(saved, "depth", where);
   if (!Number.isInteger(depth) || depth < 1) throw new SaveFormatError(`${where}.depth must be a floor number, got ${depth}`);
-  const floorState = createFloorState(generateFloor(seed, depth));
+  const floorState = createFloorState(generateFloor(seed, depth), WANDERER_INTERVAL_SECONDS * TICKS_PER_SECOND);
   const tileCount = floorState.lastSeenTick.length;
   const explored = decodeBits(readString(saved, "explored", where), tileCount, `${where}.explored`);
   const visible = decodeBits(readString(saved, "visible", where), tileCount, `${where}.visible`);
@@ -108,6 +132,9 @@ function readFloor(value: unknown, seed: number, tick: number, where: string): F
   floorState.killedThisExpedition = readArray(saved, "killedThisExpedition", where).map((item, index) =>
     readMonsterSpawn(item, `${where}.killedThisExpedition[${index}]`),
   );
+  floorState.nests = readArray(saved, "nests", where).map((item, index) => readNest(item, `${where}.nests[${index}]`));
+  floorState.denSites = readArray(saved, "denSites", where).map((item, index) => readPoint(item, `${where}.denSites[${index}]`));
+  floorState.wandererCooldownTicks = readNumber(saved, "wandererCooldownTicks", where);
   return floorState;
 }
 
@@ -128,13 +155,21 @@ function readChicken(value: unknown, where: string): Chicken {
     speed: readNumber(saved, "speed", where),
     courage: readNumber(saved, "courage", where),
     vision: readNumber(saved, "vision", where),
+    carry: readNumber(saved, "carry", where),
+    layIntervalSeconds: readNumber(saved, "layIntervalSeconds", where),
+    statBonus: readNumber(saved, "statBonus", where),
     attackCooldownTicks: readNumber(saved, "attackCooldownTicks", where),
     slowedUntilTick: readNumber(saved, "slowedUntilTick", where),
     slowMultiplier: readNumber(saved, "slowMultiplier", where),
     pouchGold: readNumber(saved, "pouchGold", where),
+    carriedEggs: readArray(saved, "carriedEggs", where).map((item, index) => readEgg(item, `${where}.carriedEggs[${index}]`)),
     exploreTarget: saved.exploreTarget === null ? null : readPoint(saved.exploreTarget, `${where}.exploreTarget`),
     lootTargetId: readNullableNumber(saved, "lootTargetId", where),
     fightTargetId: readNullableNumber(saved, "fightTargetId", where),
+    nestId: readNullableNumber(saved, "nestId", where),
+    buildSite: saved.buildSite === null ? null : readPoint(saved.buildSite, `${where}.buildSite`),
+    taskTicksLeft: readNumber(saved, "taskTicksLeft", where),
+    layTicksLeft: readNumber(saved, "layTicksLeft", where),
   };
 }
 
@@ -164,6 +199,34 @@ function readMonster(value: unknown, where: string): Monster {
     targetChickenId: readNullableNumber(saved, "targetChickenId", where),
     agitated: readBoolean(saved, "agitated", where),
     home: readPoint(saved.home, `${where}.home`),
+    denId: readNullableNumber(saved, "denId", where),
+    raidNestId: readNullableNumber(saved, "raidNestId", where),
+    spawnCooldownTicks: readNumber(saved, "spawnCooldownTicks", where),
+  };
+}
+
+function readNest(value: unknown, where: string): Nest {
+  const saved = readObject(value, where);
+  const tier = readNumber(saved, "tier", where);
+  if (!Number.isInteger(tier) || tier < 0 || tier >= NEST_TIERS.length) throw new SaveFormatError(`${where}.tier ${tier} is not a nest tier`);
+  return {
+    id: readNumber(saved, "id", where),
+    x: readNumber(saved, "x", where),
+    y: readNumber(saved, "y", where),
+    hp: readNumber(saved, "hp", where),
+    maxHp: readNumber(saved, "maxHp", where),
+    tier,
+    eggs: readArray(saved, "eggs", where).map((item, index) => readEgg(item, `${where}.eggs[${index}]`)),
+    teardownTicksLeft: readNullableNumber(saved, "teardownTicksLeft", where),
+  };
+}
+
+function readEgg(value: unknown, where: string): Egg {
+  const saved = readObject(value, where);
+  return {
+    id: readNumber(saved, "id", where),
+    laidAtDepth: readNumber(saved, "laidAtDepth", where),
+    incubationTicksLeft: readNumber(saved, "incubationTicksLeft", where),
   };
 }
 
