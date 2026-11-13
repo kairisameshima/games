@@ -4,7 +4,7 @@ import { ATTACK_RANGE, peck } from "./combat.ts";
 import { chooseFrontier, isExplored, isFrontier, isVisibleNow, pathThroughExplored, searchExplored } from "./explore.ts";
 import { currentTile, distanceBetween, isOnTileCenter, moveAlongPath, pathEndsAt } from "./movement.ts";
 import { buildNest, isInNestRoom, layEggInNest } from "./nests.ts";
-import { recordBanking } from "./offline.ts";
+import { bankPouch } from "./offline.ts";
 import { TICK_SECONDS, TICKS_PER_SECOND } from "./time.ts";
 import type { Chicken, FloorState, GameEvent, GameState, Monster } from "./types.ts";
 import { COOP_DEPTH, ENTRANCE_DEPTH, floorStateAt, placeChicken } from "./world.ts";
@@ -273,8 +273,8 @@ function climbOut(state: GameState, chicken: Chicken, events: GameEvent[]): void
     placeChicken(state, chicken, aboveDepth, floorStateAt(state, aboveDepth).floor.stairsDown, chicken.activity);
     return;
   }
-  recordBanking(state, chicken.pouchGold);
-  events.push({ type: "returnedHome", chickenId: chicken.id, goldBanked: chicken.pouchGold, eggsCarried: chicken.carriedEggs.length });
+  const goldBanked = bankPouch(state, chicken.pouchGold);
+  events.push({ type: "returnedHome", chickenId: chicken.id, goldBanked, eggsCarried: chicken.carriedEggs.length });
   state.coopEggs.push(...chicken.carriedEggs);
   chicken.carriedEggs = [];
   chicken.pouchGold = 0;

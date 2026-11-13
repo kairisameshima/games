@@ -681,6 +681,12 @@ Each row is a design call made without the owner's input. The right column is th
 | OQ50 | A hen converting a Den Site abandons the build when a monster comes into view | She finishes the build first |
 | OQ51 | A mutation's +10% lifts HP, ATK, DEF, and speed, not Courage, vision, or carry | It lifts every stat |
 | OQ52 | Yolk Mana is capped at 50 and has no use until spells exist | Cracked eggs are simply lost until spells exist |
+| OQ53 | Inheritance rank 1 starts a run with 100 gold, and each further rank multiplies it by 4 | Rank 1 already starts with 400, reading `100 × 4^rank` literally |
+| OQ54 | Bloodline multiplies gold at the moment a pouch is banked. Offline gold builds on that already-boosted rate | The bonus applies to each pile as it is picked up |
+| OQ55 | Dinner Bell rules: minutes since the last Send, total gold in pouches, and flock HP percent. The first rule met recalls the flock | One rule at a time, or rules that also send the flock back out |
+| OQ56 | Each run's seed is derived from the previous run's seed | A fresh random seed every run |
+| OQ57 | The run freezes on the Rite screen, and Golden Yolks can still be spent there | Spending waits until the next run starts |
+| OQ58 | Offline gold counts toward the gold total in the Golden Yolk formula | Only gold carried home counts |
 
 ### Resolved by owner
 

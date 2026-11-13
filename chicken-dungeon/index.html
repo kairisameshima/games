@@ -21,6 +21,16 @@
       <aside class="coop-panel">
         <h2>UPGRADES</h2>
         <ol id="upgrade-list" class="upgrade-list"></ol>
+        <h2>ANCESTRAL COOP</h2>
+        <p id="yolk-status" class="yolk-status"></p>
+        <ol id="ancestral-list" class="upgrade-list"></ol>
+        <div id="dinner-bell-rules" class="dinner-bell-rules" hidden>
+          <p>Dinner Bell recalls the flock when:</p>
+          <label>every <input id="auto-recall-minutes" type="number" min="1" step="1" placeholder="off" /> min</label>
+          <label>pouches hold <input id="auto-recall-gold" type="number" min="1" step="1" placeholder="off" /> gold</label>
+          <label>flock HP is under <input id="auto-recall-hp" type="number" min="1" max="99" step="1" placeholder="off" /> %</label>
+        </div>
+        <button id="rite-button" type="button" class="rite-button">PERFORM THE RITE</button>
       </aside>
     </div>
     <footer class="action-bar">
@@ -33,9 +43,17 @@
         <button id="brood-up-button" type="button" aria-label="More brooding hens">+</button>
       </span>
       <button id="speed-button" type="button">SPEED 1x</button>
-      <button id="new-run-button" type="button" hidden>NEW RUN</button>
     </footer>
     <ol id="event-log" class="event-log"></ol>
+    <section id="rite-overlay" class="rite-overlay" hidden>
+      <div class="rite-card">
+        <h2>THE RITE OF THE GOLDEN YOLK</h2>
+        <p id="rite-summary"></p>
+        <h3>ROLL OF FEATHERS</h3>
+        <ol id="roll-of-feathers" class="roll-of-feathers"></ol>
+        <button id="begin-run-button" type="button">BEGIN RUN 2</button>
+      </div>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

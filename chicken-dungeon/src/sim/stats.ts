@@ -18,12 +18,12 @@ const BROOD_SLOTS_PER_LEVEL = 1;
 
 /**
  * A chicken's stats are its breed's base stats with every global upgrade applied.
- * `statBonus` is the mutation bonus, which lifts HP, ATK, DEF, and speed.
+ * `statBonus` is the mutation bonus, which lifts HP, ATK, DEF, and speed. `bloodline` is the prestige multiplier on HP and ATK.
  */
-export function chickenStats(breed: BreedStats, levels: UpgradeLevels, statBonus: number): BreedStats {
+export function chickenStats(breed: BreedStats, levels: UpgradeLevels, statBonus: number, bloodline: number): BreedStats {
   return {
-    maxHp: breed.maxHp * HP_GROWTH_PER_LEVEL ** levels.thickerFeathers * statBonus,
-    attack: breed.attack * ATTACK_GROWTH_PER_LEVEL ** levels.sharperBeaks * statBonus,
+    maxHp: breed.maxHp * HP_GROWTH_PER_LEVEL ** levels.thickerFeathers * statBonus * bloodline,
+    attack: breed.attack * ATTACK_GROWTH_PER_LEVEL ** levels.sharperBeaks * statBonus * bloodline,
     defense: (breed.defense + DEFENSE_PER_LEVEL * levels.hardenedComb) * statBonus,
     speed: breed.speed * (1 + SPEED_BONUS_PER_LEVEL * levels.quickFeet) * statBonus,
     courage: Math.max(COURAGE_FLOOR, breed.courage - COURAGE_DROP_PER_LEVEL * levels.braveHeart),

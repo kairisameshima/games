@@ -1,3 +1,4 @@
+import type { AncestralNodeId, AncestralRanks } from "../data/ancestry.ts";
 import type { MonsterKindId } from "../data/bestiary.ts";
 import type { UpgradeId, UpgradeLevels } from "../data/upgrades.ts";
 import type { Floor } from "../gen/floor.ts";
@@ -145,6 +146,47 @@ export interface GameState {
   /** Eggs carried home, incubating at the coop. */
   coopEggs: Egg[];
   yolkMana: number;
+  /** All gold banked this run, offline gold included. Feeds the Golden Yolk formula. */
+  totalGoldBanked: number;
+  /** The tick of the last Send, for the Dinner Bell's timer rule. */
+  lastSendTick: number;
+  /** Everything that survives prestige. */
+  legacy: Legacy;
+  /** Set when the run has ended and the Rite screen is waiting. The sim stops until the next run begins. */
+  rite: RiteSummary | null;
+}
+
+export interface FallenChicken {
+  run: number;
+  name: string;
+  depth: number;
+  killer: MonsterKindId;
+}
+
+/** Dinner Bell rules. Null turns a rule off. The first rule met recalls the flock. */
+export interface AutoRecallRules {
+  everyMinutes: number | null;
+  pouchGold: number | null;
+  flockHpPercent: number | null;
+}
+
+export interface Legacy {
+  /** Unspent Golden Yolks. */
+  goldenYolks: number;
+  /** Every Golden Yolk ever earned. Sets the Bloodline multiplier and is never spent. */
+  lifetimeGoldenYolks: number;
+  ancestralRanks: AncestralRanks;
+  /** The current run, starting at 1. */
+  run: number;
+  rollOfFeathers: FallenChicken[];
+  autoRecall: AutoRecallRules;
+}
+
+export interface RiteSummary {
+  trigger: "extinction" | "voluntary";
+  deepestDepth: number;
+  goldBanked: number;
+  goldenYolksEarned: number;
 }
 
 export interface BankRecord {
@@ -156,7 +198,10 @@ export type Command =
   | { type: "send" }
   | { type: "recall" }
   | { type: "buyUpgrade"; upgrade: UpgradeId }
-  | { type: "setBroodQuota"; quota: number };
+  | { type: "setBroodQuota"; quota: number }
+  | { type: "buyAncestralNode"; node: AncestralNodeId }
+  | { type: "setAutoRecall"; rules: AutoRecallRules }
+  | { type: "performRite" };
 
 export type GameEvent =
   | { type: "reachedFloor"; chickenId: number; depth: number }
@@ -167,4 +212,6 @@ export type GameEvent =
   | { type: "nestBuilt"; chickenId: number; depth: number }
   | { type: "nestDestroyed"; depth: number; eggsLost: number }
   | { type: "campStruck"; depth: number; eggsPacked: number; eggsCracked: number }
-  | { type: "chickHatched"; chickenId: number; depth: number; mutated: boolean };
+  | { type: "chickHatched"; chickenId: number; depth: number; mutated: boolean }
+  | { type: "ancestralNodeBought"; node: AncestralNodeId; rank: number }
+  | { type: "autoRecalled" };

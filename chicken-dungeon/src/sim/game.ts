@@ -1,21 +1,31 @@
-import { RHODE_ISLAND_RED } from "../data/breeds.ts";
 import { UPGRADES, upgradeCost, type UpgradeId } from "../data/upgrades.ts";
 import { restAtCoop, updateChicken } from "./chickens.ts";
 import { revealAround } from "./explore.ts";
 import { spawnWanderers, updateMonsters } from "./monsters.ts";
 import { currentTile } from "./movement.ts";
 import { assignBroodingHens, startTeardowns, updateNests } from "./nests.ts";
-import { chickenStats } from "./stats.ts";
+import { beginRite, buyAncestralNode, canPerformRite, dinnerBellRings, isExtinct, sanitizeAutoRecall } from "./prestige.ts";
 import type { Command, FloorState, GameEvent, GameState } from "./types.ts";
-import { ENTRANCE_DEPTH, floorStateAt, isInDungeon, placeChicken, spawnMonster } from "./world.ts";
+import { currentChickenStats, ENTRANCE_DEPTH, floorStateAt, isHeadingOut, isInDungeon, placeChicken, spawnMonster } from "./world.ts";
 
 const RECALL_RESPAWN_SHARE = 0.25;
 const MAX_BROOD_QUOTA = 99;
 
+/** While the Rite screen waits, only legacy commands run. The rest of the world holds still. */
 export function tick(state: GameState, commands: readonly Command[]): GameEvent[] {
-  state.tick += 1;
   const events: GameEvent[] = [];
+  if (state.rite) {
+    for (const command of commands) {
+      if (command.type === "buyAncestralNode" || command.type === "setAutoRecall") applyCommand(state, command, events);
+    }
+    return events;
+  }
+  state.tick += 1;
   for (const command of commands) applyCommand(state, command, events);
+  if (dinnerBellRings(state)) {
+    recallFlock(state);
+    events.push({ type: "autoRecalled" });
+  }
   assignBroodingHens(state);
   for (const chicken of state.chickens) {
     if (chicken.activity === "home") restAtCoop(chicken);
@@ -28,6 +38,7 @@ export function tick(state: GameState, commands: readonly Command[]): GameEvent[
   for (const chicken of state.chickens) {
     if (isInDungeon(chicken)) revealAround(floorStateAt(state, chicken.depth), currentTile(chicken), state.tick, chicken.vision);
   }
+  if (state.rite === null && isExtinct(state)) beginRite(state, "extinction");
   return events;
 }
 
@@ -38,6 +49,7 @@ function applyCommand(state: GameState, command: Command, events: GameEvent[]): 
       for (const chicken of state.chickens) {
         if (chicken.activity === "home") placeChicken(state, chicken, ENTRANCE_DEPTH, entrance, "explore");
       }
+      state.lastSendTick = state.tick;
       return;
     }
     case "recall":
@@ -48,6 +60,15 @@ function applyCommand(state: GameState, command: Command, events: GameEvent[]): 
       return;
     case "setBroodQuota":
       state.broodQuota = Math.min(MAX_BROOD_QUOTA, Math.max(0, Math.floor(command.quota)));
+      return;
+    case "buyAncestralNode":
+      buyAncestralNode(state, command.node, events);
+      return;
+    case "setAutoRecall":
+      state.legacy.autoRecall = sanitizeAutoRecall(command.rules);
+      return;
+    case "performRite":
+      if (canPerformRite(state)) beginRite(state, "voluntary");
       return;
   }
 }
@@ -63,7 +84,7 @@ function buyUpgrade(state: GameState, upgradeId: UpgradeId, events: GameEvent[])
   state.upgradeLevels[upgradeId] = level + 1;
   for (const chicken of state.chickens) {
     if (chicken.activity === "dead") continue;
-    const stats = chickenStats(RHODE_ISLAND_RED, state.upgradeLevels, chicken.statBonus);
+    const stats = currentChickenStats(state, chicken.statBonus);
     const hpGained = stats.maxHp - chicken.maxHp;
     Object.assign(chicken, stats);
     chicken.hp += hpGained;
@@ -82,7 +103,7 @@ function recallFlock(state: GameState): void {
   for (const floorState of state.floors.values()) floorState.killedThisExpedition = [];
   startTeardowns(state);
   for (const chicken of deployed) {
-    if (chicken.activity === "flee" || chicken.activity === "teardown") continue;
+    if (isHeadingOut(chicken)) continue;
     chicken.activity = "recalled";
     chicken.exploreTarget = null;
     chicken.lootTargetId = null;

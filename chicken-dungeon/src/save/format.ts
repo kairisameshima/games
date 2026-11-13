@@ -1,3 +1,4 @@
+import { ANCESTRAL_NODE_IDS, noAncestralRanks, type AncestralRanks } from "../data/ancestry.ts";
 import { MONSTER_KINDS, type MonsterKindId } from "../data/bestiary.ts";
 import { NEST_TIERS, WANDERER_INTERVAL_SECONDS } from "../data/nests.ts";
 import { noUpgrades, UPGRADE_IDS, type UpgradeLevels } from "../data/upgrades.ts";
@@ -6,10 +7,24 @@ import type { Point } from "../gen/grid.ts";
 import type { MonsterSpawn } from "../gen/population.ts";
 import { createFloorState, UNSEEN } from "../sim/explore.ts";
 import { TICKS_PER_SECOND } from "../sim/time.ts";
-import type { BankRecord, Chicken, ChickenActivity, Egg, FloorState, GameState, LootPile, Monster, Nest } from "../sim/types.ts";
+import type {
+  AutoRecallRules,
+  BankRecord,
+  Chicken,
+  ChickenActivity,
+  Egg,
+  FallenChicken,
+  FloorState,
+  GameState,
+  Legacy,
+  LootPile,
+  Monster,
+  Nest,
+  RiteSummary,
+} from "../sim/types.ts";
 
 // Older saves predate the fields this version adds. They are set aside on load instead of migrated.
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export class SaveFormatError extends Error {
   constructor(message: string) {
@@ -61,6 +76,10 @@ export function serializeGame(state: GameState, savedAt: number): string {
       broodQuota: state.broodQuota,
       coopEggs: state.coopEggs,
       yolkMana: state.yolkMana,
+      totalGoldBanked: state.totalGoldBanked,
+      lastSendTick: state.lastSendTick,
+      legacy: state.legacy,
+      rite: state.rite,
       chickens: state.chickens,
       floors: [...state.floors.values()].map((floorState) => ({
         depth: floorState.floor.depth,
@@ -109,9 +128,67 @@ export function parseSave(text: string): LoadedGame {
       broodQuota: readNumber(game, "broodQuota", "game"),
       coopEggs: readArray(game, "coopEggs", "game").map((value, index) => readEgg(value, `game.coopEggs[${index}]`)),
       yolkMana: readNumber(game, "yolkMana", "game"),
+      totalGoldBanked: readNumber(game, "totalGoldBanked", "game"),
+      lastSendTick: readNumber(game, "lastSendTick", "game"),
+      legacy: readLegacy(game.legacy, "game.legacy"),
+      rite: game.rite === null ? null : readRite(game.rite, "game.rite"),
       chickens: readArray(game, "chickens", "game").map((value, index) => readChicken(value, `game.chickens[${index}]`)),
       floors,
     },
+  };
+}
+
+function readLegacy(value: unknown, where: string): Legacy {
+  const saved = readObject(value, where);
+  return {
+    goldenYolks: readNumber(saved, "goldenYolks", where),
+    lifetimeGoldenYolks: readNumber(saved, "lifetimeGoldenYolks", where),
+    ancestralRanks: readAncestralRanks(saved.ancestralRanks, `${where}.ancestralRanks`),
+    run: readNumber(saved, "run", where),
+    rollOfFeathers: readArray(saved, "rollOfFeathers", where).map((item, index) => readFallenChicken(item, `${where}.rollOfFeathers[${index}]`)),
+    autoRecall: readAutoRecall(saved.autoRecall, `${where}.autoRecall`),
+  };
+}
+
+function readAncestralRanks(value: unknown, where: string): AncestralRanks {
+  const saved = readObject(value, where);
+  const ranks = noAncestralRanks();
+  for (const id of ANCESTRAL_NODE_IDS) {
+    const rank = readNumber(saved, id, where);
+    if (!Number.isInteger(rank) || rank < 0) throw new SaveFormatError(`${where}.${id} must be a whole number, got ${rank}`);
+    ranks[id] = rank;
+  }
+  return ranks;
+}
+
+function readFallenChicken(value: unknown, where: string): FallenChicken {
+  const saved = readObject(value, where);
+  return {
+    run: readNumber(saved, "run", where),
+    name: readString(saved, "name", where),
+    depth: readNumber(saved, "depth", where),
+    killer: readMonsterKind(saved, where, "killer"),
+  };
+}
+
+function readAutoRecall(value: unknown, where: string): AutoRecallRules {
+  const saved = readObject(value, where);
+  return {
+    everyMinutes: readNullableNumber(saved, "everyMinutes", where),
+    pouchGold: readNullableNumber(saved, "pouchGold", where),
+    flockHpPercent: readNullableNumber(saved, "flockHpPercent", where),
+  };
+}
+
+function readRite(value: unknown, where: string): RiteSummary {
+  const saved = readObject(value, where);
+  const trigger = readString(saved, "trigger", where);
+  if (trigger !== "extinction" && trigger !== "voluntary") throw new SaveFormatError(`${where}.trigger "${trigger}" is unknown`);
+  return {
+    trigger,
+    deepestDepth: readNumber(saved, "deepestDepth", where),
+    goldBanked: readNumber(saved, "goldBanked", where),
+    goldenYolksEarned: readNumber(saved, "goldenYolksEarned", where),
   };
 }
 
@@ -261,9 +338,9 @@ function readMover(saved: JsonObject, where: string): { x: number; y: number; pr
   };
 }
 
-function readMonsterKind(saved: JsonObject, where: string): MonsterKindId {
-  const kind = readString(saved, "kind", where);
-  if (!Object.hasOwn(MONSTER_KINDS, kind)) throw new SaveFormatError(`${where}.kind "${kind}" is not a known monster`);
+function readMonsterKind(saved: JsonObject, where: string, key = "kind"): MonsterKindId {
+  const kind = readString(saved, key, where);
+  if (!Object.hasOwn(MONSTER_KINDS, kind)) throw new SaveFormatError(`${where}.${key} "${kind}" is not a known monster`);
   return kind as MonsterKindId;
 }
 

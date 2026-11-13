@@ -3,11 +3,14 @@ import { DungeonRenderer, VIEW_HEIGHT, VIEW_WIDTH } from "./render/renderer.ts";
 import { SaveFormatError } from "./save/format.ts";
 import { loadGame, setAsideUnreadableSave, storeGame } from "./save/storage.ts";
 import { tick } from "./sim/game.ts";
-import { offlineGold } from "./sim/offline.ts";
+import { grantOfflineGold } from "./sim/offline.ts";
+import { startNextRun } from "./sim/prestige.ts";
 import { TICKS_PER_SECOND } from "./sim/time.ts";
 import type { Command, GameState } from "./sim/types.ts";
 import { createGame } from "./sim/world.ts";
+import { AncestralPanel } from "./ui/ancestral-panel.ts";
 import { Hud } from "./ui/hud.ts";
+import { RiteOverlay } from "./ui/rite-overlay.ts";
 import { UpgradesPanel } from "./ui/upgrades-panel.ts";
 
 const STARTING_FLOCK_SIZE = 1;
@@ -26,8 +29,10 @@ const canvasStage = stage;
 const pendingCommands: Command[] = [];
 const renderer = new DungeonRenderer(dungeonCanvas);
 const enqueue = (command: Command) => pendingCommands.push(command);
-const hud = new Hud(enqueue, startNewRun);
+const hud = new Hud(enqueue);
 const upgradesPanel = new UpgradesPanel(enqueue);
+const ancestralPanel = new AncestralPanel(enqueue);
+const riteOverlay = new RiteOverlay(beginNextRun);
 let state = loadOrStartGame();
 
 let lastFrameTime = performance.now();
@@ -43,12 +48,8 @@ function loadOrStartGame(): GameState {
     const loaded = loadGame();
     if (!loaded) return newGame();
     const minutesAway = (Date.now() - loaded.savedAt) / MS_PER_MINUTE;
-    const earned = offlineGold(loaded.state, minutesAway);
-    if (earned > 0) {
-      // Paid straight into the bank, not the bank log, so offline gold never compounds into the next offline rate.
-      loaded.state.bankedGold += earned;
-      hud.note(`Away ${Math.round(minutesAway)} min: +${earned} gold.`);
-    }
+    const earned = loaded.state.rite ? 0 : grantOfflineGold(loaded.state, minutesAway);
+    if (earned > 0) hud.note(`Away ${Math.round(minutesAway)} min: +${earned} gold.`);
     return loaded.state;
   } catch (error) {
     if (!(error instanceof SaveFormatError)) throw error;
@@ -59,11 +60,11 @@ function loadOrStartGame(): GameState {
   }
 }
 
-function startNewRun(): void {
-  state = newGame();
+function beginNextRun(): void {
+  state = startNextRun(state);
   pendingCommands.length = 0;
   storeGame(state, Date.now());
-  hud.note("A new hen steps into the coop.");
+  hud.note(`Run ${state.legacy.run} begins. A new hen steps into the coop.`);
 }
 
 function fitCanvasToStage(): void {
@@ -88,6 +89,8 @@ function runFrame(now: number): void {
   renderer.draw(state, unsimulatedMs / TICK_MS);
   hud.update(state);
   upgradesPanel.update(state);
+  ancestralPanel.update(state);
+  riteOverlay.update(state);
   requestAnimationFrame(runFrame);
 }
 

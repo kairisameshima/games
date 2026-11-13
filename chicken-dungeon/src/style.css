@@ -1,3 +1,8 @@
+/* Author `display` rules would otherwise beat the hidden attribute. */
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -106,6 +111,72 @@ body {
 
 .upgrade button {
   padding: 2px 10px;
+  font-size: 18px;
+}
+
+.coop-panel h2:not(:first-child) {
+  margin-top: 16px;
+}
+
+.yolk-status {
+  font-size: 18px;
+  color: #c9b48f;
+}
+
+.dinner-bell-rules {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  font-size: 18px;
+  color: #c9b48f;
+}
+
+.dinner-bell-rules input {
+  width: 4.5em;
+  font: inherit;
+  color: inherit;
+  background: #0b0806;
+  border: 1px solid #8a7458;
+}
+
+.rite-button {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.rite-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 8, 6, 0.88);
+}
+
+.rite-card {
+  display: grid;
+  gap: 12px;
+  width: min(560px, 90vw);
+  padding: 24px;
+  text-align: center;
+  background: #1a120c;
+  border: 2px solid #d9a441;
+}
+
+.rite-card h2 {
+  font-weight: normal;
+  color: #d9a441;
+}
+
+.rite-card h3 {
+  font-weight: normal;
+  color: #c9b48f;
+}
+
+.roll-of-feathers {
+  max-height: 40vh;
+  overflow-y: auto;
+  list-style: none;
   font-size: 18px;
 }
 

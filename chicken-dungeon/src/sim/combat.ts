@@ -68,6 +68,7 @@ function killChicken(state: GameState, floorState: FloorState, chicken: Chicken,
   const tile = currentTile(chicken);
   floorState.lootPiles.push({ id: state.nextEntityId++, x: tile.x, y: tile.y, gold: chicken.pouchGold, isFeatherPile: true });
   events.push({ type: "chickenDied", chickenId: chicken.id, depth: floorState.floor.depth, killer, eggsLost: chicken.carriedEggs.length });
+  state.legacy.rollOfFeathers.push({ run: state.legacy.run, name: chicken.name, depth: floorState.floor.depth, killer });
   chicken.hp = 0;
   chicken.pouchGold = 0;
   chicken.carriedEggs = [];

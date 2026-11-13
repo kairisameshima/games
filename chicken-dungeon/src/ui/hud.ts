@@ -1,17 +1,16 @@
+import { ANCESTRAL_NODES } from "../data/ancestry.ts";
 import { MONSTER_KINDS } from "../data/bestiary.ts";
 import { YOLK_MANA_CAP } from "../data/nests.ts";
 import { UPGRADES } from "../data/upgrades.ts";
 import { flockCap } from "../sim/stats.ts";
-import type { ChickenActivity, Command, GameEvent, GameState } from "../sim/types.ts";
-import { isAlive, isInDungeon, leadChicken } from "../sim/world.ts";
+import type { Command, GameEvent, GameState } from "../sim/types.ts";
+import { isAlive, isHeadingOut, isInDungeon, leadChicken } from "../sim/world.ts";
 import { requireElement, setText } from "./dom.ts";
 
 // The bible asks for a short hold so a stray click never strands the flock.
 const RECALL_HOLD_MS = 500;
 const EVENT_LOG_LENGTH = 6;
 const SIMULATION_SPEEDS = [1, 2, 4, 8];
-// Recall has nothing more to do for chickens already on their way out.
-const LEAVING_ACTIVITIES: readonly ChickenActivity[] = ["recalled", "flee", "teardown"];
 
 export class Hud {
   private readonly flockStatus: HTMLElement;
@@ -23,25 +22,23 @@ export class Hud {
   private readonly sendButton: HTMLButtonElement;
   private readonly recallButton: HTMLButtonElement;
   private readonly speedButton: HTMLButtonElement;
-  private readonly newRunButton: HTMLButtonElement;
+  private readonly broodUpButton: HTMLButtonElement;
   private readonly eventLog: HTMLOListElement;
   private recallHoldTimer: number | undefined;
   private speedIndex = 0;
   private shownBroodQuota = 0;
 
-  /** `startNewRun` is offered only once the whole flock is dead, until prestige replaces it. */
-  constructor(enqueue: (command: Command) => void, startNewRun: () => void) {
+  constructor(enqueue: (command: Command) => void) {
     this.flockStatus = requireElement("flock-status", HTMLElement);
     this.depthStatus = requireElement("depth-status", HTMLElement);
     this.goldStatus = requireElement("gold-status", HTMLElement);
     this.eggStatus = requireElement("egg-status", HTMLElement);
     this.broodQuotaValue = requireElement("brood-quota", HTMLElement);
     this.broodDownButton = requireElement("brood-down-button", HTMLButtonElement);
-    const broodUpButton = requireElement("brood-up-button", HTMLButtonElement);
+    this.broodUpButton = requireElement("brood-up-button", HTMLButtonElement);
     this.sendButton = requireElement("send-button", HTMLButtonElement);
     this.recallButton = requireElement("recall-button", HTMLButtonElement);
     this.speedButton = requireElement("speed-button", HTMLButtonElement);
-    this.newRunButton = requireElement("new-run-button", HTMLButtonElement);
     this.eventLog = requireElement("event-log", HTMLOListElement);
 
     this.sendButton.addEventListener("click", () => enqueue({ type: "send" }));
@@ -60,9 +57,8 @@ export class Hud {
       this.speedIndex = (this.speedIndex + 1) % SIMULATION_SPEEDS.length;
       this.speedButton.textContent = `SPEED ${this.simulationSpeed}x`;
     });
-    this.newRunButton.addEventListener("click", startNewRun);
     this.broodDownButton.addEventListener("click", () => enqueue({ type: "setBroodQuota", quota: this.shownBroodQuota - 1 }));
-    broodUpButton.addEventListener("click", () => enqueue({ type: "setBroodQuota", quota: this.shownBroodQuota + 1 }));
+    this.broodUpButton.addEventListener("click", () => enqueue({ type: "setBroodQuota", quota: this.shownBroodQuota + 1 }));
   }
 
   /** Sim seconds per real second. The main loop scales elapsed time, so ticks stay fixed and the sim stays deterministic. */
@@ -84,10 +80,12 @@ export class Hud {
     setText(this.eggStatus, `Eggs ${countEggs(state)} · Mana ${state.yolkMana}/${YOLK_MANA_CAP}`);
     this.shownBroodQuota = state.broodQuota;
     setText(this.broodQuotaValue, String(state.broodQuota));
-    this.broodDownButton.disabled = state.broodQuota === 0;
-    this.sendButton.disabled = !living.some((chicken) => chicken.activity === "home");
-    this.recallButton.disabled = !deployed.some((chicken) => !LEAVING_ACTIVITIES.includes(chicken.activity));
-    this.newRunButton.hidden = living.length > 0;
+    // The Rite screen covers the run's end, so the run's controls go still behind it.
+    const runOver = state.rite !== null;
+    this.broodDownButton.disabled = runOver || state.broodQuota === 0;
+    this.broodUpButton.disabled = runOver;
+    this.sendButton.disabled = runOver || !living.some((chicken) => chicken.activity === "home");
+    this.recallButton.disabled = runOver || !deployed.some((chicken) => !isHeadingOut(chicken));
   }
 
   record(events: readonly GameEvent[], state: GameState): void {
@@ -143,6 +141,10 @@ function describeEvent(event: GameEvent, state: GameState): string {
       const mutant = event.mutated ? " A mutant: +10% stats." : "";
       return `${chickenName(state, event.chickenId)} hatched ${where}.${mutant}`;
     }
+    case "ancestralNodeBought":
+      return `${ANCESTRAL_NODES[event.node].name} is now rank ${event.rank}.`;
+    case "autoRecalled":
+      return "The Dinner Bell rings. The flock is coming home.";
   }
 }
 
