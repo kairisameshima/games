@@ -4,7 +4,8 @@ import { isWalkable, toIndex, type Point } from "../gen/grid.ts";
 import { mixSeed } from "../rng.ts";
 import { currentTile } from "../sim/movement.ts";
 import type { FloorState, GameState, Mover, Nest } from "../sim/types.ts";
-import { isInDungeon, leadChicken } from "../sim/world.ts";
+import { frontDepth, isInDungeon } from "../sim/world.ts";
+import { clampCenter, easeToward, frameTargets, type Framing } from "./camera.ts";
 import {
   buildChickenSprites,
   buildDenSiteSprite,
@@ -23,8 +24,9 @@ interface Combatant extends Mover {
   maxHp: number;
 }
 
-export const VIEW_WIDTH = 480;
-export const VIEW_HEIGHT = 270;
+const CAMERA_EASE_RATE = 4;
+// Close enough that easing would only shimmer: snap to the target so the scale lands on a whole number.
+const SCALE_SNAP = 0.01;
 const TILE_SIZE = SPRITE_SIZE;
 const WALL_SHADOW_ROWS = 3;
 const SPECKLES_PER_TILE = 3;
@@ -73,9 +75,12 @@ export class DungeonRenderer {
   private readonly chickenFacingLeft = new Map<number, boolean>();
   private readonly monsterFacingLeft = new Map<number, boolean>();
 
+  private readonly canvas: HTMLCanvasElement;
+  private framing: Framing | null = null;
+  private framedFloor: Floor | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
-    canvas.width = VIEW_WIDTH;
-    canvas.height = VIEW_HEIGHT;
+    this.canvas = canvas;
     this.context = contextOf(canvas);
     this.monsterSprites = {
       cellarRat: buildMonsterSprites("cellarRat"),
@@ -88,46 +93,82 @@ export class DungeonRenderer {
     this.denSiteSprite = buildDenSiteSprite();
   }
 
-  /** `interpolation` is how far real time has moved past the last tick, from 0 to 1. */
-  draw(state: GameState, interpolation: number): void {
+  /** Sizes the backing store in device pixels. Resizing a canvas resets its context, so smoothing is turned off again. */
+  resize(pixelWidth: number, pixelHeight: number): void {
+    this.canvas.width = pixelWidth;
+    this.canvas.height = pixelHeight;
+    this.context.imageSmoothingEnabled = false;
+  }
+
+  /**
+   * Frames every chicken on the busiest floor, easing toward the new framing.
+   * `interpolation` is how far real time has moved past the last tick, from 0 to 1.
+   */
+  draw(state: GameState, interpolation: number, deltaSeconds: number): void {
     const context = this.context;
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = ROOT_CELLAR.void;
-    context.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
-    const lead = leadChicken(state);
-    if (!lead) return;
-    const floorState = state.floors.get(lead.depth);
+    context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    const depth = frontDepth(state);
+    const floorState = depth === null ? undefined : state.floors.get(depth);
     if (!floorState) return;
     const { floor, lastSeenTick } = floorState;
 
-    const camera = cameraOrigin(floor, {
-      x: interpolate(lead.previousX, lead.x, interpolation) * TILE_SIZE + TILE_SIZE / 2,
-      y: interpolate(lead.previousY, lead.y, interpolation) * TILE_SIZE + TILE_SIZE / 2,
-    });
-    context.drawImage(this.tileLayerFor(floor), camera.x, camera.y, VIEW_WIDTH, VIEW_HEIGHT, 0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    const framed = state.chickens.filter((chicken) => isInDungeon(chicken) && chicken.depth === depth);
+    const centers = framed.map((chicken) => ({
+      x: interpolate(chicken.previousX, chicken.x, interpolation) * TILE_SIZE + TILE_SIZE / 2,
+      y: interpolate(chicken.previousY, chicken.y, interpolation) * TILE_SIZE + TILE_SIZE / 2,
+    }));
+    const framing = this.easeFraming(frameTargets(centers, this.canvas.width, this.canvas.height), floor, deltaSeconds);
+    const { scale } = framing;
+    const floorPixels = floor.side * TILE_SIZE;
+    const viewWidth = this.canvas.width / scale;
+    const viewHeight = this.canvas.height / scale;
+    // Round the view's corner to a whole device pixel so art pixels do not shimmer as the camera glides.
+    const left = Math.round((clampCenter(framing.centerX, viewWidth, floorPixels) - viewWidth / 2) * scale) / scale;
+    const top = Math.round((clampCenter(framing.centerY, viewHeight, floorPixels) - viewHeight / 2) * scale) / scale;
+    context.setTransform(scale, 0, 0, scale, -left * scale, -top * scale);
+
+    context.drawImage(this.tileLayerFor(floor), 0, 0);
     const isExplored = (point: Point) => lastSeenTick[toIndex(floor.side, point)] >= 0;
     for (const site of floorState.denSites) {
-      if (isExplored(site)) context.drawImage(this.denSiteSprite, site.x * TILE_SIZE - camera.x, site.y * TILE_SIZE - camera.y);
+      if (isExplored(site)) context.drawImage(this.denSiteSprite, site.x * TILE_SIZE, site.y * TILE_SIZE);
     }
     for (const nest of floorState.nests) {
-      if (isExplored(nest)) this.drawNest(nest, camera);
+      if (isExplored(nest)) this.drawNest(nest);
     }
     for (const pile of floorState.lootPiles) {
       if (!isExplored(pile)) continue;
-      const sprite = pile.isFeatherPile ? this.featherPileSprite : this.goldPileSprite;
-      context.drawImage(sprite, pile.x * TILE_SIZE - camera.x, pile.y * TILE_SIZE - camera.y);
+      context.drawImage(pile.isFeatherPile ? this.featherPileSprite : this.goldPileSprite, pile.x * TILE_SIZE, pile.y * TILE_SIZE);
     }
     for (const monster of floorState.monsters) {
       // Dens never move, so a den once seen stays on the map. Mobile monsters show only while in sight.
       const isDen = MONSTER_KINDS[monster.kind].spawner !== null;
       const shown = isDen ? isExplored(monster) : lastSeenTick[toIndex(floor.side, currentTile(monster))] === state.tick;
-      if (shown) this.drawCombatant(monster, this.monsterSprites[monster.kind], this.monsterFacingLeft, HEALTH_BAR.monster, camera, interpolation);
+      if (shown) this.drawCombatant(monster, this.monsterSprites[monster.kind], this.monsterFacingLeft, HEALTH_BAR.monster, interpolation);
     }
-    for (const chicken of state.chickens) {
-      if (!isInDungeon(chicken) || chicken.depth !== lead.depth) continue;
+    for (const chicken of framed) {
       const sprites = this.chickenSpritesFor(BANDANA_COLORS[chicken.id % BANDANA_COLORS.length]);
-      this.drawCombatant(chicken, sprites, this.chickenFacingLeft, HEALTH_BAR.chicken, camera, interpolation);
+      this.drawCombatant(chicken, sprites, this.chickenFacingLeft, HEALTH_BAR.chicken, interpolation);
     }
-    this.drawFog(floorState, state.tick, camera);
+    this.drawFog(floorState, state.tick, left, top, viewWidth, viewHeight);
+  }
+
+  /** Snaps on the first frame and on floor changes, otherwise glides toward the target framing. */
+  private easeFraming(target: Framing, floor: Floor, deltaSeconds: number): Framing {
+    const previous = this.framedFloor === floor ? this.framing : null;
+    this.framedFloor = floor;
+    if (!previous) {
+      this.framing = target;
+      return target;
+    }
+    const easedScale = easeToward(previous.scale, target.scale, deltaSeconds, CAMERA_EASE_RATE);
+    this.framing = {
+      centerX: easeToward(previous.centerX, target.centerX, deltaSeconds, CAMERA_EASE_RATE),
+      centerY: easeToward(previous.centerY, target.centerY, deltaSeconds, CAMERA_EASE_RATE),
+      scale: Math.abs(easedScale - target.scale) < SCALE_SNAP ? target.scale : easedScale,
+    };
+    return this.framing;
   }
 
   private drawCombatant(
@@ -135,48 +176,47 @@ export class DungeonRenderer {
     sprites: FacingSprites,
     facingLeftById: Map<number, boolean>,
     healthColor: string,
-    camera: Point,
     interpolation: number,
   ): void {
     const movedX = unit.x - unit.previousX;
     if (movedX !== 0) facingLeftById.set(unit.id, movedX < 0);
-    const screenX = Math.round(interpolate(unit.previousX, unit.x, interpolation) * TILE_SIZE - camera.x);
-    const screenY = Math.round(interpolate(unit.previousY, unit.y, interpolation) * TILE_SIZE - camera.y);
-    this.context.drawImage(facingLeftById.get(unit.id) ? sprites.left : sprites.right, screenX, screenY);
-    this.drawHealthBar(screenX, screenY, unit.hp, unit.maxHp, healthColor);
+    const worldX = Math.round(interpolate(unit.previousX, unit.x, interpolation) * TILE_SIZE);
+    const worldY = Math.round(interpolate(unit.previousY, unit.y, interpolation) * TILE_SIZE);
+    this.context.drawImage(facingLeftById.get(unit.id) ? sprites.left : sprites.right, worldX, worldY);
+    this.drawHealthBar(worldX, worldY, unit.hp, unit.maxHp, healthColor);
   }
 
-  private drawNest(nest: Nest, camera: Point): void {
-    const screenX = nest.x * TILE_SIZE - camera.x;
-    const screenY = nest.y * TILE_SIZE - camera.y;
-    this.context.drawImage(this.nestSprite, screenX, screenY);
+  private drawNest(nest: Nest): void {
+    const worldX = nest.x * TILE_SIZE;
+    const worldY = nest.y * TILE_SIZE;
+    this.context.drawImage(this.nestSprite, worldX, worldY);
     this.context.fillStyle = NEST_EGG.color;
-    nest.eggs.forEach((_, index) => this.context.fillRect(screenX + NEST_EGG.firstX + index, screenY + NEST_EGG.y, NEST_EGG.width, NEST_EGG.height));
-    this.drawHealthBar(screenX, screenY, nest.hp, nest.maxHp, HEALTH_BAR.nest);
+    nest.eggs.forEach((_, index) => this.context.fillRect(worldX + NEST_EGG.firstX + index, worldY + NEST_EGG.y, NEST_EGG.width, NEST_EGG.height));
+    this.drawHealthBar(worldX, worldY, nest.hp, nest.maxHp, HEALTH_BAR.nest);
   }
 
-  private drawHealthBar(screenX: number, screenY: number, hp: number, maxHp: number, color: string): void {
+  private drawHealthBar(worldX: number, worldY: number, hp: number, maxHp: number, color: string): void {
     if (hp >= maxHp) return;
-    const barX = screenX + HEALTH_BAR.inset;
-    const barY = screenY + SPRITE_SIZE;
+    const barX = worldX + HEALTH_BAR.inset;
+    const barY = worldY + SPRITE_SIZE;
     this.context.fillStyle = HEALTH_BAR.background;
     this.context.fillRect(barX, barY, HEALTH_BAR.width, HEALTH_BAR.height);
     this.context.fillStyle = color;
     this.context.fillRect(barX, barY, Math.max(1, Math.round((HEALTH_BAR.width * hp) / maxHp)), HEALTH_BAR.height);
   }
 
-  private drawFog(floorState: FloorState, currentTick: number, camera: Point): void {
+  private drawFog(floorState: FloorState, currentTick: number, left: number, top: number, viewWidth: number, viewHeight: number): void {
     const { floor, lastSeenTick } = floorState;
-    const firstColumn = Math.floor(camera.x / TILE_SIZE);
-    const firstRow = Math.floor(camera.y / TILE_SIZE);
-    const lastColumn = Math.min(floor.side - 1, Math.floor((camera.x + VIEW_WIDTH) / TILE_SIZE));
-    const lastRow = Math.min(floor.side - 1, Math.floor((camera.y + VIEW_HEIGHT) / TILE_SIZE));
+    const firstColumn = Math.max(0, Math.floor(left / TILE_SIZE));
+    const firstRow = Math.max(0, Math.floor(top / TILE_SIZE));
+    const lastColumn = Math.min(floor.side - 1, Math.floor((left + viewWidth) / TILE_SIZE));
+    const lastRow = Math.min(floor.side - 1, Math.floor((top + viewHeight) / TILE_SIZE));
     for (let row = firstRow; row <= lastRow; row++) {
       for (let column = firstColumn; column <= lastColumn; column++) {
         const seenTick = lastSeenTick[row * floor.side + column];
         if (seenTick === currentTick) continue;
         this.context.fillStyle = seenTick < 0 ? ROOT_CELLAR.void : REMEMBERED_SHADE;
-        this.context.fillRect(column * TILE_SIZE - camera.x, row * TILE_SIZE - camera.y, TILE_SIZE, TILE_SIZE);
+        this.context.fillRect(column * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
       }
     }
   }
@@ -203,15 +243,6 @@ export class DungeonRenderer {
 
 function interpolate(from: number, to: number, amount: number): number {
   return from + (to - from) * amount;
-}
-
-function cameraOrigin(floor: Floor, focus: Point): Point {
-  const maxX = floor.side * TILE_SIZE - VIEW_WIDTH;
-  const maxY = floor.side * TILE_SIZE - VIEW_HEIGHT;
-  return {
-    x: Math.round(Math.min(maxX, Math.max(0, focus.x - VIEW_WIDTH / 2))),
-    y: Math.round(Math.min(maxY, Math.max(0, focus.y - VIEW_HEIGHT / 2))),
-  };
 }
 
 function paintTileLayer(floor: Floor): HTMLCanvasElement {

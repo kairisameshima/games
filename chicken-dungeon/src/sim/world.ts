@@ -176,9 +176,10 @@ export function isHeadingOut(chicken: Chicken): boolean {
   return chicken.activity === "recalled" || chicken.activity === "flee" || chicken.activity === "teardown";
 }
 
-/** The first living chicken in the dungeon. The camera follows it. */
-export function leadChicken(state: GameState): Chicken | undefined {
-  return state.chickens.find(isInDungeon);
+/** The deepest floor with a chicken on it, where the expedition's front line is. The camera watches it. Null with nobody in the dungeon. */
+export function frontDepth(state: GameState): number | null {
+  const depths = state.chickens.filter(isInDungeon).map((chicken) => chicken.depth);
+  return depths.length === 0 ? null : Math.max(...depths);
 }
 
 export function placeChicken(state: GameState, chicken: Chicken, depth: number, point: Point, activity: ChickenActivity): void {

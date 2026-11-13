@@ -1,5 +1,5 @@
 import "./style.css";
-import { DungeonRenderer, VIEW_HEIGHT, VIEW_WIDTH } from "./render/renderer.ts";
+import { DungeonRenderer } from "./render/renderer.ts";
 import { SaveFormatError } from "./save/format.ts";
 import { loadGame, setAsideUnreadableSave, storeGame } from "./save/storage.ts";
 import { tick } from "./sim/game.ts";
@@ -67,13 +67,17 @@ function beginNextRun(): void {
   hud.note(`Run ${state.legacy.run} begins. A new hen steps into the coop.`);
 }
 
+/** The canvas fills the stage, and its backing store matches device pixels so zooming out stays sharp. */
 function fitCanvasToStage(): void {
-  const scale = Math.max(1, Math.floor(Math.min(canvasStage.clientWidth / VIEW_WIDTH, canvasStage.clientHeight / VIEW_HEIGHT)));
-  dungeonCanvas.style.width = `${VIEW_WIDTH * scale}px`;
-  dungeonCanvas.style.height = `${VIEW_HEIGHT * scale}px`;
+  const cssWidth = canvasStage.clientWidth;
+  const cssHeight = canvasStage.clientHeight;
+  dungeonCanvas.style.width = `${cssWidth}px`;
+  dungeonCanvas.style.height = `${cssHeight}px`;
+  renderer.resize(Math.round(cssWidth * window.devicePixelRatio), Math.round(cssHeight * window.devicePixelRatio));
 }
 
 function runFrame(now: number): void {
+  const frameSeconds = (now - lastFrameTime) / 1000;
   const speed = hud.simulationSpeed;
   unsimulatedMs += (now - lastFrameTime) * speed;
   lastFrameTime = now;
@@ -86,7 +90,7 @@ function runFrame(now: number): void {
   // A hidden tab pauses requestAnimationFrame. Drop that backlog instead of fast-forwarding through it.
   // Time away is paid out by the offline progress formula in the bible, not by replaying ticks.
   if (unsimulatedMs >= TICK_MS) unsimulatedMs = 0;
-  renderer.draw(state, unsimulatedMs / TICK_MS);
+  renderer.draw(state, unsimulatedMs / TICK_MS, frameSeconds);
   hud.update(state);
   upgradesPanel.update(state);
   ancestralPanel.update(state);

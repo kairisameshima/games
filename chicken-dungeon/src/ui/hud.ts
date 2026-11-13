@@ -4,7 +4,7 @@ import { YOLK_MANA_CAP } from "../data/nests.ts";
 import { UPGRADES } from "../data/upgrades.ts";
 import { flockCap } from "../sim/stats.ts";
 import type { Command, GameEvent, GameState } from "../sim/types.ts";
-import { isAlive, isHeadingOut, isInDungeon, leadChicken } from "../sim/world.ts";
+import { frontDepth, isAlive, isHeadingOut, isInDungeon } from "../sim/world.ts";
 import { requireElement, setText } from "./dom.ts";
 
 // The bible asks for a short hold so a stray click never strands the flock.
@@ -69,11 +69,11 @@ export class Hud {
   update(state: GameState): void {
     const living = state.chickens.filter(isAlive);
     const deployed = living.filter(isInDungeon);
-    const lead = leadChicken(state);
+    const viewed = frontDepth(state);
     const cap = flockCap(state.upgradeLevels);
     setText(this.flockStatus, living.length === 0 ? "Flock lost" : `Flock ${living.length}/${cap} · ${deployed.length} in dungeon`);
     const deepest = state.deepestDepth > 0 ? `Deepest B${state.deepestDepth}` : "";
-    const whereabouts = lead ? `Viewing B${lead.depth}` : living.length > 0 ? "Flock at the coop" : "";
+    const whereabouts = viewed !== null ? `Viewing B${viewed}` : living.length > 0 ? "Flock at the coop" : "";
     setText(this.depthStatus, [whereabouts, deepest].filter(Boolean).join(" · "));
     const carried = deployed.reduce((total, chicken) => total + chicken.pouchGold, 0);
     setText(this.goldStatus, `Gold ${state.bankedGold} · In pouches ${carried}`);
