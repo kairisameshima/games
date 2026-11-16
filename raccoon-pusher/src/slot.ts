@@ -1,17 +1,20 @@
+export type SlotSymbolId = "cherry" | "bell" | "trash" | "seven" | "raccoon";
+
 export interface SlotSymbol {
-  glyph: string;
+  id: SlotSymbolId;
   /** Relative chance of landing on each reel. */
   weight: number;
   /** Coins showered for three of this symbol across the reels. */
   tripletPayout: number;
 }
 
+/** Order matches the frames in the reel icon sheet. */
 export const SLOT_SYMBOLS: readonly SlotSymbol[] = [
-  { glyph: "🍒", weight: 5, tripletPayout: 8 },
-  { glyph: "🔔", weight: 4, tripletPayout: 15 },
-  { glyph: "🗑️", weight: 4, tripletPayout: 20 },
-  { glyph: "7", weight: 2, tripletPayout: 50 },
-  { glyph: "🦝", weight: 1, tripletPayout: 150 },
+  { id: "cherry", weight: 5, tripletPayout: 8 },
+  { id: "bell", weight: 4, tripletPayout: 15 },
+  { id: "trash", weight: 4, tripletPayout: 20 },
+  { id: "seven", weight: 2, tripletPayout: 50 },
+  { id: "raccoon", weight: 1, tripletPayout: 150 },
 ];
 
 /** Coins for matching the first two reels without the third. */

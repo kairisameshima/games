@@ -1,4 +1,5 @@
 import "./style.css";
+import { loadPusherArt } from "./art.ts";
 import { autoDropSeconds, createWallet, machineSettings, payoutPerWonCoin } from "./economy.ts";
 import { initPhysics, PHYSICS_STEP_SECONDS, PusherMachine } from "./machine.ts";
 import { PusherScene } from "./scene.ts";
@@ -13,6 +14,7 @@ const MS_PER_SECOND = 1_000;
 const STEPS_PER_SHOWER_COIN = 3;
 /** When the bag is empty the raccoon digs a coin out from under the machine this often, so a run never dead-ends. */
 const SCAVENGE_SECONDS = 6;
+const BOMB_CHEER_SECONDS = 1.5;
 const SHOP_REFRESH_MS = 200;
 
 function requireElement<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -28,10 +30,10 @@ const lostStatus = requireElement("lost-status", HTMLSpanElement);
 const hint = requireElement("hint", HTMLParagraphElement);
 
 async function main(): Promise<void> {
-  await initPhysics();
+  const [art] = await Promise.all([loadPusherArt(), initPhysics()]);
   const wallet = createWallet();
   const machine = new PusherMachine(machineSettings(wallet), Math.random);
-  const scene = new PusherScene(canvas);
+  const scene = new PusherScene(canvas, art);
   const slot = new SlotReels();
   const shop = new ShopPanel(requireElement("shop", HTMLElement), wallet, () => machine.applySettings(machineSettings(wallet)));
   let showerCoinsLeft = 0;
@@ -106,7 +108,10 @@ async function main(): Promise<void> {
       wallet.bag += result.won * payoutPerWonCoin(wallet);
       won += result.won;
       lost += result.lost;
-      result.explosions.forEach((explosion) => scene.addExplosion(explosion));
+      for (const explosion of result.explosions) {
+        scene.addExplosion(explosion);
+        scene.cheer(now / MS_PER_SECOND, BOMB_CHEER_SECONDS);
+      }
       if (result.gateHits > 0) {
         slot.addStock(result.gateHits);
         scene.flashGate();

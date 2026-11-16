@@ -5,9 +5,9 @@ export const TEXELS_PER_WORLD_UNIT = 16;
 const COIN_FACE_SIZE = 16;
 const TILE_SIZE = 16;
 
-/** Toon lighting in three hard bands: shadow, mid, lit. */
-export function createToonGradient(): THREE.DataTexture {
-  const texture = new THREE.DataTexture(new Uint8Array([70, 160, 255]), 3, 1, THREE.RedFormat);
+/** Toon lighting in hard bands, darkest first. Each value is a light level from 0 to 255. */
+export function createToonGradient(bands: readonly number[]): THREE.DataTexture {
+  const texture = new THREE.DataTexture(new Uint8Array(bands), bands.length, 1, THREE.RedFormat);
   texture.minFilter = THREE.NearestFilter;
   texture.magFilter = THREE.NearestFilter;
   texture.needsUpdate = true;

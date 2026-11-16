@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MAX_SPIN_STOCK, PAIR_PAYOUT, payoutFor, REEL_STOP_SECONDS, SLOT_SYMBOLS, SlotReels } from "../src/slot.ts";
 
-const RACCOON = SLOT_SYMBOLS.findIndex((symbol) => symbol.glyph === "🦝");
-const CHERRY = SLOT_SYMBOLS.findIndex((symbol) => symbol.glyph === "🍒");
-const BELL = SLOT_SYMBOLS.findIndex((symbol) => symbol.glyph === "🔔");
+const RACCOON = SLOT_SYMBOLS.findIndex((symbol) => symbol.id === "raccoon");
+const CHERRY = SLOT_SYMBOLS.findIndex((symbol) => symbol.id === "cherry");
+const BELL = SLOT_SYMBOLS.findIndex((symbol) => symbol.id === "bell");
 const STEP_SECONDS = 1 / 60;
 
 /** A random source that always lands on the given symbol. */

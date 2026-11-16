@@ -1,0 +1,6 @@
+Use case: stylized-concept
+Asset type: sprite art for a coin pusher arcade game rendered as 3D pixel art in the browser. The hero is a mischievous raccoon who sneaks into the arcade after closing time to play the coin pusher.
+Style/medium: crisp retro 16-bit pixel art in the style of SNES-era games. Chunky square pixels where every art pixel is a uniform 8x8 block of screen pixels. Limited palette of about 24 colors. Hard pixel edges, no anti-aliasing, no blur, no soft gradients. Every sprite has a 1-pixel dark outline.
+Lighting/mood: late-night arcade, cheeky and cheerful. Simple flat shading with one highlight band and one shadow band, light from the upper left.
+Color palette: deep night purple, neon pink #ff3d8b, neon cyan #39d7ff, coin gold #f5c04a with warm brown shading, cream highlights.
+Constraints: no text, letters, numbers, logos, signatures, UI frames or watermarks unless the spec below asks for one.

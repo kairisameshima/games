@@ -1,0 +1,10 @@
+Primary request: five slot machine reel symbols for the machine's reel display.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject, left to right:
+1. a pair of red cherries on a green stem
+2. a golden bell
+3. a dented grey metal trash can with its lid tipped open
+4. a bold red number 7 with a dark outline (the digit 7 is the only text allowed in this image)
+5. a grinning raccoon face with a black bandit mask
+Composition/framing: a strict single row of 5 cells evenly spaced across the image, each symbol centered in its cell, all symbols the same visual size and bold, with clear empty space between them. Front view, flat icon style.

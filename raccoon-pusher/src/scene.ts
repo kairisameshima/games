@@ -29,14 +29,17 @@ import {
   SIDE_WALL_THICKNESS,
 } from "./machine.ts";
 import type { SlotReels } from "./slot.ts";
+import { type PusherArt, RACCOON_FRAMES } from "./art.ts";
 import { SlotScreen } from "./slot-screen.ts";
+import { buildVoxelFrames } from "./voxel-sprite.ts";
 
 const MAX_COINS = 1_000;
 /** Low-poly is enough: at pixel-art resolution a 16-sided coin reads as round. */
 const COIN_SEGMENTS = 16;
 const CAMERA_FOV = 42;
-const CAMERA_POSITION = new THREE.Vector3(0, 8.5, 9);
-const CAMERA_TARGET = new THREE.Vector3(0, 0.2, -0.8);
+// The camera sits a little left of center so the raccoon has room beside the machine's left corner.
+const CAMERA_POSITION = new THREE.Vector3(-0.9, 8.5, 9);
+const CAMERA_TARGET = new THREE.Vector3(-0.9, 0.2, -0.8);
 const FLOOR_VISIBLE_BACK_Z = -5.4;
 /** CSS pixels per art pixel. */
 const ART_PIXEL_SIZE = 4;
@@ -49,6 +52,20 @@ const GATE_TUBE_RADIUS = 0.07;
 /** The ring is drawn a bit wider than the hit zone, so a coin that counts looks clearly inside it. */
 const GATE_RING_MARGIN = COIN_RADIUS * 0.9;
 const EXPLOSION_SECONDS = 0.5;
+/** The raccoon stands on the floor-level ledge beside the board's front-left corner, turned toward the board. */
+const RACCOON_POSITION = new THREE.Vector3(-(BOARD_HALF_WIDTH + 0.9), 0, FRONT_EDGE_Z - 0.8);
+const RACCOON_YAW = 0.15;
+/** The camera looks down steeply; leaning back keeps the raccoon's face toward it instead of its head top. */
+const RACCOON_LEAN_BACK = 0.55;
+/** One sprite pixel becomes a block this wide, close to one art pixel on screen at the raccoon's distance. */
+const RACCOON_VOXEL_SIZE = 0.08;
+/** Shadow, mid and lit bands for the cabinet and coins. */
+const SCENE_TOON_BANDS = [70, 160, 255];
+/** The raccoon's front face must show its pixel art at full colour; only faces turned away get shaded. */
+const RACCOON_TOON_BANDS = [150, 255];
+const RACCOON_DEPTH_PIXELS = 4;
+const RACCOON_IDLE_FPS = 1.5;
+const RACCOON_CHEER_FPS = 6;
 const EXPLOSION_LIGHT_INTENSITY = 60;
 const BOMB_TINT = new THREE.Color(1, 0.22, 0.18);
 const COIN_TINT = new THREE.Color(1, 1, 1);
@@ -83,14 +100,16 @@ function addBox(
 export class PusherScene {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly pixelPass = new PixelPass();
-  private readonly toonGradient = createToonGradient();
+  private readonly toonGradient = createToonGradient(SCENE_TOON_BANDS);
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.1, 100);
   private readonly coinMesh: THREE.InstancedMesh;
   private readonly pusherMesh: THREE.Mesh;
   private readonly dropGuide: THREE.Mesh;
   private readonly gateRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshToonMaterial>;
-  private readonly slotScreen = new SlotScreen();
+  private readonly slotScreen: SlotScreen;
+  private readonly raccoonFrames: THREE.InstancedMesh[];
+  private cheerUntilSeconds = -Infinity;
   private gateFlash = 0;
   private readonly sideWallMeshes: THREE.Mesh[] = [];
   private readonly bombTarget: THREE.Mesh;
@@ -103,7 +122,8 @@ export class PusherScene {
   private readonly coinRotation = new THREE.Quaternion();
   private readonly coinScale = new THREE.Vector3(1, 1, 1);
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, art: PusherArt) {
+    this.slotScreen = new SlotScreen(art.reels);
     // No antialiasing and hard shadows: every edge should land on a whole art pixel.
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -114,6 +134,14 @@ export class PusherScene {
     this.scene.background = new THREE.Color(COLORS.background);
     this.camera.position.copy(CAMERA_POSITION);
     this.camera.lookAt(CAMERA_TARGET);
+
+    const raccoonMaterial = new THREE.MeshToonMaterial({ gradientMap: createToonGradient(RACCOON_TOON_BANDS) });
+    this.raccoonFrames = buildVoxelFrames(art.raccoon, RACCOON_VOXEL_SIZE, RACCOON_DEPTH_PIXELS, raccoonMaterial);
+    const raccoon = new THREE.Group();
+    raccoon.position.copy(RACCOON_POSITION);
+    raccoon.rotation.set(-RACCOON_LEAN_BACK, RACCOON_YAW, 0, "YXZ");
+    raccoon.add(...this.raccoonFrames);
+    this.scene.add(raccoon);
 
     this.addLights();
     this.addCabinet();
@@ -190,7 +218,8 @@ export class PusherScene {
     this.scene.add(key);
     // Toon shading turns strong coloured fills into hard tinted bands, so the neon fills stay faint.
     const pinkFill = new THREE.PointLight(COLORS.neonPink, 8, 18);
-    pinkFill.position.set(-5, 3, 3);
+    // Behind the raccoon, so it rims the machine's left side without tinting the raccoon pink.
+    pinkFill.position.set(-5, 3, -3);
     this.scene.add(pinkFill);
     const blueFill = new THREE.PointLight(COLORS.neonBlue, 8, 18);
     blueFill.position.set(5, 3, 3);
@@ -307,6 +336,20 @@ export class PusherScene {
 
   showSlotWin(payout: number, timeSeconds: number): void {
     this.slotScreen.showWin(payout, timeSeconds);
+    this.cheer(timeSeconds, 2.5);
+  }
+
+  /** The raccoon cheers for `seconds`, for slot wins and bomb blasts. */
+  cheer(timeSeconds: number, seconds: number): void {
+    this.cheerUntilSeconds = Math.max(this.cheerUntilSeconds, timeSeconds + seconds);
+  }
+
+  private updateRaccoon(timeSeconds: number): void {
+    const cheering = timeSeconds < this.cheerUntilSeconds;
+    const frames = cheering ? RACCOON_FRAMES.cheer : RACCOON_FRAMES.idle;
+    const fps = cheering ? RACCOON_CHEER_FPS : RACCOON_IDLE_FPS;
+    const shown = frames[Math.floor(timeSeconds * fps) % frames.length];
+    this.raccoonFrames.forEach((mesh, frame) => (mesh.visible = frame === shown));
   }
 
   render(machine: PusherMachine, slot: SlotReels, timeSeconds: number, frameSeconds: number): void {
@@ -318,6 +361,7 @@ export class PusherScene {
     this.updateSideWalls(machine.sideWallEndZ);
     this.updateExplosions(frameSeconds);
     this.slotScreen.draw(slot, timeSeconds);
+    this.updateRaccoon(timeSeconds);
     machine.coins.forEach((coin, index) => {
       const position = coin.translation();
       const rotation = coin.rotation();

@@ -1,0 +1,9 @@
+Primary request: an animation sprite sheet of one raccoon character standing beside an arcade machine.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject: one chubby, cheeky raccoon standing upright on its hind legs, front-facing 3/4 view, grey fur, black bandit mask, ringed striped tail, big eyes. The exact same character, size and colors in every frame. Full body visible.
+Composition/framing: a strict single row of 4 frames evenly spaced, every frame the same scale with feet on the same baseline, clear empty space between frames.
+Frame 1: idle, clutching a gold coin to its chest, sly grin.
+Frame 2: idle, same pose, tail flicked up and eyes half closed.
+Frame 3: cheering, both arms thrown up, mouth open, a few gold coins flying above its head.
+Frame 4: cheering, jumping slightly off the ground, arms up, coins flying.
