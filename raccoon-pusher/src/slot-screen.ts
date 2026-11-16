@@ -8,9 +8,9 @@ const SCREEN_HEIGHT = 26;
 const REEL_SIZE = 18;
 const REEL_GAP = 2;
 const REEL_TOP = 1;
-const PIP_SIZE = 2;
-const PIP_SPACING = 4;
-const PIP_Y = 22;
+const PIP_SIZE = 3;
+const PIP_SPACING = 5;
+const PIP_Y = 21;
 /** How many symbols per second flick past on a spinning reel. */
 const SPIN_SYMBOLS_PER_SECOND = 14;
 const WIN_BANNER_SECONDS = 2.5;

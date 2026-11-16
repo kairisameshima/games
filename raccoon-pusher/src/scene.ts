@@ -49,8 +49,8 @@ const SCREEN_WIDTH = 3.6;
 const SCREEN_HEIGHT = 1.35;
 const SCREEN_CENTER_Y = 1.6;
 const GATE_TUBE_RADIUS = 0.07;
-/** The ring is drawn a bit wider than the hit zone, so a coin that counts looks clearly inside it. */
-const GATE_RING_MARGIN = COIN_RADIUS * 0.9;
+/** The ring's radius is the hit zone plus this, so a coin whose center lands inside the drawn ring counts. */
+const GATE_RING_MARGIN = 0.2;
 const EXPLOSION_SECONDS = 0.5;
 /** The raccoon stands on the floor-level ledge beside the board's front-left corner, turned toward the board. */
 const RACCOON_POSITION = new THREE.Vector3(-(BOARD_HALF_WIDTH + 0.9), 0, FRONT_EDGE_Z - 0.8);
@@ -72,6 +72,8 @@ const COIN_TINT = new THREE.Color(1, 1, 1);
 const GATE_GLOW = 1.2;
 const GATE_FLASH_GLOW = 8;
 const GATE_FLASH_DECAY_PER_SECOND = 4;
+/** On a hit the ring swells by this share of its size and shrinks back as the flash fades. */
+const GATE_FLASH_SWELL = 0.5;
 
 const COLORS = {
   background: 0x0b0714,
@@ -180,7 +182,7 @@ export class PusherScene {
     );
     // Lay the ring flat so coins fall through it.
     this.gateRing.rotation.x = Math.PI / 2;
-    this.gateRing.position.set(0, GATE_Y, DROP_Z);
+    this.gateRing.position.set(0, GATE_Y, 0);
     this.scene.add(this.gateRing);
 
     const screen = new THREE.Mesh(
@@ -354,8 +356,8 @@ export class PusherScene {
 
   render(machine: PusherMachine, slot: SlotReels, timeSeconds: number, frameSeconds: number): void {
     this.pusherMesh.position.z = machine.pusherZ;
-    this.gateRing.position.x = machine.gateX;
-    this.gateRing.scale.setScalar(machine.gateTolerance + GATE_RING_MARGIN);
+    this.gateRing.position.set(machine.gateX, GATE_Y, machine.gateZ);
+    this.gateRing.scale.setScalar((machine.gateTolerance + GATE_RING_MARGIN) * (1 + this.gateFlash * GATE_FLASH_SWELL));
     this.gateFlash = Math.max(0, this.gateFlash - GATE_FLASH_DECAY_PER_SECOND * frameSeconds);
     this.gateRing.material.emissiveIntensity = GATE_GLOW + this.gateFlash * (GATE_FLASH_GLOW - GATE_GLOW);
     this.updateSideWalls(machine.sideWallEndZ);

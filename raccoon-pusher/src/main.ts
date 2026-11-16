@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         ? `Click the pile to toss a bomb (${wallet.bombs} left).`
         : wallet.bag < 1
           ? "Out of coins. The raccoon is digging under the machine..."
-          : "Hold to drop coins. Time them through the ring for a spin.";
+          : "Hold to drop coins. Coins knocked off the shelf through the ring earn a spin.";
   };
 
   const fitCanvas = () => scene.resize(canvas.clientWidth, canvas.clientHeight);

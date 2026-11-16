@@ -47,8 +47,13 @@ export const DROP_HALF_RANGE = BOARD_HALF_WIDTH - COIN_RADIUS - 0.1;
 /** Random sideways offset per drop, so coins held at one spot spread out instead of stacking into a tower. */
 const DROP_JITTER = 0.25;
 
-/** A ring that sweeps across the drop slot below the drop point. A dropped coin falling through it earns a slot spin. */
-export const GATE_Y = 2.5;
+/**
+ * A ring that rides just in front of the pusher shelf's edge and sweeps side to side. A coin scraped off the shelf
+ * that falls through it earns a slot spin. It sits below the shelf top, so only coins dropping off the shelf reach it.
+ */
+export const GATE_Y = PUSHER_HEIGHT - 0.15;
+/** How far in front of the shelf edge the ring's center sits, roughly where a tipping coin's center falls. */
+const GATE_FORWARD_OFFSET = 0.45;
 export const GATE_SWING = DROP_HALF_RANGE * 0.9;
 const GATE_PERIOD_SECONDS = 3;
 
@@ -96,7 +101,7 @@ export interface Explosion {
 export interface StepResult {
   won: number;
   lost: number;
-  /** Dropped coins that fell through the gate this step. */
+  /** Coins that fell off the pusher shelf through the gate this step. */
   gateHits: number;
   explosions: Explosion[];
 }
@@ -126,8 +131,8 @@ export class PusherMachine {
   private sideWalls: RAPIER.RigidBody[] = [];
   private settings: MachineSettings;
   private elapsedSeconds = 0;
-  /** Dropped coins still above the gate. */
-  private readonly gateCandidates: RAPIER.RigidBody[] = [];
+  /** Coins resting on the pusher shelf, watched until they fall past the gate's height. */
+  private readonly shelfCoins = new Set<RAPIER.RigidBody>();
   private readonly bombFuses = new Map<RAPIER.RigidBody, number>();
 
   /** Call initPhysics() first. The board starts full of settled coins, like a real machine. */
@@ -156,6 +161,10 @@ export class PusherMachine {
 
   get gateX(): number {
     return Math.sin((2 * Math.PI * this.elapsedSeconds) / GATE_PERIOD_SECONDS) * GATE_SWING;
+  }
+
+  get gateZ(): number {
+    return pusherFrontZ(this.elapsedSeconds) + GATE_FORWARD_OFFSET;
   }
 
   get sideWallEndZ(): number {
@@ -261,6 +270,7 @@ export class PusherMachine {
     const coin = this.coins[index];
     this.coinKinds.delete(coin.handle);
     this.bombFuses.delete(coin);
+    this.shelfCoins.delete(coin);
     this.world.removeRigidBody(coin);
     this.coins.splice(index, 1);
   }
@@ -283,7 +293,7 @@ export class PusherMachine {
   dropCoin(slotX: number, random: () => number): void {
     const jittered = Math.max(-1, Math.min(1, slotX)) * DROP_HALF_RANGE + (random() - 0.5) * 2 * DROP_JITTER;
     const x = Math.max(-DROP_HALF_RANGE, Math.min(DROP_HALF_RANGE, jittered));
-    this.gateCandidates.push(this.addCoin(x, DROP_Y, DROP_Z, ...this.tumble(random), true, this.spin(random)));
+    this.addCoin(x, DROP_Y, DROP_Z, ...this.tumble(random), true, this.spin(random));
   }
 
   /** The raccoon tosses a bomb coin onto the pile at a board position; it goes off after its fuse. */
@@ -314,11 +324,17 @@ export class PusherMachine {
   private countGateHits(): number {
     let hits = 0;
     const gateX = this.gateX;
-    for (let index = this.gateCandidates.length - 1; index >= 0; index--) {
-      const position = this.gateCandidates[index].translation();
+    const shelfFrontZ = pusherFrontZ(this.elapsedSeconds);
+    for (const coin of this.shelfCoins) {
+      const position = coin.translation();
       if (position.y > GATE_Y) continue;
+      this.shelfCoins.delete(coin);
       if (Math.abs(position.x - gateX) <= this.settings.gateTolerance) hits += 1;
-      this.gateCandidates.splice(index, 1);
+    }
+    // Only the shelf holds coins above its own height behind its front face; floor piles in front never count.
+    for (const coin of this.coins) {
+      const position = coin.translation();
+      if (position.y > PUSHER_HEIGHT && position.z < shelfFrontZ) this.shelfCoins.add(coin);
     }
     return hits;
   }
