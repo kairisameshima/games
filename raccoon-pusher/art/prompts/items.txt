@@ -1,0 +1,10 @@
+Primary request: three small loot items that get mixed into the coin pile and are broken open when won.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Pixel grid: draw each item on a 20x20 pixel grid and enlarge it so every art pixel is exactly a 16x16 block of screen pixels. Do not add detail smaller than one art pixel.
+Subject, left to right:
+1. a chubby pink piggy bank with a coin slot on its back, side view
+2. a rough grey geode rock cracked open at the top, purple crystals peeking out
+3. a toy vending-machine capsule shaped like an egg standing upright: the top half is clear see-through plastic showing a tiny yellow star toy inside, the bottom half is solid cyan plastic, no band, no button
+Each item is bold, chunky, with a thick dark outline and about 8 colors.
+Composition/framing: a strict single row of 3 cells evenly spaced, each item centered in its own cell, all the same visual size, clear empty space between them.

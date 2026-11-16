@@ -1,3 +1,7 @@
+import itemsLayout from "./assets/items.json";
+import itemsUrl from "./assets/items.png";
+import prizesLayout from "./assets/prizes.json";
+import prizesUrl from "./assets/prizes.png";
 import raccoonLayout from "./assets/raccoon.json";
 import raccoonUrl from "./assets/raccoon.png";
 import reelsLayout from "./assets/reels.json";
@@ -20,9 +24,15 @@ export interface PusherArt {
   reels: Sheet;
   /** Raccoon frames: two idle, then two cheering. */
   raccoon: Sheet;
+  /** Loot items, one frame each, in ITEM_KINDS order. */
+  items: Sheet;
+  /** Grand prizes, one frame each, in MACHINES order. */
+  prizes: Sheet;
 }
 
 export const RACCOON_FRAMES = { idle: [0, 1], cheer: [2, 3] } as const;
+export const ITEMS_SHEET_URL = itemsUrl;
+export const ITEMS_SHEET_LAYOUT: SheetLayout = itemsLayout;
 
 async function loadImage(url: string): Promise<HTMLImageElement> {
   const image = new Image();
@@ -32,6 +42,16 @@ async function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 export async function loadPusherArt(): Promise<PusherArt> {
-  const [reels, raccoon] = await Promise.all([loadImage(reelsUrl), loadImage(raccoonUrl)]);
-  return { reels: { image: reels, layout: reelsLayout }, raccoon: { image: raccoon, layout: raccoonLayout } };
+  const [reels, raccoon, items, prizes] = await Promise.all([
+    loadImage(reelsUrl),
+    loadImage(raccoonUrl),
+    loadImage(itemsUrl),
+    loadImage(prizesUrl),
+  ]);
+  return {
+    reels: { image: reels, layout: reelsLayout },
+    raccoon: { image: raccoon, layout: raccoonLayout },
+    items: { image: items, layout: itemsLayout },
+    prizes: { image: prizes, layout: prizesLayout },
+  };
 }

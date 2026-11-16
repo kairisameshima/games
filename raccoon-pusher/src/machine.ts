@@ -40,6 +40,11 @@ const WALL_RESTITUTION = 0.4;
 const DROP_MAX_TILT = 0.9;
 const DROP_MAX_SPIN = 8;
 const NO_SPIN = { x: 0, y: 0, z: 0 };
+/** Loot and prizes are blocky, so they get a small rounded edge to slide over coins instead of snagging. */
+const BLOCK_BORDER_RADIUS = 0.04;
+const PRIZE_RESTITUTION = 0.1;
+/** Grippier than a coin, so the prize drags against the felt and the pile has to shove it. */
+const PRIZE_FRICTION = 1;
 
 export const DROP_Y = 3.2;
 export const DROP_Z = -4.6;
@@ -75,9 +80,14 @@ const BOMB_IMPULSE = 0.45;
 const BOMB_FORWARD_BIAS = 0.6;
 const BOMB_LIFT = 0.35;
 
-/** Coins below this height have left the board and are scored. */
+/** The prize starts standing in the middle of the floor, well back from the edge, facing the player. */
+const PRIZE_START_Z = -1;
+/** A prize lost to a gutter drops back in here, onto the pile in front of the pusher. */
+const PRIZE_RESPAWN = { x: 0, y: 2.5, z: -1 };
+
+/** Pieces below this height have left the board and are scored. */
 const FALLEN_Y = -3;
-/** A fallen coin counts as won when it left over the front edge, allowing for its tumble. */
+/** A fallen piece counts as won when it left over the front edge, allowing for its tumble. */
 const WON_ZONE_Z = FRONT_EDGE_Z - COIN_RADIUS;
 
 const STARTING_COIN_ROWS = 7;
@@ -85,12 +95,32 @@ const STARTING_COIN_COLUMNS = 7;
 const STARTING_COIN_LAYERS = 2;
 const STARTING_COIN_SPACING = 1.05;
 const STARTING_FILL_FRONT_Z = 2.4;
+const STARTING_ITEMS = 2;
+const STARTING_ITEM_Y = 1.5;
+const STARTING_ITEM_BACK_Z = -1.5;
 const SETTLE_SECONDS = 4;
 
 export const PHYSICS_STEP_SECONDS = 1 / 60;
 const SOLVER_ITERATIONS = 8;
 
-export type CoinKind = "normal" | "bomb";
+export type ItemKind = "piggy" | "geode" | "capsule";
+/** Order matches the frames in the loot item sheet. */
+export const ITEM_KINDS: readonly ItemKind[] = ["piggy", "geode", "capsule"];
+export type PieceKind = "coin" | "bomb" | ItemKind;
+
+export interface HalfExtents {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Sizes that come from the art: loot and prizes collide with boxes the size of their 3D pixel sprites. */
+export interface MachineShape {
+  itemHalfExtents: HalfExtents;
+  prizeHalfExtents: HalfExtents;
+  /** Prize density relative to a coin's; a heavier prize takes more coins to push off the edge. */
+  prizeDensity: number;
+}
 
 export interface Explosion {
   x: number;
@@ -99,11 +129,17 @@ export interface Explosion {
 }
 
 export interface StepResult {
+  /** Coins (and unexploded bombs) pushed over the front edge. */
   won: number;
+  /** Pieces lost to the side gutters. */
   lost: number;
-  /** Coins that fell off the pusher shelf through the gate this step. */
+  /** Pieces that fell off the pusher shelf through the gate this step. */
   gateHits: number;
   explosions: Explosion[];
+  /** Loot pushed over the front edge, to be broken open. */
+  wonItems: ItemKind[];
+  /** True on the step the grand prize falls over the front edge. */
+  prizeWon: boolean;
 }
 
 /** Things upgrades change about the cabinet. */
@@ -125,22 +161,29 @@ export function pusherFrontZ(timeSeconds: number): number {
 
 export class PusherMachine {
   readonly world: RAPIER.World;
-  readonly coins: RAPIER.RigidBody[] = [];
-  private readonly coinKinds = new Map<number, CoinKind>();
+  /** Every loose piece on the board: coins, bombs and loot. The prize is kept apart. */
+  readonly pieces: RAPIER.RigidBody[] = [];
+  private readonly pieceKinds = new Map<number, PieceKind>();
   private readonly pusher: RAPIER.RigidBody;
+  private readonly shape: MachineShape;
+  private prizeBody: RAPIER.RigidBody | undefined;
   private sideWalls: RAPIER.RigidBody[] = [];
   private settings: MachineSettings;
   private elapsedSeconds = 0;
-  /** Coins resting on the pusher shelf, watched until they fall past the gate's height. */
-  private readonly shelfCoins = new Set<RAPIER.RigidBody>();
+  /** Pieces resting on the pusher shelf, watched until they fall past the gate's height. */
+  private readonly shelfPieces = new Set<RAPIER.RigidBody>();
   private readonly bombFuses = new Map<RAPIER.RigidBody, number>();
 
-  /** Call initPhysics() first. The board starts full of settled coins, like a real machine. */
-  constructor(settings: MachineSettings, random: () => number) {
+  /**
+   * Call initPhysics() first. The board starts full of settled coins with the prize standing among them.
+   * `withPrize` is false once this machine's prize has been won, so a reload does not hand it back.
+   */
+  constructor(settings: MachineSettings, shape: MachineShape, withPrize: boolean, random: () => number) {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = PHYSICS_STEP_SECONDS;
     this.world.numSolverIterations = SOLVER_ITERATIONS;
     this.settings = settings;
+    this.shape = shape;
     this.buildCabinet();
     this.pusher = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, PUSHER_HEIGHT / 2, this.pusherCenterZ()),
@@ -151,6 +194,7 @@ export class PusherMachine {
         .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max),
       this.pusher,
     );
+    if (withPrize) this.prizeBody = this.addPrize(0, shape.prizeHalfExtents.y + 0.05, PRIZE_START_Z);
     this.fillBoard(random);
     for (let elapsed = 0; elapsed < SETTLE_SECONDS; elapsed += PHYSICS_STEP_SECONDS) this.step();
   }
@@ -175,14 +219,24 @@ export class PusherMachine {
     return this.settings.gateTolerance;
   }
 
-  coinKind(coin: RAPIER.RigidBody): CoinKind {
-    return this.coinKinds.get(coin.handle) ?? "normal";
+  /** The grand prize while it is still on the board. */
+  get prize(): RAPIER.RigidBody | undefined {
+    return this.prizeBody;
+  }
+
+  pieceKind(piece: RAPIER.RigidBody): PieceKind {
+    return this.pieceKinds.get(piece.handle) ?? "coin";
   }
 
   applySettings(settings: MachineSettings): void {
     const wallsMoved = settings.sideWallEndZ !== this.settings.sideWallEndZ;
     this.settings = settings;
     if (wallsMoved) this.buildSideWalls();
+  }
+
+  /** Releases the physics world. The machine must not be used afterwards. */
+  dispose(): void {
+    this.world.free();
   }
 
   private pusherCenterZ(): number {
@@ -232,60 +286,99 @@ export class PusherMachine {
     );
   }
 
-  /** `tilt` turns the coin about a horizontal axis at `tiltHeading` radians around the vertical. */
-  private addCoin(
-    x: number,
-    y: number,
-    z: number,
+  /** `tilt` turns the piece about a horizontal axis at `tiltHeading` radians around the vertical. */
+  private createPieceBody(
+    position: RAPIER.Vector,
     tilt: number,
     tiltHeading: number,
     ccd: boolean,
     spin: RAPIER.Vector = NO_SPIN,
   ): RAPIER.RigidBody {
     const halfTilt = Math.sin(tilt / 2);
-    const body = this.world.createRigidBody(
+    return this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(x, y, z)
+        .setTranslation(position.x, position.y, position.z)
         .setRotation({ x: Math.cos(tiltHeading) * halfTilt, y: 0, z: Math.sin(tiltHeading) * halfTilt, w: Math.cos(tilt / 2) })
         .setAngvel(spin)
         .setLinearDamping(COIN_LINEAR_DAMPING)
         .setAngularDamping(COIN_ANGULAR_DAMPING)
         .setCcdEnabled(ccd),
     );
+  }
+
+  private addCoin(position: RAPIER.Vector, tilt: number, tiltHeading: number, ccd: boolean, spin?: RAPIER.Vector): RAPIER.RigidBody {
+    const body = this.createPieceBody(position, tilt, tiltHeading, ccd, spin);
     this.world.createCollider(
-      RAPIER.ColliderDesc.roundCylinder(
-        COIN_THICKNESS / 2 - COIN_BORDER_RADIUS,
-        COIN_RADIUS - COIN_BORDER_RADIUS,
-        COIN_BORDER_RADIUS,
-      )
+      RAPIER.ColliderDesc.roundCylinder(COIN_THICKNESS / 2 - COIN_BORDER_RADIUS, COIN_RADIUS - COIN_BORDER_RADIUS, COIN_BORDER_RADIUS)
         .setFriction(COIN_FRICTION)
         .setRestitution(COIN_RESTITUTION),
       body,
     );
-    this.coins.push(body);
+    this.pieces.push(body);
     return body;
   }
 
-  private removeCoin(index: number): void {
-    const coin = this.coins[index];
-    this.coinKinds.delete(coin.handle);
-    this.bombFuses.delete(coin);
-    this.shelfCoins.delete(coin);
-    this.world.removeRigidBody(coin);
-    this.coins.splice(index, 1);
+  private addItem(kind: ItemKind, position: RAPIER.Vector, tilt: number, tiltHeading: number, spin?: RAPIER.Vector): void {
+    const body = this.createPieceBody(position, tilt, tiltHeading, true, spin);
+    const { x, y, z } = this.shape.itemHalfExtents;
+    this.world.createCollider(
+      RAPIER.ColliderDesc.roundCuboid(x - BLOCK_BORDER_RADIUS, y - BLOCK_BORDER_RADIUS, z - BLOCK_BORDER_RADIUS, BLOCK_BORDER_RADIUS)
+        .setFriction(COIN_FRICTION)
+        .setRestitution(COIN_RESTITUTION),
+      body,
+    );
+    this.pieces.push(body);
+    this.pieceKinds.set(body.handle, kind);
+  }
+
+  private addPrize(x: number, y: number, z: number): RAPIER.RigidBody {
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).setLinearDamping(COIN_LINEAR_DAMPING).setCcdEnabled(true),
+    );
+    const half = this.shape.prizeHalfExtents;
+    this.world.createCollider(
+      RAPIER.ColliderDesc.roundCuboid(half.x - BLOCK_BORDER_RADIUS, half.y - BLOCK_BORDER_RADIUS, half.z - BLOCK_BORDER_RADIUS, BLOCK_BORDER_RADIUS)
+        .setDensity(this.shape.prizeDensity)
+        .setFriction(PRIZE_FRICTION)
+        .setRestitution(PRIZE_RESTITUTION),
+      body,
+    );
+    return body;
+  }
+
+  private removePiece(index: number): void {
+    const piece = this.pieces[index];
+    this.pieceKinds.delete(piece.handle);
+    this.bombFuses.delete(piece);
+    this.shelfPieces.delete(piece);
+    this.world.removeRigidBody(piece);
+    this.pieces.splice(index, 1);
   }
 
   private fillBoard(random: () => number): void {
+    const prizeHalf = this.shape.prizeHalfExtents;
     for (let layer = 0; layer < STARTING_COIN_LAYERS; layer++) {
       for (let row = 0; row < STARTING_COIN_ROWS; row++) {
         for (let column = 0; column < STARTING_COIN_COLUMNS; column++) {
           const x = (column - (STARTING_COIN_COLUMNS - 1) / 2) * STARTING_COIN_SPACING + (random() - 0.5) * 0.4;
           const z = STARTING_FILL_FRONT_Z - row * STARTING_COIN_SPACING + (random() - 0.5) * 0.4;
+          // Leave room for the prize, so it starts standing on the felt rather than wedged into coins.
+          const insidePrize =
+            this.prizeBody !== undefined &&
+            Math.abs(x) < prizeHalf.x + COIN_RADIUS &&
+            Math.abs(z - PRIZE_START_Z) < prizeHalf.z + COIN_RADIUS;
+          if (insidePrize) continue;
           // Coins behind the pusher's front face start on top of it.
           const floorY = z < pusherFrontZ(0) ? PUSHER_HEIGHT : 0;
-          this.addCoin(x, floorY + 0.2 + layer * 0.3, z, (random() - 0.5) * 0.3, 0, false);
+          this.addCoin({ x, y: floorY + 0.2 + layer * 0.3, z }, (random() - 0.5) * 0.3, 0, false);
         }
       }
+    }
+    for (let item = 0; item < STARTING_ITEMS; item++) {
+      const kind = ITEM_KINDS[Math.floor(random() * ITEM_KINDS.length)];
+      const x = (random() * 2 - 1) * (BOARD_HALF_WIDTH - 1);
+      const z = STARTING_ITEM_BACK_Z + random() * (STARTING_FILL_FRONT_Z - 1 - STARTING_ITEM_BACK_Z);
+      this.addItem(kind, { x, y: STARTING_ITEM_Y, z }, random() * Math.PI, random() * Math.PI * 2);
     }
   }
 
@@ -293,23 +386,34 @@ export class PusherMachine {
   dropCoin(slotX: number, random: () => number): void {
     const jittered = Math.max(-1, Math.min(1, slotX)) * DROP_HALF_RANGE + (random() - 0.5) * 2 * DROP_JITTER;
     const x = Math.max(-DROP_HALF_RANGE, Math.min(DROP_HALF_RANGE, jittered));
-    this.addCoin(x, DROP_Y, DROP_Z, ...this.tumble(random), true, this.spin(random));
+    this.addCoin({ x, y: DROP_Y, z: DROP_Z }, ...this.tumble(random), true, this.spin(random));
   }
 
   /** The raccoon tosses a bomb coin onto the pile at a board position; it goes off after its fuse. */
   tossBomb(x: number, z: number): void {
     const clampedX = Math.max(-DROP_HALF_RANGE, Math.min(DROP_HALF_RANGE, x));
     const clampedZ = Math.max(BOMB_TOSS_BACK_Z, Math.min(FRONT_EDGE_Z - COIN_RADIUS, z));
-    const bomb = this.addCoin(clampedX, BOMB_TOSS_Y, clampedZ, 0, 0, true);
-    this.coinKinds.set(bomb.handle, "bomb");
+    const bomb = this.addCoin({ x: clampedX, y: BOMB_TOSS_Y, z: clampedZ }, 0, 0, true);
+    this.pieceKinds.set(bomb.handle, "bomb");
     this.bombFuses.set(bomb, BOMB_FUSE_SECONDS);
+  }
+
+  private showerPosition(random: () => number): RAPIER.Vector {
+    return {
+      x: (random() * 2 - 1) * SHOWER_HALF_WIDTH,
+      y: SHOWER_Y,
+      z: SHOWER_BACK_Z + random() * (SHOWER_FRONT_Z - SHOWER_BACK_Z),
+    };
   }
 
   /** Drops one payout coin at a random spot over the back of the board. */
   dropShowerCoin(random: () => number): void {
-    const x = (random() * 2 - 1) * SHOWER_HALF_WIDTH;
-    const z = SHOWER_BACK_Z + random() * (SHOWER_FRONT_Z - SHOWER_BACK_Z);
-    this.addCoin(x, SHOWER_Y, z, ...this.tumble(random), true, this.spin(random));
+    this.addCoin(this.showerPosition(random), ...this.tumble(random), true, this.spin(random));
+  }
+
+  /** Drops a loot item into the shower, to be pushed off with the coins. */
+  dropShowerItem(kind: ItemKind, random: () => number): void {
+    this.addItem(kind, this.showerPosition(random), ...this.tumble(random), this.spin(random));
   }
 
   /** A random [tilt, tiltHeading] for a coin leaving the slot. */
@@ -325,26 +429,27 @@ export class PusherMachine {
     let hits = 0;
     const gateX = this.gateX;
     const shelfFrontZ = pusherFrontZ(this.elapsedSeconds);
-    for (const coin of this.shelfCoins) {
-      const position = coin.translation();
+    for (const piece of this.shelfPieces) {
+      const position = piece.translation();
       if (position.y > GATE_Y) continue;
-      this.shelfCoins.delete(coin);
+      this.shelfPieces.delete(piece);
       if (Math.abs(position.x - gateX) <= this.settings.gateTolerance) hits += 1;
     }
-    // Only the shelf holds coins above its own height behind its front face; floor piles in front never count.
-    for (const coin of this.coins) {
-      const position = coin.translation();
-      if (position.y > PUSHER_HEIGHT && position.z < shelfFrontZ) this.shelfCoins.add(coin);
+    // Only the shelf holds pieces above its own height behind its front face; floor piles in front never count.
+    for (const piece of this.pieces) {
+      const position = piece.translation();
+      if (position.y > PUSHER_HEIGHT && position.z < shelfFrontZ) this.shelfPieces.add(piece);
     }
     return hits;
   }
 
-  /** Pushes every coin near the bomb outward and toward the payout edge, then removes the bomb. */
+  /** Pushes every piece near the bomb (the prize too) outward and toward the payout edge, then removes the bomb. */
   private explode(bomb: RAPIER.RigidBody): Explosion {
     const center = bomb.translation();
-    for (const coin of this.coins) {
-      if (coin === bomb) continue;
-      const position = coin.translation();
+    const pushed = this.prizeBody ? [...this.pieces, this.prizeBody] : this.pieces;
+    for (const piece of pushed) {
+      if (piece === bomb) continue;
+      const position = piece.translation();
       const dx = position.x - center.x;
       const dz = position.z - center.z;
       const distance = Math.hypot(dx, dz);
@@ -352,7 +457,7 @@ export class PusherMachine {
       const strength = BOMB_IMPULSE * (1 - distance / BOMB_RADIUS);
       const outwardX = distance > 0 ? dx / distance : 0;
       const outwardZ = distance > 0 ? dz / distance : 1;
-      coin.applyImpulse(
+      piece.applyImpulse(
         {
           x: strength * outwardX * (1 - BOMB_FORWARD_BIAS),
           y: strength * BOMB_LIFT,
@@ -361,7 +466,7 @@ export class PusherMachine {
         true,
       );
     }
-    this.removeCoin(this.coins.indexOf(bomb));
+    this.removePiece(this.pieces.indexOf(bomb));
     return { x: center.x, y: center.y, z: center.z };
   }
 
@@ -377,20 +482,47 @@ export class PusherMachine {
     return explosions;
   }
 
-  /** Advances one physics step and removes coins that left the board. */
+  private isOverFrontEdge(position: RAPIER.Vector): boolean {
+    return position.z > WON_ZONE_Z && Math.abs(position.x) < BOARD_HALF_WIDTH + COIN_RADIUS;
+  }
+
+  /** True when the prize fell over the front edge. A prize lost to a gutter drops back in instead. */
+  private checkPrize(): boolean {
+    if (!this.prizeBody) return false;
+    const position = this.prizeBody.translation();
+    if (position.y > FALLEN_Y) return false;
+    this.world.removeRigidBody(this.prizeBody);
+    if (this.isOverFrontEdge(position)) {
+      this.prizeBody = undefined;
+      return true;
+    }
+    this.prizeBody = this.addPrize(PRIZE_RESPAWN.x, PRIZE_RESPAWN.y, PRIZE_RESPAWN.z);
+    return false;
+  }
+
+  /** Advances one physics step and removes pieces that left the board. */
   step(): StepResult {
     this.elapsedSeconds += PHYSICS_STEP_SECONDS;
     this.pusher.setNextKinematicTranslation({ x: 0, y: PUSHER_HEIGHT / 2, z: this.pusherCenterZ() });
     this.world.step();
 
-    const result: StepResult = { won: 0, lost: 0, gateHits: this.countGateHits(), explosions: this.burnFuses() };
-    for (let index = this.coins.length - 1; index >= 0; index--) {
-      const coin = this.coins[index];
-      const position = coin.translation();
+    const result: StepResult = {
+      won: 0,
+      lost: 0,
+      gateHits: this.countGateHits(),
+      explosions: this.burnFuses(),
+      wonItems: [],
+      prizeWon: this.checkPrize(),
+    };
+    for (let index = this.pieces.length - 1; index >= 0; index--) {
+      const piece = this.pieces[index];
+      const position = piece.translation();
       if (position.y > FALLEN_Y) continue;
-      if (position.z > WON_ZONE_Z && Math.abs(position.x) < BOARD_HALF_WIDTH + COIN_RADIUS) result.won += 1;
-      else result.lost += 1;
-      this.removeCoin(index);
+      const kind = this.pieceKind(piece);
+      if (!this.isOverFrontEdge(position)) result.lost += 1;
+      else if (kind === "coin" || kind === "bomb") result.won += 1;
+      else result.wonItems.push(kind);
+      this.removePiece(index);
     }
     return result;
   }

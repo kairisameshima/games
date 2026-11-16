@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { RigidBody } from "@dimforge/rapier3d-compat";
 import { PixelPass } from "./pixel-pass.ts";
 import {
   createCoinFaceTexture,
@@ -24,14 +25,18 @@ import {
   GATE_Y,
   PUSHER_HALF_DEPTH,
   PUSHER_HEIGHT,
+  ITEM_KINDS,
+  type ItemKind,
+  type MachineShape,
   type PusherMachine,
   SIDE_WALL_HEIGHT,
   SIDE_WALL_THICKNESS,
 } from "./machine.ts";
 import type { SlotReels } from "./slot.ts";
 import { type PusherArt, RACCOON_FRAMES } from "./art.ts";
+import type { MachineTheme } from "./machines.ts";
 import { SlotScreen } from "./slot-screen.ts";
-import { buildVoxelFrames } from "./voxel-sprite.ts";
+import { buildVoxelGeometry, readSheetPixels, voxelHalfExtents } from "./voxel-sprite.ts";
 
 const MAX_COINS = 1_000;
 /** Low-poly is enough: at pixel-art resolution a 16-sided coin reads as round. */
@@ -61,9 +66,15 @@ const RACCOON_LEAN_BACK = 0.55;
 const RACCOON_VOXEL_SIZE = 0.07;
 /** Shadow, mid and lit bands for the cabinet and coins. */
 const SCENE_TOON_BANDS = [70, 160, 255];
-/** The raccoon's front face must show its pixel art at full colour; only faces turned away get shaded. */
-const RACCOON_TOON_BANDS = [150, 255];
+/** 3D pixel sprites must show their art at full colour on the front; only faces turned away get shaded. */
+const SPRITE_TOON_BANDS = [150, 255];
 const RACCOON_DEPTH_PIXELS = 4;
+/** Loot is small, so its blocks are smaller than an art pixel; it reads as a chunky token rather than crisp art. */
+const ITEM_VOXEL_SIZE = 0.045;
+const ITEM_DEPTH_PIXELS = 8;
+const MAX_ITEMS_PER_KIND = 32;
+const PRIZE_VOXEL_SIZE = 0.06;
+const PRIZE_DEPTH_PIXELS = 12;
 const RACCOON_IDLE_FPS = 1.5;
 const RACCOON_CHEER_FPS = 6;
 const EXPLOSION_LIGHT_INTENSITY = 60;
@@ -99,6 +110,15 @@ function addBox(
   return mesh;
 }
 
+/** Collision sizes for loot and prizes, matching the 3D pixel sprites drawn for them. */
+export function machineShapeFor(art: PusherArt, prizeDensity: number): MachineShape {
+  return {
+    itemHalfExtents: voxelHalfExtents(art.items.layout, ITEM_VOXEL_SIZE, ITEM_DEPTH_PIXELS),
+    prizeHalfExtents: voxelHalfExtents(art.prizes.layout, PRIZE_VOXEL_SIZE, PRIZE_DEPTH_PIXELS),
+    prizeDensity,
+  };
+}
+
 export class PusherScene {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly pixelPass = new PixelPass();
@@ -110,7 +130,11 @@ export class PusherScene {
   private readonly dropGuide: THREE.Mesh;
   private readonly gateRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshToonMaterial>;
   private readonly slotScreen: SlotScreen;
-  private readonly raccoonFrames: THREE.InstancedMesh[];
+  private readonly raccoonFrames: THREE.Mesh[];
+  private readonly itemMeshes: Record<ItemKind, THREE.InstancedMesh>;
+  private readonly prizeGeometries: THREE.BufferGeometry[];
+  private readonly prizeMesh: THREE.Mesh;
+  private readonly feltMaterial = new THREE.MeshToonMaterial({ gradientMap: this.toonGradient });
   private cheerUntilSeconds = -Infinity;
   private gateFlash = 0;
   private readonly sideWallMeshes: THREE.Mesh[] = [];
@@ -137,13 +161,42 @@ export class PusherScene {
     this.camera.position.copy(CAMERA_POSITION);
     this.camera.lookAt(CAMERA_TARGET);
 
-    const raccoonMaterial = new THREE.MeshToonMaterial({ gradientMap: createToonGradient(RACCOON_TOON_BANDS) });
-    this.raccoonFrames = buildVoxelFrames(art.raccoon, RACCOON_VOXEL_SIZE, RACCOON_DEPTH_PIXELS, raccoonMaterial);
+    const spriteMaterial = new THREE.MeshToonMaterial({ gradientMap: createToonGradient(SPRITE_TOON_BANDS), vertexColors: true });
+    const raccoonPixels = readSheetPixels(art.raccoon);
+    this.raccoonFrames = Array.from({ length: art.raccoon.layout.columns }, (_, frame) => {
+      const geometry = buildVoxelGeometry(raccoonPixels, art.raccoon.layout, frame, RACCOON_VOXEL_SIZE, RACCOON_DEPTH_PIXELS, "feet");
+      const mesh = new THREE.Mesh(geometry, spriteMaterial);
+      mesh.castShadow = true;
+      return mesh;
+    });
     const raccoon = new THREE.Group();
     raccoon.position.copy(RACCOON_POSITION);
     raccoon.rotation.set(-RACCOON_LEAN_BACK, RACCOON_YAW, 0, "YXZ");
     raccoon.add(...this.raccoonFrames);
     this.scene.add(raccoon);
+
+    const itemPixels = readSheetPixels(art.items);
+    const itemMeshes = ITEM_KINDS.map((_kind, frame) => {
+      const geometry = buildVoxelGeometry(itemPixels, art.items.layout, frame, ITEM_VOXEL_SIZE, ITEM_DEPTH_PIXELS, "center");
+      const mesh = new THREE.InstancedMesh(geometry, spriteMaterial, MAX_ITEMS_PER_KIND);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      return mesh;
+    });
+    this.itemMeshes = { piggy: itemMeshes[0], geode: itemMeshes[1], capsule: itemMeshes[2] };
+
+    const prizePixels = readSheetPixels(art.prizes);
+    this.prizeGeometries = Array.from({ length: art.prizes.layout.columns }, (_, frame) =>
+      buildVoxelGeometry(prizePixels, art.prizes.layout, frame, PRIZE_VOXEL_SIZE, PRIZE_DEPTH_PIXELS, "center"),
+    );
+    this.prizeMesh = new THREE.Mesh(this.prizeGeometries[0], spriteMaterial);
+    this.prizeMesh.castShadow = true;
+    // The prize's matrix is copied straight from its physics body each frame.
+    this.prizeMesh.matrixAutoUpdate = false;
+    this.prizeMesh.receiveShadow = true;
+    this.scene.add(this.prizeMesh);
 
     this.addLights();
     this.addCabinet();
@@ -231,9 +284,7 @@ export class PusherScene {
   private addCabinet(): void {
     const floorWidth = BOARD_HALF_WIDTH * 2;
     const floorDepth = FRONT_EDGE_Z - FLOOR_VISIBLE_BACK_Z;
-    const felt = this.toon({ color: 0xffffff, map: tiled(createFeltTexture(), floorWidth, floorDepth) });
-    addBox(this.scene, [floorWidth, 0.5, floorDepth], [0, -0.25, FLOOR_VISIBLE_BACK_Z + floorDepth / 2], felt);
-
+    addBox(this.scene, [floorWidth, 0.5, floorDepth], [0, -0.25, FLOOR_VISIBLE_BACK_Z + floorDepth / 2], this.feltMaterial);
     const trim = this.toon({ color: COLORS.trim, emissive: COLORS.trim, emissiveIntensity: 1.5 });
     addBox(this.scene, [floorWidth, 0.06, 0.06], [0, 0.03, FRONT_EDGE_Z - 0.03], trim);
 
@@ -257,6 +308,15 @@ export class PusherScene {
       strip.castShadow = false;
       this.sideWallMeshes.push(wall, strip);
     }
+  }
+
+  /** Dresses the cabinet for a machine: its felt colours and its grand prize. */
+  setMachine(theme: MachineTheme, prizeFrame: number): void {
+    this.feltMaterial.map?.dispose();
+    const floorDepth = FRONT_EDGE_Z - FLOOR_VISIBLE_BACK_Z;
+    this.feltMaterial.map = tiled(createFeltTexture(theme.feltColor, theme.feltPrintColor), BOARD_HALF_WIDTH * 2, floorDepth);
+    this.feltMaterial.needsUpdate = true;
+    this.prizeMesh.geometry = this.prizeGeometries[prizeFrame];
   }
 
   resize(width: number, height: number): void {
@@ -354,6 +414,43 @@ export class PusherScene {
     this.raccoonFrames.forEach((mesh, frame) => (mesh.visible = frame === shown));
   }
 
+  private composeFromBody(body: RigidBody): THREE.Matrix4 {
+    const position = body.translation();
+    const rotation = body.rotation();
+    this.coinPosition.set(position.x, position.y, position.z);
+    this.coinRotation.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    return this.coinMatrix.compose(this.coinPosition, this.coinRotation, this.coinScale);
+  }
+
+  private updatePieces(machine: PusherMachine): void {
+    let coinCount = 0;
+    const itemCounts: Record<ItemKind, number> = { piggy: 0, geode: 0, capsule: 0 };
+    for (const piece of machine.pieces) {
+      const kind = machine.pieceKind(piece);
+      if (kind === "coin" || kind === "bomb") {
+        if (coinCount >= MAX_COINS) continue;
+        this.coinMesh.setMatrixAt(coinCount, this.composeFromBody(piece));
+        this.coinMesh.setColorAt(coinCount, kind === "bomb" ? BOMB_TINT : COIN_TINT);
+        coinCount += 1;
+        continue;
+      }
+      if (itemCounts[kind] >= MAX_ITEMS_PER_KIND) continue;
+      this.itemMeshes[kind].setMatrixAt(itemCounts[kind], this.composeFromBody(piece));
+      itemCounts[kind] += 1;
+    }
+    this.coinMesh.count = coinCount;
+    this.coinMesh.instanceMatrix.needsUpdate = true;
+    if (this.coinMesh.instanceColor) this.coinMesh.instanceColor.needsUpdate = true;
+    for (const kind of ITEM_KINDS) {
+      this.itemMeshes[kind].count = itemCounts[kind];
+      this.itemMeshes[kind].instanceMatrix.needsUpdate = true;
+    }
+
+    const prize = machine.prize;
+    this.prizeMesh.visible = prize !== undefined;
+    if (prize) this.prizeMesh.matrix.copy(this.composeFromBody(prize));
+  }
+
   render(machine: PusherMachine, slot: SlotReels, timeSeconds: number, frameSeconds: number): void {
     this.pusherMesh.position.z = machine.pusherZ;
     this.gateRing.position.set(machine.gateX, GATE_Y, machine.gateZ);
@@ -364,18 +461,7 @@ export class PusherScene {
     this.updateExplosions(frameSeconds);
     this.slotScreen.draw(slot, timeSeconds);
     this.updateRaccoon(timeSeconds);
-    machine.coins.forEach((coin, index) => {
-      const position = coin.translation();
-      const rotation = coin.rotation();
-      this.coinPosition.set(position.x, position.y, position.z);
-      this.coinRotation.set(rotation.x, rotation.y, rotation.z, rotation.w);
-      this.coinMatrix.compose(this.coinPosition, this.coinRotation, this.coinScale);
-      this.coinMesh.setMatrixAt(index, this.coinMatrix);
-      this.coinMesh.setColorAt(index, machine.coinKind(coin) === "bomb" ? BOMB_TINT : COIN_TINT);
-    });
-    this.coinMesh.count = Math.min(machine.coins.length, MAX_COINS);
-    this.coinMesh.instanceMatrix.needsUpdate = true;
-    if (this.coinMesh.instanceColor) this.coinMesh.instanceColor.needsUpdate = true;
+    this.updatePieces(machine);
     this.pixelPass.render(this.renderer, this.scene, this.camera);
   }
 }

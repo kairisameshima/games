@@ -10,18 +10,29 @@
   <body>
     <header class="top-bar">
       <h1>RACCOON PUSHER</h1>
-      <p class="tagline">3:12 AM. The arcade is closed. The raccoon is not.</p>
+      <span id="machine-status" class="machine-status"></span>
       <span id="bag-status" class="bag-status"></span>
       <span id="won-status"></span>
       <span id="lost-status"></span>
     </header>
     <div class="play-area">
       <canvas id="machine-view"></canvas>
-      <aside id="shop" class="shop">
+      <aside class="shop">
         <h2>RACCOON'S STASH</h2>
+        <div id="shop-items" class="shop-items"></div>
+        <h2>LOOT</h2>
+        <div id="loot-list" class="loot-list"></div>
       </aside>
     </div>
     <p id="hint" class="hint"></p>
+    <p id="note" class="note" hidden></p>
+    <section id="prize-overlay" class="prize-overlay" hidden>
+      <div class="prize-card">
+        <h2 id="prize-title"></h2>
+        <p id="prize-summary"></p>
+        <button id="next-machine-button" type="button"></button>
+      </div>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

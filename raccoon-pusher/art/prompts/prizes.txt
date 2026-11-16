@@ -1,0 +1,11 @@
+Primary request: four grand prizes that sit on top of the coin pile inside the coin pusher machine, one per machine the raccoon visits.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Pixel grid: draw each prize on a 32x32 pixel grid and enlarge it so every art pixel is exactly a 12x12 block of screen pixels. Do not add detail smaller than one art pixel.
+Subject, left to right:
+1. a shiny golden trash can trophy with a lid and two handles
+2. a giant lucky sock, red and white striped, with a gold star patch
+3. a gold trophy cup holding a big slice of pepperoni pizza
+4. a sparkling cyan diamond statue of a raccoon head
+Each prize is bold, chunky, front view, with a thick dark outline and about 10 colors.
+Composition/framing: a strict single row of 4 cells evenly spaced, each prize centered in its own cell, all the same visual size, clear empty space between them.

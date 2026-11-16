@@ -23,6 +23,15 @@ const STICKY_PAWS_BONUS_PER_LEVEL = 0.25;
 const STICKY_PAWS_MAX_LEVEL = 8;
 const STICKY_PAWS_BASE_COST = 30;
 const STICKY_PAWS_COST_GROWTH = 1.9;
+/** Every machine beaten adds this much to the payout multiplier, for good. */
+const LEGACY_BONUS_PER_MACHINE = 0.5;
+/**
+ * Coins that come back per coin dropped, by side wall level, measured in a headless run of the machine at steady
+ * state. Offline earnings use these instead of simulating physics.
+ */
+const SIDE_WALL_RETURN_BY_LEVEL = [0.65, 0.84, 0.98, 1.05];
+/** Time away past this earns nothing, so a week-old tab is not a jackpot. */
+export const MAX_OFFLINE_SECONDS = 8 * 60 * 60;
 
 export const BOMB_COST = 15;
 /** Enough for Side Walls plus Sticky Paws, the pair that first makes the machine pay back more than you feed it. */
@@ -99,11 +108,28 @@ export function machineSettings(wallet: Wallet): MachineSettings {
   };
 }
 
-/** Coins added to the bag for each coin pushed over the front edge. */
-export function payoutPerWonCoin(wallet: Wallet): number {
-  return 1 + wallet.upgrades.stickyPaws * STICKY_PAWS_BONUS_PER_LEVEL;
+/** Permanent payout multiplier from grand prizes won. */
+export function legacyMultiplier(machinesBeaten: number): number {
+  return 1 + machinesBeaten * LEGACY_BONUS_PER_MACHINE;
+}
+
+/** Coins added to the bag for each coin pushed over the front edge, including the bonus from beaten machines. */
+export function payoutPerWonCoin(wallet: Wallet, machinesBeaten: number): number {
+  return (1 + wallet.upgrades.stickyPaws * STICKY_PAWS_BONUS_PER_LEVEL) * legacyMultiplier(machinesBeaten);
 }
 
 export function autoDropSeconds(wallet: Wallet): number | undefined {
   return AUTO_DROP_SECONDS_BY_LEVEL[wallet.upgrades.autoDropper];
+}
+
+/**
+ * Coins the Auto-Dropper nets while the player is away: each drop costs a coin and returns the measured share,
+ * times the payout multiplier. A machine that loses coins on balance earns nothing rather than draining the bag.
+ */
+export function offlineEarnings(wallet: Wallet, machinesBeaten: number, secondsAway: number): number {
+  const interval = autoDropSeconds(wallet);
+  if (interval === undefined) return 0;
+  const drops = Math.floor(Math.min(secondsAway, MAX_OFFLINE_SECONDS) / interval);
+  const netPerDrop = SIDE_WALL_RETURN_BY_LEVEL[wallet.upgrades.sideWalls] * payoutPerWonCoin(wallet, machinesBeaten) - 1;
+  return Math.max(0, Math.floor(drops * netPerDrop));
 }

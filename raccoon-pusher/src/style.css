@@ -34,7 +34,7 @@ body {
   letter-spacing: 1px;
 }
 
-.tagline {
+.machine-status {
   color: #9c8bb8;
   margin-right: auto;
 }
@@ -129,4 +129,118 @@ body {
   bottom: 16px;
   transform: translateX(-50%);
   color: #9c8bb8;
+}
+
+.shop-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.loot-empty {
+  font-size: 17px;
+  color: #9c8bb8;
+}
+
+.loot-item {
+  padding: 6px;
+  border: none;
+  border-radius: 6px;
+  background: #2e1d48;
+  box-shadow: 0 3px 0 #0d0618;
+  cursor: pointer;
+}
+
+.loot-item:hover {
+  background: #3c2760;
+}
+
+.loot-item.breaking {
+  animation: shake 0.45s steps(6) both;
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+  20% {
+    transform: translate(-3px, 0) rotate(-6deg);
+  }
+  40% {
+    transform: translate(3px, -2px) rotate(6deg);
+  }
+  60% {
+    transform: translate(-3px, 0) rotate(-8deg);
+  }
+  80% {
+    transform: translate(3px, -3px) rotate(8deg) scale(1.15);
+  }
+}
+
+.loot-icon {
+  display: block;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.note {
+  position: fixed;
+  left: 50%;
+  top: 72px;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: #1a0f2b;
+  box-shadow: 0 0 0 2px #f5c04a;
+  font-size: 24px;
+}
+
+.prize-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(11, 7, 20, 0.7);
+}
+
+.prize-overlay[hidden] {
+  display: none;
+}
+
+.prize-card {
+  max-width: 520px;
+  padding: 24px 28px;
+  border-radius: 10px;
+  background: #1a0f2b;
+  box-shadow: 0 0 0 3px #ff3d8b, 0 8px 0 3px #000;
+  text-align: center;
+}
+
+.prize-card h2 {
+  font-size: 40px;
+  color: #f5c04a;
+}
+
+.prize-card p {
+  margin: 10px 0 18px;
+  color: #cbb9e0;
+}
+
+.prize-card button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  background: #ff3d8b;
+  color: #fff3d6;
+  font: inherit;
+  font-size: 26px;
+  box-shadow: 0 3px 0 #7a1a44;
+  cursor: pointer;
 }

@@ -10,7 +10,7 @@ test("buying an upgrade spends its cost and raises the next price", () => {
   assert.equal(buyUpgrade(wallet, "stickyPaws"), true);
   assert.equal(wallet.bag, 0);
   assert.ok((upgradeCost(wallet, "stickyPaws") ?? 0) > firstCost);
-  assert.equal(payoutPerWonCoin(wallet), 1.25);
+  assert.equal(payoutPerWonCoin(wallet, 0), 1.25);
 });
 
 test("side walls reach the front edge at max level, and a maxed upgrade cannot be bought", () => {

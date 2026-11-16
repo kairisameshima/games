@@ -65,20 +65,21 @@ export function createCoinFaceTexture(): THREE.CanvasTexture {
   return toPixelTexture(canvas, false);
 }
 
-/** Arcade felt: teal with a small diamond print every half tile. */
-export function createFeltTexture(): THREE.CanvasTexture {
+/** Arcade felt in a machine's colours, with a small diamond print every half tile. */
+export function createFeltTexture(baseColor: string, printColor: string): THREE.CanvasTexture {
   const { canvas, context } = createCanvas(TILE_SIZE);
-  context.fillStyle = "#1f4a5a";
+  const armColor = new THREE.Color(baseColor).lerp(new THREE.Color(printColor), 0.5).getStyle();
+  context.fillStyle = baseColor;
   context.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
   for (const [cx, cy] of [
     [4, 4],
     [12, 12],
   ]) {
-    fillPixel(context, cx, cy - 1, "#2c6577");
-    fillPixel(context, cx - 1, cy, "#2c6577");
-    fillPixel(context, cx + 1, cy, "#2c6577");
-    fillPixel(context, cx, cy + 1, "#2c6577");
-    fillPixel(context, cx, cy, "#3b8296");
+    fillPixel(context, cx, cy - 1, armColor);
+    fillPixel(context, cx - 1, cy, armColor);
+    fillPixel(context, cx + 1, cy, armColor);
+    fillPixel(context, cx, cy + 1, armColor);
+    fillPixel(context, cx, cy, printColor);
   }
   return toPixelTexture(canvas, true);
 }
