@@ -1,9 +1,18 @@
-Primary request: an animation sprite sheet of one raccoon character standing beside an arcade machine.
+Primary request: an animation sprite sheet of one raccoon character, designed to stay readable at a tiny in-game size (about 32 pixels wide and 48 pixels tall).
 Size: 1536x1024 landscape.
 Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
-Subject: one chubby, cheeky raccoon standing upright on its hind legs, front-facing 3/4 view, grey fur, black bandit mask, ringed striped tail, big eyes. The exact same character, size and colors in every frame. Full body visible.
-Composition/framing: a strict single row of 4 frames evenly spaced, every frame the same scale with feet on the same baseline, clear empty space between frames.
-Frame 1: idle, clutching a gold coin to its chest, sly grin.
-Frame 2: idle, same pose, tail flicked up and eyes half closed.
-Frame 3: cheering, both arms thrown up, mouth open, a few gold coins flying above its head.
-Frame 4: cheering, jumping slightly off the ground, arms up, coins flying.
+Pixel grid: draw each frame on a 32x48 pixel grid and enlarge it so every art pixel is exactly a 12x12 block of screen pixels. Every frame is 384x576 screen pixels. Do not add detail smaller than one art pixel.
+Subject: one chibi raccoon standing upright on its hind legs, front view. Design for small size:
+- a huge head, about half of its total height, with two big pointed ears
+- a bold, simple black bandit mask band across the eyes, with each eye a single 2x2 white highlight inside the mask
+- a cream muzzle with a black nose
+- grey fur, cream belly, a pink bandana around the neck
+- a fat ringed tail with three thick dark stripes, sticking out to one side
+- no other clothing, no small accessories
+- about 12 colors in total, thick dark outline
+The exact same character, size and colors in every frame.
+Composition/framing: a strict single row of 4 frames side by side, each in its own 384x576 cell, feet on the same baseline at the bottom of each cell.
+Frame 1: idle, holding one big gold coin against its belly with both paws, sly grin.
+Frame 2: idle, same pose, eyes squinted shut in a grin, tail flicked higher.
+Frame 3: cheering, both arms straight up, mouth open, two gold coins in the air above its head (still inside the cell).
+Frame 4: cheering, small hop with feet off the baseline, arms up, two gold coins above its head.

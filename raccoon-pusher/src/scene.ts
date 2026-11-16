@@ -58,7 +58,7 @@ const RACCOON_YAW = 0.15;
 /** The camera looks down steeply; leaning back keeps the raccoon's face toward it instead of its head top. */
 const RACCOON_LEAN_BACK = 0.55;
 /** One sprite pixel becomes a block this wide, close to one art pixel on screen at the raccoon's distance. */
-const RACCOON_VOXEL_SIZE = 0.08;
+const RACCOON_VOXEL_SIZE = 0.07;
 /** Shadow, mid and lit bands for the cabinet and coins. */
 const SCENE_TOON_BANDS = [70, 160, 255];
 /** The raccoon's front face must show its pixel art at full colour; only faces turned away get shaded. */
