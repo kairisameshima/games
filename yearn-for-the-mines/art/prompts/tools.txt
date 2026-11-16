@@ -1,0 +1,11 @@
+Primary request: a set of 6 inventory icons for mining tools and crew, for a game shop UI.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject, left to right, top row then bottom row:
+1. a small brown leather work glove (bare hands tier)
+2. a wooden spoon
+3. a classic pickaxe with a wooden handle
+4. a hand-cranked brass drill
+5. a bundle of three red dynamite sticks with a lit fuse
+6. a yellow hard hat with a headlamp
+Composition/framing: a strict grid of 3 columns and 2 rows, each icon centered in its cell with clear empty space between icons, all icons the same visual size, slight 3/4 angle, bold silhouettes.

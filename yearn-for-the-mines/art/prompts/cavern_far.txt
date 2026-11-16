@@ -1,0 +1,4 @@
+Primary request: the far background parallax layer of a giant underground cavern, seen from inside.
+Size: 1024x1536 portrait.
+Scene/backdrop: a vast cave interior that recedes into the distance. Dark blue-violet rock walls, faint distant stalactites at the top, tiny far-off lantern lights and a few softly glowing distant crystal clusters. The image gets darker and more violet toward the bottom.
+Composition/framing: full-bleed, no empty background. Low contrast and dark so foreground sprites stay readable in front of it. No platforms, no characters, no buildings, nothing large in the middle of the frame.

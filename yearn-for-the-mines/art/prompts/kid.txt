@@ -1,0 +1,8 @@
+Primary request: an animation sprite sheet of one kid miner character, for a side-view game.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject: one cheerful kid miner, about 8 years old, with an oversized yellow hard hat with a headlamp, blue overalls over a striped shirt, rosy cheeks and a huge grin. The exact same character, size and colors in every frame. Full body, side view facing RIGHT.
+Composition/framing: a strict grid of 4 columns and 3 rows, 12 frames, evenly spaced with clear empty space between frames, every frame the same scale with feet on the same baseline.
+Row 1: 4-frame walk cycle, pickaxe resting on the shoulder.
+Row 2: 4-frame mining swing: pickaxe raised high, mid swing, striking forward and down, recoil.
+Row 3: 4-frame walk cycle carrying a bulging sack of ore over the shoulder, no pickaxe visible.

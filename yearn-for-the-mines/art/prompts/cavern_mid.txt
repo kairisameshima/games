@@ -1,0 +1,5 @@
+Primary request: the middle parallax layer of a giant underground cavern, drawn as cutout pieces on a transparent background.
+Size: 1024x1536 portrait.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject: rock pillars and stalactite columns hugging the left and right edges of the image, a few hanging iron chains, two or three hanging oil lanterns glowing amber, and a sagging rope bridge silhouette crossing near the top. Slightly darker and less saturated than foreground art.
+Composition/framing: the middle 60% of the width must stay mostly empty (transparent) so layers behind show through.

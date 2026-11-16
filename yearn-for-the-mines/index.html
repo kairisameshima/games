@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yearn for the Mines</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" />
+  </head>
+  <body>
+    <header class="top-bar">
+      <h1>YEARN FOR THE MINES</h1>
+      <span id="gold-status" class="gold-status"></span>
+      <span id="dig-status"></span>
+      <span id="lift-status"></span>
+    </header>
+    <div class="play-area">
+      <main id="stage" class="stage">
+        <canvas id="mine-view"></canvas>
+      </main>
+      <aside class="shop">
+        <h2>LIFT</h2>
+        <div id="lift-shop" class="buy-row"></div>
+        <h2>GALLERIES</h2>
+        <ol id="gallery-list" class="gallery-list"></ol>
+        <div id="open-gallery-slot"></div>
+      </aside>
+    </div>
+    <p id="note" class="note" hidden></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

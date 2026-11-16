@@ -1,0 +1,5 @@
+Primary request: one floor (gallery) of the mine, shown as a side-view cutaway that floats in a cavern. It is a cutout on a transparent background.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject: a long wooden plank floor spanning the FULL width of the image, held up by timber beams and cross-braces underneath. Two timber support posts with an overhead crossbeam frame the gallery like a room, but the space between them is open (transparent), not a wall. At the RIGHT end, a jagged charcoal grey rock wall rises from the floor to the crossbeam: this is the dig face, with black glossy coal seams in dark grey rock embedded in it. A single hanging lantern under the crossbeam. Leave the left end of the floor plain and open.
+Composition/framing: wide and short. The gallery occupies a horizontal band in the middle 55% of the image height; everything above and below that band is transparent. No characters.

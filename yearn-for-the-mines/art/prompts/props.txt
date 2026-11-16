@@ -1,0 +1,11 @@
+Primary request: a set of 6 game prop sprites for a side-view mine.
+Size: 1536x1024 landscape.
+Background: fully transparent. If transparency is unavailable, use a flat pure magenta #FF00FF background with no shading.
+Subject, left to right, top row then bottom row:
+1. a wooden mine elevator cage (lift car) hanging from a rope, front side view, open sides
+2. an empty wooden ore crate, side view
+3. the same wooden ore crate heaped full of mixed colorful ore
+4. a bulging burlap sack of ore
+5. a single shiny gold coin, front view
+6. a hanging oil lantern glowing amber
+Composition/framing: a strict grid of 3 columns and 2 rows, each prop centered in its cell with clear empty space between props. Flat side view.

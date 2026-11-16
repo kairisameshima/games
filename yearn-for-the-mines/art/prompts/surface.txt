@@ -1,0 +1,5 @@
+Primary request: the above-ground strip at the very top of the game world, shown in side view.
+Size: 1536x1024 landscape.
+Scene/backdrop: a grassy hilltop at golden-hour dusk with a warm orange-pink sky and a few pixel clouds.
+Subject: at the FAR LEFT, a tall wooden mine headframe (winch tower with a big pulley wheel) standing directly over a vertical mine shaft. The shaft is a dark opening that drops straight down along the left edge and exits through the bottom edge of the image. To the right, a small wooden ore-selling shed with a mine cart full of ore and a heap of gold coins next to it. Rail tracks on the ground connect the headframe to the shed.
+Composition/framing: flat side view, horizon in the upper half. The bottom 30% of the image is a straight horizontal cross-section cut of soil and rock layers (grass, brown dirt, then grey rock) spanning the full width, so the image can sit on top of an underground cavern.

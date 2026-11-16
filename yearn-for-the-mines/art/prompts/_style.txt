@@ -1,0 +1,6 @@
+Use case: stylized-concept
+Asset type: art for a 2D side-view idle mining game for the browser. The game is a cheerful joke: the kids are thrilled to be underground and "yearn for the mines".
+Style/medium: crisp retro 16-bit pixel art in the style of SNES-era games. Chunky square pixels where every art pixel is a uniform 6x6 block of screen pixels. Limited palette of about 32 colors. Hard pixel edges, no anti-aliasing, no blur, no soft airbrush gradients (dithering is fine). Sprites and props have 1-pixel dark outlines.
+Lighting/mood: cozy and comedic, not grim. Warm lantern amber and orange light against deep blue-violet cave shadows.
+Color palette: deep indigo and violet shadows, earthy browns and tans for wood and dirt, warm amber lantern light, saturated pops of color for ore and gems.
+Constraints: no text, letters, numbers, logos, signatures, UI frames or watermarks anywhere in the image.
