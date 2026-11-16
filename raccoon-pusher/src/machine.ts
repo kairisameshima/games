@@ -27,9 +27,19 @@ export const COIN_RADIUS = 0.5;
 export const COIN_THICKNESS = 0.14;
 const COIN_BORDER_RADIUS = 0.02;
 const COIN_FRICTION = 0.5;
-const COIN_RESTITUTION = 0.05;
+/** Coin-on-coin bounce: lively enough to clatter, low enough that a resting pile stays put. */
+const COIN_RESTITUTION = 0.3;
 const COIN_LINEAR_DAMPING = 0.1;
-const COIN_ANGULAR_DAMPING = 0.5;
+/** Low enough that a dropped coin keeps spinning and wobbling for a moment after it lands. */
+const COIN_ANGULAR_DAMPING = 0.2;
+/** Bounce of each cabinet surface. Surfaces use the Max combine rule, so a coin bounces as hard as the surface allows. */
+const STEEL_RESTITUTION = 0.5;
+const FELT_RESTITUTION = 0.2;
+const WALL_RESTITUTION = 0.4;
+/** Dropped and showered coins leave the slot tilted up to this far and spinning up to this fast, so they land on an edge and tumble. */
+const DROP_MAX_TILT = 0.9;
+const DROP_MAX_SPIN = 8;
+const NO_SPIN = { x: 0, y: 0, z: 0 };
 
 export const DROP_Y = 3.2;
 export const DROP_Z = -4.6;
@@ -131,7 +141,9 @@ export class PusherMachine {
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, PUSHER_HEIGHT / 2, this.pusherCenterZ()),
     );
     this.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(BOARD_HALF_WIDTH - 0.05, PUSHER_HEIGHT / 2, PUSHER_HALF_DEPTH),
+      RAPIER.ColliderDesc.cuboid(BOARD_HALF_WIDTH - 0.05, PUSHER_HEIGHT / 2, PUSHER_HALF_DEPTH)
+        .setRestitution(STEEL_RESTITUTION)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max),
       this.pusher,
     );
     this.fillBoard(random);
@@ -168,19 +180,33 @@ export class PusherMachine {
     return pusherFrontZ(this.elapsedSeconds) - PUSHER_HALF_DEPTH;
   }
 
-  private addFixedBox(halfExtents: [number, number, number], center: [number, number, number]): RAPIER.RigidBody {
+  private addFixedBox(
+    halfExtents: [number, number, number],
+    center: [number, number, number],
+    restitution: number,
+  ): RAPIER.RigidBody {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...center));
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(...halfExtents), body);
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(...halfExtents)
+        .setRestitution(restitution)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max),
+      body,
+    );
     return body;
   }
 
   private buildCabinet(): void {
     const floorHalfDepth = (FRONT_EDGE_Z - FLOOR_BACK_Z) / 2;
-    this.addFixedBox([BOARD_HALF_WIDTH, FLOOR_THICKNESS / 2, floorHalfDepth], [0, -FLOOR_THICKNESS / 2, FLOOR_BACK_Z + floorHalfDepth]);
+    this.addFixedBox(
+      [BOARD_HALF_WIDTH, FLOOR_THICKNESS / 2, floorHalfDepth],
+      [0, -FLOOR_THICKNESS / 2, FLOOR_BACK_Z + floorHalfDepth],
+      FELT_RESTITUTION,
+    );
     const backWallHalfHeight = (BACK_WALL_TOP_Y - BACK_WALL_BOTTOM_Y) / 2;
     this.addFixedBox(
       [BOARD_HALF_WIDTH, backWallHalfHeight, BACK_WALL_THICKNESS / 2],
       [0, BACK_WALL_BOTTOM_Y + backWallHalfHeight, BACK_WALL_Z],
+      WALL_RESTITUTION,
     );
     this.buildSideWalls();
   }
@@ -192,15 +218,27 @@ export class PusherMachine {
       this.addFixedBox(
         [SIDE_WALL_THICKNESS / 2, SIDE_WALL_HEIGHT / 2, wallHalfDepth],
         [side * (BOARD_HALF_WIDTH + SIDE_WALL_THICKNESS / 2), SIDE_WALL_HEIGHT / 2, FLOOR_BACK_Z + wallHalfDepth],
+        WALL_RESTITUTION,
       ),
     );
   }
 
-  private addCoin(x: number, y: number, z: number, tilt: number, ccd: boolean): RAPIER.RigidBody {
+  /** `tilt` turns the coin about a horizontal axis at `tiltHeading` radians around the vertical. */
+  private addCoin(
+    x: number,
+    y: number,
+    z: number,
+    tilt: number,
+    tiltHeading: number,
+    ccd: boolean,
+    spin: RAPIER.Vector = NO_SPIN,
+  ): RAPIER.RigidBody {
+    const halfTilt = Math.sin(tilt / 2);
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(x, y, z)
-        .setRotation({ x: Math.sin(tilt / 2), y: 0, z: 0, w: Math.cos(tilt / 2) })
+        .setRotation({ x: Math.cos(tiltHeading) * halfTilt, y: 0, z: Math.sin(tiltHeading) * halfTilt, w: Math.cos(tilt / 2) })
+        .setAngvel(spin)
         .setLinearDamping(COIN_LINEAR_DAMPING)
         .setAngularDamping(COIN_ANGULAR_DAMPING)
         .setCcdEnabled(ccd),
@@ -235,7 +273,7 @@ export class PusherMachine {
           const z = STARTING_FILL_FRONT_Z - row * STARTING_COIN_SPACING + (random() - 0.5) * 0.4;
           // Coins behind the pusher's front face start on top of it.
           const floorY = z < pusherFrontZ(0) ? PUSHER_HEIGHT : 0;
-          this.addCoin(x, floorY + 0.2 + layer * 0.3, z, (random() - 0.5) * 0.3, false);
+          this.addCoin(x, floorY + 0.2 + layer * 0.3, z, (random() - 0.5) * 0.3, 0, false);
         }
       }
     }
@@ -245,14 +283,14 @@ export class PusherMachine {
   dropCoin(slotX: number, random: () => number): void {
     const jittered = Math.max(-1, Math.min(1, slotX)) * DROP_HALF_RANGE + (random() - 0.5) * 2 * DROP_JITTER;
     const x = Math.max(-DROP_HALF_RANGE, Math.min(DROP_HALF_RANGE, jittered));
-    this.gateCandidates.push(this.addCoin(x, DROP_Y, DROP_Z, (random() - 0.5) * 0.6, true));
+    this.gateCandidates.push(this.addCoin(x, DROP_Y, DROP_Z, ...this.tumble(random), true, this.spin(random)));
   }
 
   /** The raccoon tosses a bomb coin onto the pile at a board position; it goes off after its fuse. */
   tossBomb(x: number, z: number): void {
     const clampedX = Math.max(-DROP_HALF_RANGE, Math.min(DROP_HALF_RANGE, x));
     const clampedZ = Math.max(BOMB_TOSS_BACK_Z, Math.min(FRONT_EDGE_Z - COIN_RADIUS, z));
-    const bomb = this.addCoin(clampedX, BOMB_TOSS_Y, clampedZ, 0, true);
+    const bomb = this.addCoin(clampedX, BOMB_TOSS_Y, clampedZ, 0, 0, true);
     this.coinKinds.set(bomb.handle, "bomb");
     this.bombFuses.set(bomb, BOMB_FUSE_SECONDS);
   }
@@ -261,7 +299,16 @@ export class PusherMachine {
   dropShowerCoin(random: () => number): void {
     const x = (random() * 2 - 1) * SHOWER_HALF_WIDTH;
     const z = SHOWER_BACK_Z + random() * (SHOWER_FRONT_Z - SHOWER_BACK_Z);
-    this.addCoin(x, SHOWER_Y, z, (random() - 0.5) * 1.2, true);
+    this.addCoin(x, SHOWER_Y, z, ...this.tumble(random), true, this.spin(random));
+  }
+
+  /** A random [tilt, tiltHeading] for a coin leaving the slot. */
+  private tumble(random: () => number): [number, number] {
+    return [(random() * 2 - 1) * DROP_MAX_TILT, random() * Math.PI * 2];
+  }
+
+  private spin(random: () => number): RAPIER.Vector {
+    return { x: (random() * 2 - 1) * DROP_MAX_SPIN, y: 0, z: (random() * 2 - 1) * DROP_MAX_SPIN };
   }
 
   private countGateHits(): number {
