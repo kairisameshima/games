@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Raccoon Pusher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" />
+  </head>
+  <body>
+    <header class="top-bar">
+      <h1>RACCOON PUSHER</h1>
+      <p class="tagline">3:12 AM. The arcade is closed. The raccoon is not.</p>
+      <span id="bag-status" class="bag-status"></span>
+      <span id="won-status"></span>
+      <span id="lost-status"></span>
+    </header>
+    <div class="play-area">
+      <canvas id="machine-view"></canvas>
+      <aside id="shop" class="shop">
+        <h2>RACCOON'S STASH</h2>
+      </aside>
+    </div>
+    <p id="hint" class="hint"></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

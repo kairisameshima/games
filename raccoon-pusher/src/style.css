@@ -1,0 +1,132 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: #0b0714;
+  color: #fff3d6;
+  font-family: "Jersey 10", ui-monospace, monospace;
+  font-size: 22px;
+  overflow: hidden;
+}
+
+.top-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  padding: 8px 16px;
+  background: #1a0f2b;
+  box-shadow: 0 3px 0 #000;
+}
+
+.top-bar h1 {
+  font-size: 32px;
+  color: #ff3d8b;
+  letter-spacing: 1px;
+}
+
+.tagline {
+  color: #9c8bb8;
+  margin-right: auto;
+}
+
+.bag-status {
+  font-size: 32px;
+  color: #f5c04a;
+}
+
+.play-area {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#machine-view {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.shop {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  background: #1a0f2b;
+  box-shadow: -3px 0 0 #000;
+}
+
+.shop h2 {
+  font-size: 26px;
+  color: #39d7ff;
+}
+
+.shop-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #2e1d48;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 3px 0 #0d0618;
+  cursor: pointer;
+}
+
+.shop-button:hover:not(:disabled) {
+  background: #3c2760;
+}
+
+.shop-button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #0d0618;
+}
+
+.shop-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shop-button.bomb {
+  background: #5a1c2c;
+}
+
+.shop-name {
+  font-size: 22px;
+  color: #ff3d8b;
+}
+
+.shop-detail {
+  font-size: 17px;
+  color: #cbb9e0;
+}
+
+.shop-cost {
+  color: #f5c04a;
+}
+
+.hint {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  color: #9c8bb8;
+}
