@@ -1,5 +1,13 @@
 import * as THREE from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { PixelPass } from "./pixel-pass.ts";
+import {
+  createCoinFaceTexture,
+  createFeltTexture,
+  createSteelTexture,
+  createToonGradient,
+  createWallTexture,
+  tiled,
+} from "./pixel-textures.ts";
 import {
   BACK_WALL_BOTTOM_Y,
   BACK_WALL_TOP_Y,
@@ -24,12 +32,14 @@ import type { SlotReels } from "./slot.ts";
 import { SlotScreen } from "./slot-screen.ts";
 
 const MAX_COINS = 1_000;
-const COIN_SEGMENTS = 32;
+/** Low-poly is enough: at pixel-art resolution a 16-sided coin reads as round. */
+const COIN_SEGMENTS = 16;
 const CAMERA_FOV = 42;
 const CAMERA_POSITION = new THREE.Vector3(0, 8.5, 9);
 const CAMERA_TARGET = new THREE.Vector3(0, 0.2, -0.8);
 const FLOOR_VISIBLE_BACK_Z = -5.4;
-const FACE_TEXTURE_SIZE = 128;
+/** CSS pixels per art pixel. */
+const ART_PIXEL_SIZE = 4;
 
 // The slot screen sits on the back wall between the pusher and the gate.
 const SCREEN_WIDTH = 3.6;
@@ -50,42 +60,11 @@ const COLORS = {
   background: 0x0b0714,
   gold: 0xf5c04a,
   goldEdge: 0xc98b2a,
-  felt: 0x1f4a5a,
-  pusher: 0xd9dde3,
   trim: 0xff3d8b,
-  backWall: 0x2a1640,
   neonBlue: 0x39d7ff,
   neonPink: 0xff3d8b,
   glass: 0x9fe8ff,
 };
-
-/** Coin faces get a stamped ring and star so tumbling coins read as coins, not discs. */
-function createCoinFaceTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = FACE_TEXTURE_SIZE;
-  canvas.height = FACE_TEXTURE_SIZE;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas 2D is not available");
-  const center = FACE_TEXTURE_SIZE / 2;
-  context.fillStyle = "#f5c04a";
-  context.fillRect(0, 0, FACE_TEXTURE_SIZE, FACE_TEXTURE_SIZE);
-  context.strokeStyle = "#b07a22";
-  context.lineWidth = 8;
-  context.beginPath();
-  context.arc(center, center, center - 10, 0, Math.PI * 2);
-  context.stroke();
-  context.fillStyle = "#c98b2a";
-  context.beginPath();
-  for (let point = 0; point < 10; point++) {
-    const radius = point % 2 === 0 ? 34 : 15;
-    const angle = (point * Math.PI) / 5 - Math.PI / 2;
-    context.lineTo(center + Math.cos(angle) * radius, center + Math.sin(angle) * radius);
-  }
-  context.fill();
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
 
 function addBox(
   scene: THREE.Scene,
@@ -103,12 +82,14 @@ function addBox(
 
 export class PusherScene {
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly pixelPass = new PixelPass();
+  private readonly toonGradient = createToonGradient();
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.1, 100);
   private readonly coinMesh: THREE.InstancedMesh;
   private readonly pusherMesh: THREE.Mesh;
   private readonly dropGuide: THREE.Mesh;
-  private readonly gateRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshStandardMaterial>;
+  private readonly gateRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshToonMaterial>;
   private readonly slotScreen = new SlotScreen();
   private gateFlash = 0;
   private readonly sideWallMeshes: THREE.Mesh[] = [];
@@ -123,30 +104,29 @@ export class PusherScene {
   private readonly coinScale = new THREE.Vector3(1, 1, 1);
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // No antialiasing and hard shadows: every edge should land on a whole art pixel.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.shadowMap.type = THREE.BasicShadowMap;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
 
     this.scene.background = new THREE.Color(COLORS.background);
-    const environment = new THREE.PMREMGenerator(this.renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environment = environment;
-    this.scene.environmentIntensity = 0.6;
     this.camera.position.copy(CAMERA_POSITION);
     this.camera.lookAt(CAMERA_TARGET);
 
     this.addLights();
     this.addCabinet();
+    const pusherWidth = BOARD_HALF_WIDTH * 2 - 0.1;
     this.pusherMesh = addBox(
       this.scene,
-      [BOARD_HALF_WIDTH * 2 - 0.1, PUSHER_HEIGHT, PUSHER_HALF_DEPTH * 2],
+      [pusherWidth, PUSHER_HEIGHT, PUSHER_HALF_DEPTH * 2],
       [0, PUSHER_HEIGHT / 2, 0],
-      new THREE.MeshStandardMaterial({ color: COLORS.pusher, metalness: 0.9, roughness: 0.25 }),
+      this.toon({ color: 0xffffff, map: tiled(createSteelTexture(), pusherWidth, PUSHER_HEIGHT) }),
     );
 
-    const faceMaterial = new THREE.MeshStandardMaterial({ map: createCoinFaceTexture(), metalness: 1, roughness: 0.3 });
-    const edgeMaterial = new THREE.MeshStandardMaterial({ color: COLORS.goldEdge, metalness: 1, roughness: 0.35 });
+    const faceMaterial = this.toon({ color: 0xffffff, map: createCoinFaceTexture() });
+    const edgeMaterial = this.toon({ color: COLORS.goldEdge });
     // CylinderGeometry groups: side, top cap, bottom cap.
     this.coinMesh = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(COIN_RADIUS, COIN_RADIUS, COIN_THICKNESS, COIN_SEGMENTS),
@@ -168,7 +148,7 @@ export class PusherScene {
     this.gateRing = new THREE.Mesh(
       // Unit radius; render() scales it to the gate's current hit zone.
       new THREE.TorusGeometry(1, GATE_TUBE_RADIUS, 12, 48),
-      new THREE.MeshStandardMaterial({ color: COLORS.neonPink, emissive: COLORS.neonPink, emissiveIntensity: GATE_GLOW }),
+      this.toon({ color: COLORS.neonPink, emissive: COLORS.neonPink, emissiveIntensity: GATE_GLOW }),
     );
     // Lay the ring flat so coins fall through it.
     this.gateRing.rotation.x = Math.PI / 2;
@@ -191,12 +171,16 @@ export class PusherScene {
     this.scene.add(this.bombTarget);
   }
 
+  private toon(parameters: THREE.MeshToonMaterialParameters): THREE.MeshToonMaterial {
+    return new THREE.MeshToonMaterial({ gradientMap: this.toonGradient, ...parameters });
+  }
+
   private addLights(): void {
     this.scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x2a1640, 0.6));
     const key = new THREE.DirectionalLight(0xfff1d6, 2.2);
     key.position.set(-4, 12, 6);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(1024, 1024);
     const shadowCamera = key.shadow.camera;
     shadowCamera.left = -8;
     shadowCamera.right = 8;
@@ -204,45 +188,51 @@ export class PusherScene {
     shadowCamera.bottom = -8;
     key.shadow.bias = -0.0005;
     this.scene.add(key);
-    const pinkFill = new THREE.PointLight(COLORS.neonPink, 25, 18);
+    // Toon shading turns strong coloured fills into hard tinted bands, so the neon fills stay faint.
+    const pinkFill = new THREE.PointLight(COLORS.neonPink, 8, 18);
     pinkFill.position.set(-5, 3, 3);
     this.scene.add(pinkFill);
-    const blueFill = new THREE.PointLight(COLORS.neonBlue, 25, 18);
+    const blueFill = new THREE.PointLight(COLORS.neonBlue, 8, 18);
     blueFill.position.set(5, 3, 3);
     this.scene.add(blueFill);
   }
 
   private addCabinet(): void {
+    const floorWidth = BOARD_HALF_WIDTH * 2;
     const floorDepth = FRONT_EDGE_Z - FLOOR_VISIBLE_BACK_Z;
-    const felt = new THREE.MeshStandardMaterial({ color: COLORS.felt, roughness: 0.9 });
-    addBox(this.scene, [BOARD_HALF_WIDTH * 2, 0.5, floorDepth], [0, -0.25, FLOOR_VISIBLE_BACK_Z + floorDepth / 2], felt);
+    const felt = this.toon({ color: 0xffffff, map: tiled(createFeltTexture(), floorWidth, floorDepth) });
+    addBox(this.scene, [floorWidth, 0.5, floorDepth], [0, -0.25, FLOOR_VISIBLE_BACK_Z + floorDepth / 2], felt);
 
-    const trim = new THREE.MeshStandardMaterial({ color: COLORS.trim, emissive: COLORS.trim, emissiveIntensity: 1.5 });
-    addBox(this.scene, [BOARD_HALF_WIDTH * 2, 0.06, 0.06], [0, 0.03, FRONT_EDGE_Z - 0.03], trim);
+    const trim = this.toon({ color: COLORS.trim, emissive: COLORS.trim, emissiveIntensity: 1.5 });
+    addBox(this.scene, [floorWidth, 0.06, 0.06], [0, 0.03, FRONT_EDGE_Z - 0.03], trim);
 
+    const backWallWidth = floorWidth + 0.4;
     const backWallHeight = BACK_WALL_TOP_Y - BACK_WALL_BOTTOM_Y;
     addBox(
       this.scene,
-      [BOARD_HALF_WIDTH * 2 + 0.4, backWallHeight, 0.2],
+      [backWallWidth, backWallHeight, 0.2],
       [0, BACK_WALL_BOTTOM_Y + backWallHeight / 2, BACK_WALL_Z],
-      new THREE.MeshStandardMaterial({ color: COLORS.backWall, roughness: 0.6 }),
+      this.toon({ color: 0xffffff, map: tiled(createWallTexture(), backWallWidth, backWallHeight) }),
     );
-    const neon = new THREE.MeshStandardMaterial({ color: COLORS.neonBlue, emissive: COLORS.neonBlue, emissiveIntensity: 2 });
-    addBox(this.scene, [BOARD_HALF_WIDTH * 2, 0.08, 0.08], [0, BACK_WALL_TOP_Y - 0.3, BACK_WALL_Z + 0.12], neon);
+    const neon = this.toon({ color: COLORS.neonBlue, emissive: COLORS.neonBlue, emissiveIntensity: 2 });
+    addBox(this.scene, [floorWidth, 0.08, 0.08], [0, BACK_WALL_TOP_Y - 0.3, BACK_WALL_Z + 0.12], neon);
 
-    const glass = new THREE.MeshStandardMaterial({ color: COLORS.glass, transparent: true, opacity: 0.12, roughness: 0.05 });
+    const glass = new THREE.MeshBasicMaterial({ color: COLORS.glass, transparent: true, opacity: 0.06, depthWrite: false });
     // Walls are built 1 deep and stretched each frame to the length the Side Walls upgrade gives them.
     for (const side of [-1, 1]) {
       const wall = addBox(this.scene, [SIDE_WALL_THICKNESS, SIDE_WALL_HEIGHT, 1], [side * (BOARD_HALF_WIDTH + SIDE_WALL_THICKNESS / 2), SIDE_WALL_HEIGHT / 2, 0], glass);
       wall.castShadow = false;
       const strip = addBox(this.scene, [0.08, 0.08, 1], [side * (BOARD_HALF_WIDTH + SIDE_WALL_THICKNESS / 2), SIDE_WALL_HEIGHT, 0], neon);
+      strip.castShadow = false;
       this.sideWallMeshes.push(wall, strip);
     }
   }
 
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
+    const devicePixelRatio = this.renderer.getPixelRatio();
+    const pixelSize = Math.max(1, Math.round(ART_PIXEL_SIZE * devicePixelRatio));
+    this.camera.aspect = this.pixelPass.setSize(Math.round(width * devicePixelRatio), Math.round(height * devicePixelRatio), pixelSize);
     this.camera.updateProjectionMatrix();
   }
 
@@ -340,6 +330,6 @@ export class PusherScene {
     this.coinMesh.count = Math.min(machine.coins.length, MAX_COINS);
     this.coinMesh.instanceMatrix.needsUpdate = true;
     if (this.coinMesh.instanceColor) this.coinMesh.instanceColor.needsUpdate = true;
-    this.renderer.render(this.scene, this.camera);
+    this.pixelPass.render(this.renderer, this.scene, this.camera);
   }
 }
