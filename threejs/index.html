@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>three.js scenes</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        min-height: 100vh;
+        padding: 60px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: radial-gradient(ellipse at top, #3a3022, #15110c 70%);
+        color: #f6ecd8;
+        font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      }
+      h1 { font-size: 44px; letter-spacing: 0.04em; }
+      p.sub { margin: 6px 0 32px; color: #d9c7a6; font-style: italic; }
+      a.card {
+        display: block;
+        width: min(560px, 100%);
+        padding: 22px 26px;
+        border-radius: 14px;
+        background: #2b241b;
+        color: inherit;
+        text-decoration: none;
+        box-shadow: 0 0 0 1px #4a3d2b, 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+      a.card:hover { background: #352c20; }
+      a.card h2 { font-size: 28px; color: #f0bf6a; }
+      a.card p { margin-top: 6px; line-height: 1.4; color: #e3d5bb; }
+    </style>
+  </head>
+  <body>
+    <h1>three.js scenes</h1>
+    <p class="sub">small worlds to orbit around</p>
+    <a class="card" href="ship-of-the-line/" style="margin-bottom: 20px">
+      <h2>The Wooden Wall</h2>
+      <p>Command a 74-gun ship of the line with 540 working crew. Make sail, beat to quarters, fire broadsides, and inspect every deck in cutaway or x-ray.</p>
+    </a>
+    <a class="card" href="ironhollow/" style="margin-bottom: 20px">
+      <h2>Ironhollow · remade</h2>
+      <p>A village reclaiming an ancient war platform. Weathered steel, exposed turbines, broken limbs and ivy-covered cottages in a wooded valley.</p>
+    </a>
+    <a class="card" href="mech-village/">
+      <h2>Ironhollow · original</h2>
+      <p>A quaint village built on the back of a fallen siege walker. Cottages crowd the armoured deck, a windmill turns on the gun turret, and vines hang from the old cannon barrels.</p>
+    </a>
+  </body>
+</html>
